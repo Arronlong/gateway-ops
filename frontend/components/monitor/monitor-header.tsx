@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useTheme } from "next-themes"
-import { Activity, Bell, ChevronDown, Github, Home, LayoutList, LogOut, RefreshCw, Server, Settings2, ShieldCheck, Sun, Moon, WalletCards, UsersRound } from "lucide-react"
+import { Activity, Bell, ChevronDown, ExternalLink, Github, Home, LayoutList, LogOut, RefreshCw, Server, Settings2, ShieldCheck, Sun, Moon, WalletCards, UsersRound } from "lucide-react"
 import { Link, NavLink, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import {
@@ -62,7 +62,6 @@ export function MonitorHeader() {
     { to: "/", label: "首页", icon: Home, end: true },
     { to: "/channels", label: "渠道管理", icon: LayoutList },
     { to: "/relay-stations", label: "中转站管理", icon: Server },
-    { to: "/public/service-status", label: "服务状态", icon: Activity },
   ]
 
   const operationItems = [
@@ -71,15 +70,16 @@ export function MonitorHeader() {
   ]
   const operationActive = location.pathname.startsWith("/operations/")
   const systemItems = [
+    { to: "/settings", label: "系统设置", icon: Settings2 },
     { to: "/captcha", label: "验证码服务", icon: ShieldCheck },
     { to: "/notifications", label: "通知渠道", icon: Bell },
   ]
-  const systemActive = ["/captcha", "/notifications"].some((path) => location.pathname.startsWith(path))
+  const systemActive = ["/settings", "/captcha", "/notifications"].some((path) => location.pathname.startsWith(path))
   const isPathActive = (to: string, end = false) => end ? location.pathname === to : location.pathname.startsWith(to)
 
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
-      <div className="flex h-14 w-full items-center justify-between gap-2 px-6 sm:gap-4">
+      <div className="flex h-14 w-full min-w-0 items-center gap-2 px-6 sm:gap-4">
         {/* left: logo + title */}
         <div className="flex min-w-0 items-center gap-2.5">
           <div className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background">
@@ -88,59 +88,51 @@ export function MonitorHeader() {
           <h1 className="truncate text-base font-semibold tracking-tight text-foreground"><span>GatewayOps</span></h1>
         </div>
 
-        <nav className="hidden items-center gap-1 lg:flex" aria-label="主菜单">
+        <nav className="hidden min-w-0 flex-1 flex-nowrap items-center justify-start gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex xl:justify-center" aria-label="主菜单">
           {navItems.map((item) => (
-            item.to === "/public/service-status" ? (
-              <a
-                key={item.to}
-                href={item.to}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-              >
-                <item.icon className="size-3.5" />
-                {item.label}
-              </a>
-            ) : (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.end}
-                className={({ isActive }) => cn(
-                  "inline-flex h-9 items-center gap-1.5 rounded-md px-3 text-sm transition-colors",
-                  isActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
-                )}
-              >
-                <item.icon className="size-3.5" />
-                {item.label}
-              </NavLink>
-            )
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) => cn(
+                "inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors",
+                isActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+              )}
+            >
+              <item.icon className="size-3.5" />
+              {item.label}
+            </NavLink>
           ))}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className={cn("inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm transition-colors hover:bg-muted/60 hover:text-foreground", operationActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")} aria-label="运营管理菜单">
-                <WalletCards className="size-3.5" />运营管理<ChevronDown className="size-3" />
+              <button type="button" className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" aria-label="状态监控菜单">
+                <Activity className="size-3.5" />状态监控<ChevronDown className="size-3" />
               </button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-40">
-              <DropdownMenuLabel>运营管理</DropdownMenuLabel>
+              <DropdownMenuLabel>状态监控</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {operationItems.map((item) => <DropdownMenuItem key={item.to} asChild><Link to={item.to}><item.icon />{item.label}</Link></DropdownMenuItem>)}
+              <DropdownMenuItem asChild>
+                <a href="/public/relay-monitor" target="_blank" rel="noopener noreferrer" title="在新标签页打开"><Activity />分组监控<ExternalLink className="ml-auto size-3.5 text-muted-foreground" aria-hidden="true" /><span className="sr-only">（在新标签页打开）</span></a>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <a href="/public/service-status" target="_blank" rel="noopener noreferrer" title="在新标签页打开"><Activity />服务状态<ExternalLink className="ml-auto size-3.5 text-muted-foreground" aria-hidden="true" /><span className="sr-only">（在新标签页打开）</span></a>
+              </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className={cn("inline-flex h-9 cursor-pointer items-center gap-1.5 rounded-md px-3 text-sm transition-colors hover:bg-muted/60 hover:text-foreground", systemActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")} aria-label="系统设置菜单"><Settings2 className="size-3.5" />系统设置<ChevronDown className="size-3" /></button>
+              <button type="button" className={cn("inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors hover:bg-muted/60 hover:text-foreground", systemActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")} aria-label="系统设置菜单"><Settings2 className="size-3.5" />系统设置<ChevronDown className="size-3" /></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-44"><DropdownMenuLabel>系统设置</DropdownMenuLabel><DropdownMenuSeparator />{systemItems.map((item) => <DropdownMenuItem key={item.to} asChild><Link to={item.to}><item.icon />{item.label}</Link></DropdownMenuItem>)}</DropdownMenuContent>
           </DropdownMenu>
         </nav>
 
         {/* right: actions */}
-        <div className="flex shrink-0 items-center gap-1 sm:gap-3 xl:mr-[120px]">
+        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-11 lg:hidden sm:size-8" aria-label="打开菜单"><LayoutList className="size-4" /></Button>
+              <Button variant="ghost" size="icon" className="size-11 xl:hidden sm:size-8" aria-label="打开菜单"><LayoutList className="size-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" sideOffset={8} className="w-[min(20rem,calc(100vw-2rem))] p-2">
               <DropdownMenuLabel className="flex items-center gap-2 px-2 py-2 text-xs font-semibold text-foreground">
@@ -149,24 +141,24 @@ export function MonitorHeader() {
               <div className="space-y-0.5">
                 {navItems.map((item) => {
                   const active = isPathActive(item.to, item.end)
-                  const content = item.to === "/public/service-status"
-                    ? <a href={item.to} target="_blank" rel="noopener noreferrer"><item.icon className={cn(active && "text-brand")} />{item.label}{active ? <span className="ml-auto size-1.5 rounded-full bg-brand" /> : null}</a>
-                    : <Link to={item.to}><item.icon className={cn(active && "text-brand")} />{item.label}{active ? <span className="ml-auto size-1.5 rounded-full bg-brand" /> : null}</Link>
-                  return <DropdownMenuItem key={item.to} asChild className={cn("min-h-11 rounded-md px-3 sm:min-h-9", active && "bg-brand/10 font-medium text-brand focus:bg-brand/10 focus:text-brand")}>{content}</DropdownMenuItem>
+                  return <DropdownMenuItem key={item.to} asChild className={cn("min-h-11 rounded-md px-3 sm:min-h-9", active && "bg-brand/10 font-medium text-brand focus:bg-brand/10 focus:text-brand")}><Link to={item.to}><item.icon className={cn(active && "text-brand")} />{item.label}{active ? <span className="ml-auto size-1.5 rounded-full bg-brand" /> : null}</Link></DropdownMenuItem>
                 })}
               </div>
 
               <DropdownMenuSeparator className="my-2" />
               <DropdownMenuLabel className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-foreground">
-                <span className="flex size-7 items-center justify-center rounded-md bg-brand/10 text-brand"><WalletCards className="size-3.5" /></span>
-                运营管理
+                <span className="flex size-7 items-center justify-center rounded-md bg-brand/10 text-brand"><Activity className="size-3.5" /></span>
+                状态监控
               </DropdownMenuLabel>
               <div className="ml-3 space-y-0.5 border-l border-border pl-3">
-                {operationItems.map((item) => {
-                  const active = isPathActive(item.to)
-                  return <DropdownMenuItem key={item.to} asChild className={cn("min-h-11 rounded-md px-3 sm:min-h-9", active && "bg-muted font-medium text-foreground")}><Link to={item.to}><item.icon />{item.label}{active ? <span className="ml-auto text-[10px] font-medium text-brand">当前</span> : null}</Link></DropdownMenuItem>
-                })}
+                <DropdownMenuItem asChild className="min-h-11 rounded-md px-3 sm:min-h-9">
+                  <a href="/public/relay-monitor" target="_blank" rel="noopener noreferrer" title="在新标签页打开"><Activity />分组监控<ExternalLink className="ml-auto size-3.5 text-muted-foreground" aria-hidden="true" /><span className="sr-only">（在新标签页打开）</span></a>
+                </DropdownMenuItem>
+                <DropdownMenuItem asChild className="min-h-11 rounded-md px-3 sm:min-h-9">
+                  <a href="/public/service-status" target="_blank" rel="noopener noreferrer" title="在新标签页打开"><Activity />服务状态<ExternalLink className="ml-auto size-3.5 text-muted-foreground" aria-hidden="true" /><span className="sr-only">（在新标签页打开）</span></a>
+                </DropdownMenuItem>
               </div>
+
 
               <DropdownMenuLabel className="mt-2 flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-foreground">
                 <span className="flex size-7 items-center justify-center rounded-md bg-muted text-foreground"><Settings2 className="size-3.5" /></span>

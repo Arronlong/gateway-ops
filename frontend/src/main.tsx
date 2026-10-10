@@ -45,6 +45,7 @@ createRoot(document.getElementById('root')!).render(
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
       <BrowserRouter>
         <Routes>
+          <Route path="public/relay-monitor" element={<PublicRelayMonitorPage />} />
           <Route path="public/relay-monitor/:stationID" element={<PublicRelayMonitorPage />} />
           <Route path="public/model-pricing/:stationID" element={<PublicModelPricingPage />} />
           <Route path="public/service-status" element={<PublicServiceStatusPage />} />
