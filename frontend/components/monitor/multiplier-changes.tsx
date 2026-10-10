@@ -1,17 +1,20 @@
 "use client"
 
 import { ArrowDownRight, ArrowUpRight } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardTitle } from "@/components/ui/card"
+import { ListPanelHeader } from "@/components/ui/list-panel"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { useDashboardSummary, useChannels } from "@/lib/queries"
+import { useChannelSummary, useDashboardSummary, useChannels, useSystemSettings } from "@/lib/queries"
 import { channelTypeLabel, ratioDelta, relativeTime, shortTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
 import type { RelayUsageRange } from "@/lib/api-types"
 
-export function MultiplierChanges({ range = "today" }: { range?: RelayUsageRange }) {
-  const summary = useDashboardSummary(range)
+export function MultiplierChanges({ range = "today", source = "dashboard" }: { range?: RelayUsageRange; source?: "dashboard" | "channels" }) {
+  const dashboardSummary = useDashboardSummary(range, source === "dashboard")
+  const channelSummary = useChannelSummary(range, source === "channels")
   const channels = useChannels()
+  const systemSettings = useSystemSettings()
 
   const channelMap = useMemo(() => {
     const m = new Map<number, { name: string; type: string }>()
@@ -19,15 +22,19 @@ export function MultiplierChanges({ range = "today" }: { range?: RelayUsageRange
     return m
   }, [channels.data])
 
+  const summary = source === "channels" ? channelSummary : dashboardSummary
   const items = summary.data?.recent_rate_changes ?? []
 
+  if (systemSettings.data?.channels_show_rate_changes !== true) return null
+
   return (
-    <Card className="h-[clamp(18rem,60dvh,25rem)] min-h-0 overflow-hidden border border-border shadow-none">
-      <CardHeader className="flex shrink-0 flex-row items-start justify-between gap-3 pb-2">
-        <div><CardTitle className="text-base font-semibold">{"最近倍率变动"}</CardTitle><p className="mt-1 text-xs text-muted-foreground">{"所选时间范围内最近 20 条"}</p></div>
-        <span className="text-xs text-muted-foreground">{items.length > 0 ? `${items.length} 条` : ""}</span>
-      </CardHeader>
-      <CardContent className="min-h-0 flex-1 overflow-hidden px-0">
+    <Card className="h-[clamp(18rem,60dvh,25rem)] min-h-0 gap-0 overflow-hidden border border-border py-0 shadow-none">
+<ListPanelHeader
+        title={<CardTitle className="text-sm font-semibold">{"最近倍率变动"}</CardTitle>}
+        description={<p className="mt-1 text-xs text-muted-foreground">{"所选时间范围内最近 20 条"}</p>}
+        meta={<span className="flex h-11 items-center text-xs text-muted-foreground sm:h-9">{items.length > 0 ? `${items.length} 条` : ""}</span>}
+      ></ListPanelHeader>
+      <CardContent className="min-h-0 flex-1 overflow-hidden border-t border-border p-0">
         {summary.loading ? (
           <p className="px-6 py-6 text-xs text-muted-foreground">{"加载中…"}</p>
         ) : items.length === 0 ? (
