@@ -1,4 +1,4 @@
-import { StrictMode } from 'react'
+import { StrictMode, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import '@fontsource-variable/geist'
@@ -6,11 +6,14 @@ import '@fontsource-variable/geist-mono'
 import { ThemeProvider } from '@/components/theme-provider'
 import { AuthProvider } from '@/lib/auth-context'
 import { RefreshProvider } from '@/lib/refresh-context'
+import { cancelInFlightQueries } from '@/lib/queries'
+import { installNavigationCancellation } from '@/lib/navigation-cancellation'
 import { AddChannelProvider } from '@/lib/add-channel-context'
 import { AuthGate } from '@/components/auth/auth-gate'
 import { AppShell } from '@/components/app-shell'
 import { SettingsProvider } from '@/components/settings-provider'
 import { Toaster } from '@/components/ui/sonner'
+import { PageErrorBoundary } from '@/components/ui/page-error-boundary'
 import DashboardPage from '@/app/page'
 import ChannelsPage from '@/app/channels-page'
 import CaptchaPage from '@/app/captcha-page'
@@ -25,6 +28,8 @@ import PublicServiceStatusPage from '@/app/public-service-status-page'
 import '@/app/globals.css'
 
 function ProtectedApplication() {
+  useEffect(() => installNavigationCancellation(cancelInFlightQueries), [])
+
   return (
     <AuthProvider>
       <AuthGate>
@@ -42,8 +47,9 @@ function ProtectedApplication() {
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
+    <PageErrorBoundary>
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
-      <BrowserRouter>
+      <BrowserRouter useTransitions={false}>
         <Routes>
           <Route path="public/relay-monitor" element={<PublicRelayMonitorPage />} />
           <Route path="public/relay-monitor/:stationID" element={<PublicRelayMonitorPage />} />
@@ -63,5 +69,6 @@ createRoot(document.getElementById('root')!).render(
       </BrowserRouter>
       <Toaster richColors closeButton position="top-right" />
     </ThemeProvider>
+    </PageErrorBoundary>
   </StrictMode>,
 )
