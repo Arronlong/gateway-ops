@@ -1,18 +1,22 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Activity, Box, Boxes, CircleDollarSign, LayoutGrid, List, RefreshCw, RotateCcw, Search, Users, UsersRound } from "lucide-react"
+import { Activity, ArrowDown, ArrowUp, Box, Boxes, CircleDollarSign, LayoutGrid, List, RefreshCw, RotateCcw, Search, SlidersHorizontal, Users, UsersRound } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardTitle } from "@/components/ui/card"
+import { ListPanelHeader } from "@/components/ui/list-panel"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { apiFetch } from "@/lib/api"
 import type { DashboardRange, RelayAccountView } from "@/lib/api-types"
 import { useRelayOverview, useRelayStations, useRelayUsage } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 
 type ViewMode = "aggregate" | "accounts"
+type AccountSortKey = "expires_at" | "name"
+type SortDirection = "asc" | "desc"
 
 const ranges: { value: DashboardRange; label: string }[] = [
   { value: "today", label: "今天" }, { value: "24h", label: "24 小时" }, { value: "7d", label: "7 天" }, { value: "30d", label: "30 天" },
@@ -22,10 +26,18 @@ function money(value: number) { return `¥${value.toLocaleString("zh-CN", { mini
 function integer(value: number) { return value.toLocaleString("zh-CN") }
 function planName(account: RelayAccountView) {
   const raw = account.account_plan?.trim().toLowerCase()
-  if (raw && raw !== "unknown" && raw !== "<nil>") return raw
-  const source = `${account.name} ${account.current_groups.map((group) => group.name).join(" ")}`.toLowerCase()
-  for (const value of ["k12", "team", "pro", "plus", "free", "enterprise"]) if (source.includes(value)) return value
-  return "未识别"
+  if (!raw || raw === "unknown" || raw === "<nil>") return "未识别"
+  const known: Record<string, string> = { team: "Team", k12: "K12", pro: "Pro", plus: "Plus", free: "Free", enterprise: "Enterprise" }
+  return known[raw] ?? raw.charAt(0).toUpperCase() + raw.slice(1)
+}
+function expiryTime(value?: string | null) {
+  if (!value) return null
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time : null
+}
+function expiryName(value?: string | null) {
+  const time = expiryTime(value)
+  return time == null ? "暂无" : new Date(time).toLocaleString("zh-CN")
 }
 function statusName(account: RelayAccountView) {
   if (account.status?.toLowerCase() !== "active") return "异常"
@@ -41,6 +53,8 @@ export default function LocalPoolPage() {
   const [platform, setPlatform] = useState("all")
   const [status, setStatus] = useState("all")
   const [query, setQuery] = useState("")
+  const [sortKey, setSortKey] = useState<AccountSortKey>("expires_at")
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc")
   const [busy, setBusy] = useState(false)
   const overview = useRelayOverview(stationID)
   const usage = useRelayUsage(stationID, range)
@@ -68,6 +82,16 @@ export default function LocalPoolPage() {
     return !keyword || account.name.toLowerCase().includes(keyword) || String(account.external_id).includes(keyword)
   }), [oauthAccounts, plan, platform, query, status])
 
+  const sortedFiltered = useMemo(() => [...filtered].sort((a, b) => {
+    if (sortKey === "name") return sortDirection === "asc" ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)
+    const aTime = expiryTime(a.expires_at)
+    const bTime = expiryTime(b.expires_at)
+    if (aTime == null && bTime == null) return a.external_id - b.external_id
+    if (aTime == null) return 1
+    if (bTime == null) return -1
+    return sortDirection === "asc" ? aTime - bTime : bTime - aTime
+  }), [filtered, sortDirection, sortKey])
+
   const groups = useMemo(() => {
     const result = new Map<string, { plan: string; accounts: typeof filtered; requests: number; tokens: number; charge: number }>()
     for (const account of filtered) {
@@ -93,21 +117,16 @@ export default function LocalPoolPage() {
     } catch (error) { toast.error(error instanceof Error ? error.message : "同步失败") } finally { setBusy(false) }
   }
 
-  function resetFilters() { setPlan("all"); setPlatform("all"); setStatus("all"); setQuery("") }
+  function resetFilters() { setPlan("all"); setPlatform("all"); setStatus("all"); setQuery(""); setSortKey("expires_at"); setSortDirection("asc") }
+
+  const hasActiveFilters = plan !== "all" || platform !== "all" || status !== "all" || Boolean(query.trim())
 
   return <section className="space-y-4">
-    <header className="flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
+    <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
       <div><h1 className="flex items-center gap-2 text-xl font-bold"><UsersRound className="size-5 text-brand" />本地号池</h1><p className="mt-1 text-xs text-muted-foreground">同步中转站 OAuth 账号，汇总账号状态、用户扣费、请求和 Token；仅作统计展示。</p></div>
       <Button size="sm" className="h-9 gap-1.5" disabled={!stationID || busy} onClick={() => void syncOAuth()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步 OAuth 号池</Button>
     </header>
 
-    <div className="flex flex-wrap items-center gap-2">
-      <div className="inline-flex rounded-md border border-border p-0.5"><button type="button" onClick={() => setView("aggregate")} className={cn("inline-flex h-8 items-center gap-1.5 rounded px-3 text-xs", view === "aggregate" ? "bg-muted font-medium" : "text-muted-foreground")}><LayoutGrid className="size-3.5" />类型聚合</button><button type="button" onClick={() => setView("accounts")} className={cn("inline-flex h-8 items-center gap-1.5 rounded px-3 text-xs", view === "accounts" ? "bg-muted font-medium" : "text-muted-foreground")}><List className="size-3.5" />单独账号</button></div>
-      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-        <Select value={stationID == null ? "none" : String(stationID)} onValueChange={(value) => setStationID(value === "none" ? null : Number(value))}><SelectTrigger className="h-9 w-48 text-xs"><SelectValue placeholder="选择中转站" /></SelectTrigger><SelectContent>{(stations.data ?? []).map((station) => <SelectItem key={station.id} value={String(station.id)}>{station.name}</SelectItem>)}</SelectContent></Select>
-        <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5">{ranges.map((item) => <button type="button" key={item.value} onClick={() => setRange(item.value)} className={cn("h-8 rounded px-3 text-xs transition-colors", range === item.value ? "bg-background font-medium shadow-xs" : "text-muted-foreground hover:text-foreground")}>{item.label}</button>)}</div>
-      </div>
-    </div>
 
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
       {[
@@ -119,11 +138,26 @@ export default function LocalPoolPage() {
     </div>
 
     <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
-      <CardHeader className="gap-3 px-4 py-3"><div className="flex items-center justify-between gap-3"><div><CardTitle className="flex items-center gap-2 text-sm"><Boxes className="size-4 text-brand" />OAuth 号池统计</CardTitle><p className="mt-1 text-xs text-muted-foreground">账号类型优先读取中转站元数据，缺失时根据账号名称和分组识别 Team、K12、Pro、Plus 等。</p></div>{usage.loading ? <span className="text-xs text-muted-foreground">统计读取中…</span> : usage.error ? <span className="text-xs text-danger">统计读取失败</span> : null}</div>
-        <div className="flex flex-wrap justify-end gap-2"><div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="账号名称或 ID" className="h-9 w-44 pl-8 text-xs" /></div><Select value={plan} onValueChange={setPlan}><SelectTrigger className="h-9 w-32 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部账号类型</SelectItem>{plans.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><Select value={platform} onValueChange={setPlatform}><SelectTrigger className="h-9 w-32 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部平台</SelectItem>{platforms.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><Select value={status} onValueChange={setStatus}><SelectTrigger className="h-9 w-28 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部状态</SelectItem><SelectItem value="正常">正常</SelectItem><SelectItem value="未调度">未调度</SelectItem><SelectItem value="异常">异常</SelectItem></SelectContent></Select><Button variant="outline" size="sm" className="h-9 gap-1.5" onClick={resetFilters}><RotateCcw className="size-3.5" />重置</Button><Button variant="outline" size="sm" className="h-9 gap-1.5" disabled={!stationID || busy} onClick={() => { void overview.refetch(); void usage.refetch() }}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />刷新</Button></div>
-      </CardHeader>
+      <ListPanelHeader
+          secondaryPlacement="inline"
+          actionsPlacement="secondary"
+          title={<CardTitle className="flex items-center gap-2 text-sm"><Boxes className="size-4 text-brand" />OAuth 号池统计</CardTitle>}
+          description={<p className="mt-1 truncate text-xs text-muted-foreground">账号类型优先读取中转站元数据，缺失时根据账号名称和分组识别 Team、K12、Pro、Plus 等。</p>}
+actions={<>
+<div className="inline-flex shrink-0 rounded-md border border-border bg-muted/30 p-0.5">{ranges.map((item) => <button type="button" key={item.value} onClick={() => setRange(item.value)} className={cn("h-8 shrink-0 whitespace-nowrap rounded px-3 text-xs transition-colors", range === item.value ? "bg-background font-medium shadow-xs" : "text-muted-foreground hover:text-foreground")}>{item.label}</button>)}</div>
+<Button variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" disabled={!stationID || busy} onClick={() => { void overview.refetch(); void usage.refetch() }}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />刷新</Button>
+</>}
+          secondary={<>
+<Select value={stationID == null ? "none" : String(stationID)} onValueChange={(value) => setStationID(value === "none" ? null : Number(value))}><SelectTrigger className="h-11 w-48 text-xs sm:h-9"><SelectValue placeholder="选择中转站" /></SelectTrigger><SelectContent>{(stations.data ?? []).map((station) => <SelectItem key={station.id} value={String(station.id)}>{station.name}</SelectItem>)}</SelectContent></Select>
+<div className="relative min-w-0 flex-1 basis-64"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="账号名称或 ID" className="h-11 sm:h-9 w-full pl-8 text-xs" /></div>
+<DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="sm" variant="outline" className="h-11 sm:h-9 gap-1.5 text-xs"><SlidersHorizontal className="size-3.5" />筛选{hasActiveFilters ? "（已启用）" : ""}</Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-56"><DropdownMenuLabel className="text-xs text-muted-foreground">筛选条件</DropdownMenuLabel><DropdownMenuSub><DropdownMenuSubTrigger>订阅类型</DropdownMenuSubTrigger><DropdownMenuSubContent className="w-44"><DropdownMenuRadioGroup value={plan} onValueChange={setPlan}><DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>{plans.map((value) => <DropdownMenuRadioItem key={value} value={value}>{value}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup></DropdownMenuSubContent></DropdownMenuSub><DropdownMenuSub><DropdownMenuSubTrigger>平台</DropdownMenuSubTrigger><DropdownMenuSubContent className="w-44"><DropdownMenuRadioGroup value={platform} onValueChange={setPlatform}><DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>{platforms.map((value) => <DropdownMenuRadioItem key={value} value={value}>{value}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup></DropdownMenuSubContent></DropdownMenuSub><DropdownMenuSub><DropdownMenuSubTrigger>状态</DropdownMenuSubTrigger><DropdownMenuSubContent className="w-44"><DropdownMenuRadioGroup value={status} onValueChange={setStatus}><DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem><DropdownMenuRadioItem value="正常">正常</DropdownMenuRadioItem><DropdownMenuRadioItem value="未调度">未调度</DropdownMenuRadioItem><DropdownMenuRadioItem value="异常">异常</DropdownMenuRadioItem></DropdownMenuRadioGroup></DropdownMenuSubContent></DropdownMenuSub><DropdownMenuSeparator /><DropdownMenuItem disabled={!hasActiveFilters} onSelect={resetFilters}><RotateCcw className="size-3.5" />清除筛选与搜索</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+<DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="sm" variant="outline" className="h-11 sm:h-9 gap-1.5 text-xs">排序：{sortKey === "expires_at" ? "到期时间" : "账号名称"}{sortDirection === "desc" ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />}</Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-52"><DropdownMenuLabel className="text-xs text-muted-foreground">排序维度</DropdownMenuLabel><DropdownMenuRadioGroup value={sortKey} onValueChange={(value) => setSortKey(value as AccountSortKey)}><DropdownMenuRadioItem value="expires_at">到期时间</DropdownMenuRadioItem><DropdownMenuRadioItem value="name">账号名称</DropdownMenuRadioItem></DropdownMenuRadioGroup><DropdownMenuSeparator /><DropdownMenuLabel className="text-xs text-muted-foreground">排序方向</DropdownMenuLabel><DropdownMenuRadioGroup value={sortDirection} onValueChange={(value) => setSortDirection(value as SortDirection)}><DropdownMenuRadioItem value="asc"><ArrowUp className="size-3.5" />近到远 / A → Z</DropdownMenuRadioItem><DropdownMenuRadioItem value="desc"><ArrowDown className="size-3.5" />远到近 / Z → A</DropdownMenuRadioItem></DropdownMenuRadioGroup></DropdownMenuContent></DropdownMenu>
+<div className="inline-flex shrink-0 rounded-md border border-border p-0.5"><button type="button" onClick={() => setView("aggregate")} className={cn("inline-flex h-11 shrink-0 whitespace-nowrap sm:h-8 items-center gap-1.5 rounded px-3 text-xs", view === "aggregate" ? "bg-muted font-medium" : "text-muted-foreground")}><LayoutGrid className="size-3.5" />类型聚合</button><button type="button" onClick={() => setView("accounts")} className={cn("inline-flex h-11 shrink-0 whitespace-nowrap sm:h-8 items-center gap-1.5 rounded px-3 text-xs", view === "accounts" ? "bg-muted font-medium" : "text-muted-foreground")}><List className="size-3.5" />单独账号</button></div>
+</>}
+          meta={<>{usage.loading ? <span className="text-xs text-muted-foreground">统计读取中…</span> : usage.error ? <span className="text-xs text-danger">统计读取失败</span> : null}</>}
+        ></ListPanelHeader>
       <CardContent className="border-t border-border p-0"><div className="isolate max-h-[min(65vh,680px)] overflow-auto">
-        {view === "aggregate" ? <div className="min-w-[900px]"><div className="sticky top-0 z-30 grid grid-cols-[150px_100px_100px_130px_130px_150px_minmax(180px,1fr)] gap-0 border-b border-border bg-muted text-[11px] text-foreground/90 font-medium [&>*]:px-4 [&>*]:py-2"><span>账号类型</span><span>账号数</span><span>正常</span><span>用户扣费</span><span>请求</span><span>Token</span><span>状态分布</span></div>{groups.length ? groups.map((group) => <div key={group.plan} className="grid grid-cols-[150px_100px_100px_130px_130px_150px_minmax(180px,1fr)] items-center gap-0 border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-2.5"><span className="font-semibold capitalize">{group.plan}</span><span className="font-mono tabular-nums">{integer(group.accounts.length)}</span><span className="font-mono text-success">{group.accounts.filter((account) => statusName(account) === "正常").length}</span><span className="font-mono font-semibold text-brand">{money(group.charge)}</span><span className="font-mono">{integer(group.requests)}</span><span className="font-mono">{integer(group.tokens)}</span><span className="text-muted-foreground">正常 {group.accounts.filter((account) => statusName(account) === "正常").length} · 未调度 {group.accounts.filter((account) => statusName(account) === "未调度").length} · 异常 {group.accounts.filter((account) => statusName(account) === "异常").length}</span></div>) : <p className="py-12 text-center text-sm text-muted-foreground">当前中转站没有符合条件的 OAuth 账号</p>}</div> : <div className="min-w-[1120px]"><div className="sticky top-0 z-30 grid grid-cols-[80px_minmax(190px,1fr)_100px_100px_90px_90px_120px_130px_150px] gap-0 border-b border-border bg-muted text-[11px] text-foreground/90 font-medium [&>*]:px-4 [&>*]:py-2"><span>ID</span><span>账号</span><span>平台</span><span>账号类型</span><span>状态</span><span>优先级</span><span>用户扣费</span><span>请求</span><span>Token</span></div>{filtered.length ? filtered.map((account) => <div key={account.external_id} className="grid grid-cols-[80px_minmax(190px,1fr)_100px_100px_90px_90px_120px_130px_150px] items-center gap-0 border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-2.5"><span className="font-mono text-muted-foreground">#{account.external_id}</span><div className="min-w-0"><p className="truncate font-medium" title={account.name}>{account.name}</p><p className="mt-0.5 text-[11px] text-muted-foreground">最近调用 {account.last_used_at ? new Date(account.last_used_at).toLocaleString("zh-CN") : "暂无"}</p></div><span>{account.platform || "-"}</span><span className="capitalize">{account.plan}</span><span className={cn(statusName(account) === "正常" ? "text-success" : statusName(account) === "异常" ? "text-danger" : "text-warning")}>{statusName(account)}</span><span className="font-mono">{account.priority}</span><span className="font-mono font-semibold text-brand">{money(account.charge)}</span><span className="font-mono">{integer(account.requestCount)}</span><span className="font-mono">{integer(account.tokens)}</span></div>) : <p className="py-12 text-center text-sm text-muted-foreground">当前筛选没有账号</p>}</div>}
+        {view === "aggregate" ? <div className="min-w-[900px]"><div className="sticky top-0 z-30 grid grid-cols-[150px_100px_100px_130px_130px_150px_minmax(180px,1fr)] gap-0 border-b border-border bg-muted text-[11px] text-foreground/90 font-medium [&>*]:px-4 [&>*]:py-2"><span>账号类型</span><span>账号数</span><span>正常</span><span>用户扣费</span><span>请求</span><span>Token</span><span>状态分布</span></div>{groups.length ? groups.map((group) => <div key={group.plan} className="grid grid-cols-[150px_100px_100px_130px_130px_150px_minmax(180px,1fr)] items-center gap-0 border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-2.5"><span className="font-semibold capitalize">{group.plan}</span><span className="font-mono tabular-nums">{integer(group.accounts.length)}</span><span className="font-mono text-success">{group.accounts.filter((account) => statusName(account) === "正常").length}</span><span className="font-mono font-semibold text-brand">{money(group.charge)}</span><span className="font-mono">{integer(group.requests)}</span><span className="font-mono">{integer(group.tokens)}</span><span className="text-muted-foreground">正常 {group.accounts.filter((account) => statusName(account) === "正常").length} · 未调度 {group.accounts.filter((account) => statusName(account) === "未调度").length} · 异常 {group.accounts.filter((account) => statusName(account) === "异常").length}</span></div>) : <p className="py-12 text-center text-sm text-muted-foreground">当前中转站没有符合条件的 OAuth 账号</p>}</div> : <div className="min-w-[1250px]"><div className="sticky top-0 z-30 grid grid-cols-[80px_minmax(190px,1fr)_100px_100px_90px_90px_150px_120px_130px_150px] gap-0 border-b border-border bg-muted text-[11px] text-foreground/90 font-medium [&>*]:px-4 [&>*]:py-2"><span>ID</span><span>账号</span><span>平台</span><span>订阅类型</span><span>状态</span><span>优先级</span><span>到期时间</span><span>用户扣费</span><span>请求</span><span>Token</span></div>{sortedFiltered.length ? sortedFiltered.map((account) => <div key={account.external_id} className="grid grid-cols-[80px_minmax(190px,1fr)_100px_100px_90px_90px_150px_120px_130px_150px] items-center gap-0 border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-2.5"><span className="font-mono text-muted-foreground">#{account.external_id}</span><div className="min-w-0"><p className="truncate font-medium" title={account.name}>{account.name}</p><p className="mt-0.5 text-[11px] text-muted-foreground">最近调用 {account.last_used_at ? new Date(account.last_used_at).toLocaleString("zh-CN") : "暂无"}</p></div><span>{account.platform || "-"}</span><span>{account.plan}</span><span className={cn(statusName(account) === "正常" ? "text-success" : statusName(account) === "异常" ? "text-danger" : "text-warning")}>{statusName(account)}</span><span className="font-mono">{account.priority}</span><span className="text-xs">{expiryName(account.expires_at)}</span><span className="font-mono font-semibold text-brand">{money(account.charge)}</span><span className="font-mono">{integer(account.requestCount)}</span><span className="font-mono">{integer(account.tokens)}</span></div>) : <p className="py-12 text-center text-sm text-muted-foreground">当前筛选没有账号</p>}</div>}
       </div></CardContent>
     </Card>
   </section>

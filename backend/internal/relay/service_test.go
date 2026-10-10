@@ -1077,3 +1077,50 @@ func TestSuspiciousEmailMatchesRegistrationPattern(t *testing.T) {
 		t.Fatal("ordinary emails must not be suspicious")
 	}
 }
+
+func TestRemoteAccountPlanPrefersCredentialsPlanType(t *testing.T) {
+	account := remoteAccount{
+		Credentials: remoteAccountCredentials{Raw: map[string]any{"plan_type": "Team"}},
+		Extra:       map[string]any{"plan_type": "legacy"},
+	}
+	if got := remoteAccountPlan(account); got != "team" {
+		t.Fatalf("plan = %q, want team", got)
+	}
+}
+
+func TestRemoteAccountPlanFallsBackToLegacyExtra(t *testing.T) {
+	account := remoteAccount{Extra: map[string]any{"plan_type": "K12"}}
+	if got := remoteAccountPlan(account); got != "k12" {
+		t.Fatalf("plan = %q, want k12", got)
+	}
+}
+
+func TestRemoteAccountExpiresAt(t *testing.T) {
+	want := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name  string
+		value any
+		want  *time.Time
+	}{
+		{name: "rfc3339", value: want.Format(time.RFC3339), want: &want},
+		{name: "unix seconds", value: float64(want.Unix()), want: &want},
+		{name: "unix milliseconds", value: float64(want.UnixMilli()), want: &want},
+		{name: "missing", value: nil, want: nil},
+		{name: "invalid", value: "not-a-date", want: nil},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			account := remoteAccount{Credentials: remoteAccountCredentials{Raw: map[string]any{"expires_at": test.value}}}
+			got := remoteAccountExpiresAt(account)
+			if test.want == nil {
+				if got != nil {
+					t.Fatalf("expires_at = %v, want nil", got)
+				}
+				return
+			}
+			if got == nil || !got.Equal(*test.want) {
+				t.Fatalf("expires_at = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
