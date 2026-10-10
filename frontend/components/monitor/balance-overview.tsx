@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState } from "react"
 import { ExternalLink } from "lucide-react"
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianGrid } from "recharts"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardTitle } from "@/components/ui/card"
+import { ListPanelHeader } from "@/components/ui/list-panel"
 import { useBalanceTrend, useDashboardSummary } from "@/lib/queries"
 import type { DashboardRange } from "@/lib/api-types"
 import { money } from "@/lib/format"
@@ -98,12 +99,12 @@ export function BalanceOverview({ range = "today" }: { range?: DashboardRange })
   const yMax = data.length > 0 ? niceCeil(Math.max(...data.map((d) => d.balance))) : 10
 
   return (
-    <Card className="border border-border shadow-none lg:h-100">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between pb-2">
-        <CardTitle className="text-base font-semibold">{"渠道余额趋势"}</CardTitle>
-        <span className="shrink-0 rounded-md border border-border bg-muted/30 px-2 py-1 text-xs text-foreground">{range === "today" ? "今天" : range === "24h" ? "24 小时" : range === "7d" ? "7 天" : "30 天"}</span>
-      </CardHeader>
-      <CardContent className="flex min-h-0 flex-1 flex-col">
+    <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none lg:h-100">
+      <ListPanelHeader
+        title={<CardTitle className="text-sm font-semibold">{"渠道余额趋势"}</CardTitle>}
+        meta={<span className="shrink-0 rounded-md border border-border bg-muted/30 px-2 py-1 text-xs text-foreground">{range === "today" ? "今天" : range === "24h" ? "24 小时" : range === "7d" ? "7 天" : "30 天"}</span>}
+      />
+      <CardContent className="flex min-h-0 flex-1 flex-col border-t border-border p-4">
         <div ref={chartRef} className="min-h-0 w-full flex-1">
           {trend.loading ? (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">{"加载中…"}</div>

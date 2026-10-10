@@ -66,3 +66,17 @@ test("legacy monitor responses must never be relabelled as another station or ti
   }
 })
 
+test("public monitor cards do not inject failure-summary explanations into recent calls", () => {
+  const page = readFileSync(new URL("../app/public-relay-monitor-page.tsx", import.meta.url), "utf8")
+  assert.doesNotMatch(page, /failure_summary/)
+  assert.match(page, /formatTime\(group\.latest_call_at\)/)
+  assert.match(page, /recentSamples=\{group\.calls\}/)
+})
+
+test("public recent-call tooltips use each call latency instead of only its bucket", () => {
+  const page = readFileSync(new URL("../components/monitor/latency-stability-lane.tsx", import.meta.url), "utf8")
+  assert.match(page, /function RecentSampleTooltip\(\{ sample, bucket \}/)
+  assert.match(page, /formatLatency\(sample\.first_token_ms\)/)
+  assert.match(page, /formatLatency\(sample\.duration_ms\)/)
+  assert.match(page, /当前调用延迟；同时对比所属时间段的 P50\/P95/)
+})

@@ -541,6 +541,7 @@ type RelayAccount struct {
 	PoolMode           bool       `gorm:"not null;default:false" json:"pool_mode"`
 	PoolModeRetryCount int        `gorm:"not null;default:3" json:"pool_mode_retry_count"`
 	AccountPlan        string     `gorm:"size:64" json:"account_plan,omitempty"`
+	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
 	ModelType          string     `gorm:"size:64" json:"model_type,omitempty"`
 	// This value is populated only from extra.upstream_billing_probe. The
 	// remote accounts.rate_multiplier defaults to 1 and is not upstream cost.

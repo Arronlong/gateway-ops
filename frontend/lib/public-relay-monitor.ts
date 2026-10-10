@@ -20,7 +20,7 @@ export function publicRelayMonitorCacheKey(stationID: number, range: PublicRelay
 }
 
 export function isPublicRelayMonitorViewForSelection(
-  view: (Pick<PublicGroupMonitorView, "station_id"> & { range?: PublicRelayMonitorRange }) | null | undefined,
+  view: (Pick<PublicGroupMonitorView, "station_id"> & Partial<Pick<PublicGroupMonitorView, "range">>) | null | undefined,
   stationID: number,
   range: PublicRelayMonitorRange,
 ) {
