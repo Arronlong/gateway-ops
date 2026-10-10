@@ -1,4 +1,4 @@
-import { BookOpenCheck, CircleDollarSign, ReceiptText, WalletCards } from "lucide-react"
+import { BookOpenCheck, CircleDollarSign, Gauge, ReceiptText, WalletCards } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import type { OperationSummary } from "@/lib/api-types"
 import { cn } from "@/lib/utils"
@@ -8,12 +8,29 @@ export function cny(value: number | null | undefined) {
   return `¥${value.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+export function usd(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—"
+  return `$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+export function multiplier(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—"
+  return `${value.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 倍`
+}
+
 export function OperationSummaryCards({ data, loading }: { data: OperationSummary | null; loading: boolean }) {
+  const multiplierFooter = "实时倍率 = 实际消耗成本 ÷ 中转站用户消耗"
+
   const items = [
     { label: "总收入", value: cny(data?.ledger.income_amount), footer: "所选范围内经营收入", tone: "text-success", background: "bg-success/10", icon: ReceiptText },
-    { label: "支出", value: cny(data?.ledger.expense_amount), footer: "所选范围内经营支出", tone: "text-danger", background: "bg-danger/10", icon: CircleDollarSign },
-    { label: "账号采购", value: cny(data?.ledger.account_purchase_amount), footer: "已计入支出的账号成本", tone: "text-warning", background: "bg-warning/10", icon: BookOpenCheck },
-    { label: "现金净额", value: cny(data?.ledger.net_amount), footer: "收入减支出，不代表利润", tone: "text-success", background: "bg-success/10", icon: WalletCards },
+    { label: "支出", value: cny(data?.ledger.expense_amount), footer: "支出 = 账号采购 + 上游充值", tone: "text-danger", background: "bg-danger/10", icon: CircleDollarSign },
+    { label: "现金净额", value: cny(data?.ledger.net_amount), footer: "总收入减支出", tone: "text-success", background: "bg-success/10", icon: WalletCards },
+    { label: "账号采购成本", value: cny(data?.cost.relay_account_purchase_amount), footer: "采购用于中转站服务的账号所支付的金额", tone: "text-warning", background: "bg-warning/10", icon: BookOpenCheck },
+    { label: "上游充值支出", value: cny(data?.cost.relay_upstream_recharge_amount), footer: "向上游渠道充值、购买调用额度所支付的金额", tone: "text-warning", background: "bg-warning/10", icon: ReceiptText },
+    { label: "当前渠道余额", value: cny(data?.cost.channel_balance_amount), footer: "尚未被消耗的渠道预付资产", tone: "text-brand", background: "bg-brand/10", icon: WalletCards },
+    { label: "实际消耗成本", value: cny(data?.cost.relay_actual_cost_amount), footer: "实际消耗成本 = 支出 - 当前渠道余额", tone: "text-danger", background: "bg-danger/10", icon: CircleDollarSign },
+    { label: "中转站用户消耗", value: usd(data?.cost.relay_revenue_amount), footer: "用户通过中转站调用模型服务产生的累计计费金额", tone: "text-success", background: "bg-success/10", icon: ReceiptText },
+    { label: "实时倍率", value: multiplier(data?.cost.realtime_multiplier), footer: multiplierFooter, tone: "text-brand", background: "bg-brand/10", icon: Gauge },
   ]
 
   return (

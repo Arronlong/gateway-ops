@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	LedgerSourceManual       = "manual"
-	LedgerSourceLocalAccount = "local_account"
-	LedgerCategoryPurchase   = "account_purchase"
+	LedgerSourceManual        = "manual"
+	LedgerSourceLocalAccount  = "local_account"
+	LedgerSourceHistoryImport = "history_import"
+	LedgerCategoryPurchase    = "account_purchase"
 )
 
 var ErrInvalidOperationInput = errors.New("运营数据无效")
@@ -35,6 +36,7 @@ type LedgerFilter struct {
 	Since     time.Time
 	Direction string
 	Category  string
+	Query     string
 	Limit     int
 }
 
@@ -77,6 +79,9 @@ func (o *Operations) ListLedger(filter LedgerFilter) ([]OperationLedgerEntryView
 	if filter.Category != "" && filter.Category != "all" {
 		query = query.Where("entry.category = ?", filter.Category)
 	}
+	if pattern := ledgerSearchPattern(filter.Query); pattern != "" {
+		query = query.Where("(entry.description ILIKE ? OR channel.name ILIKE ? OR station.name ILIKE ?)", pattern, pattern, pattern)
+	}
 	limit := filter.Limit
 	if limit <= 0 || limit > 1000 {
 		limit = 300
@@ -84,6 +89,14 @@ func (o *Operations) ListLedger(filter LedgerFilter) ([]OperationLedgerEntryView
 	list := make([]OperationLedgerEntryView, 0)
 	err := query.Order("entry.occurred_at DESC, entry.id DESC").Limit(limit).Scan(&list).Error
 	return list, err
+}
+
+func ledgerSearchPattern(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return ""
+	}
+	return "%" + query + "%"
 }
 
 func (o *Operations) LedgerSummary(since time.Time) (LedgerSummary, []LedgerCategorySummary, error) {
@@ -117,6 +130,65 @@ func (o *Operations) LedgerSummary(since time.Time) (LedgerSummary, []LedgerCate
 	return summary, breakdown, nil
 }
 
+// AccountPurchaseTotals returns account-purchase expenses grouped by relay station.
+func (o *Operations) AccountPurchaseTotals(since time.Time) (map[uint]float64, error) {
+	type row struct {
+		RelayStationID uint
+		Amount         float64
+	}
+	rows := make([]row, 0)
+	query := o.db.Model(&OperationLedgerEntry{}).
+		Select("relay_station_id, COALESCE(SUM(amount), 0) AS amount").
+		Where("relay_station_id IS NOT NULL AND direction = ? AND category = ?", "expense", LedgerCategoryPurchase).
+		Group("relay_station_id")
+	if !since.IsZero() {
+		query = query.Where("occurred_at >= ?", since)
+	}
+	if err := query.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	totals := make(map[uint]float64, len(rows))
+	for _, item := range rows {
+		totals[item.RelayStationID] = item.Amount
+	}
+	return totals, nil
+}
+
+type StationExpenseTotal struct {
+	AccountPurchase  float64
+	UpstreamRecharge float64
+}
+
+// StationExpenseTotals returns period expenses grouped by relay station.
+func (o *Operations) StationExpenseTotals(since time.Time) (map[uint]StationExpenseTotal, error) {
+	type row struct {
+		RelayStationID   uint
+		AccountPurchase  float64
+		UpstreamRecharge float64
+	}
+	rows := make([]row, 0)
+	query := o.db.Model(&OperationLedgerEntry{}).
+		Select(`relay_station_id,
+			COALESCE(SUM(CASE WHEN category = 'account_purchase' THEN amount ELSE 0 END), 0) AS account_purchase,
+			COALESCE(SUM(CASE WHEN category = 'upstream_recharge' THEN amount ELSE 0 END), 0) AS upstream_recharge`).
+		Where("relay_station_id IS NOT NULL AND direction = ? AND category IN ?", "expense", []string{"account_purchase", "upstream_recharge"}).
+		Group("relay_station_id")
+	if !since.IsZero() {
+		query = query.Where("occurred_at >= ?", since)
+	}
+	if err := query.Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	totals := make(map[uint]StationExpenseTotal, len(rows))
+	for _, item := range rows {
+		totals[item.RelayStationID] = StationExpenseTotal{
+			AccountPurchase:  item.AccountPurchase,
+			UpstreamRecharge: item.UpstreamRecharge,
+		}
+	}
+	return totals, nil
+}
+
 // ChannelRechargeTotals returns all-time upstream recharge amounts linked to
 // each monitored channel. Unlinked ledger entries are intentionally omitted.
 func (o *Operations) ChannelRechargeTotals() (map[uint]float64, error) {
@@ -140,7 +212,12 @@ func (o *Operations) ChannelRechargeTotals() (map[uint]float64, error) {
 }
 
 func (o *Operations) CreateLedger(entry *OperationLedgerEntry) error {
-	entry.Source = LedgerSourceManual
+	if entry.Source == "" {
+		entry.Source = LedgerSourceManual
+	}
+	if entry.Source != LedgerSourceManual && entry.Source != LedgerSourceHistoryImport {
+		return fmt.Errorf("%w：账本来源无效", ErrInvalidOperationInput)
+	}
 	entry.LocalAccountID = nil
 	return o.db.Transaction(func(tx *gorm.DB) error {
 		if err := validateLedgerReferences(tx, entry); err != nil {
@@ -149,10 +226,21 @@ func (o *Operations) CreateLedger(entry *OperationLedgerEntry) error {
 		if err := tx.Create(entry).Error; err != nil {
 			return err
 		}
+		if !shouldApplyRechargeAdjustment(entry.Source) {
+			return nil
+		}
 		adjustments := map[uint]float64{}
 		addRechargeAdjustment(adjustments, entry, 1)
 		return applyManualRechargeAdjustments(tx, adjustments)
 	})
+}
+
+func shouldApplyRechargeAdjustment(source string) bool {
+	return source == LedgerSourceManual
+}
+
+func canEditLedgerSource(source string) bool {
+	return source == LedgerSourceManual || source == LedgerSourceHistoryImport
 }
 
 func (o *Operations) UpdateLedger(entry *OperationLedgerEntry) error {
@@ -161,15 +249,20 @@ func (o *Operations) UpdateLedger(entry *OperationLedgerEntry) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, entry.ID).Error; err != nil {
 			return err
 		}
-		if current.Source != LedgerSourceManual {
+		if !canEditLedgerSource(current.Source) {
 			return errors.New("自动采购成本记录需要在本地号池中修改")
 		}
+		entry.Source = current.Source
 		if err := validateLedgerReferences(tx, entry); err != nil {
 			return err
 		}
 		adjustments := map[uint]float64{}
-		addRechargeAdjustment(adjustments, &current, -1)
-		addRechargeAdjustment(adjustments, entry, 1)
+		if shouldApplyRechargeAdjustment(current.Source) {
+			addRechargeAdjustment(adjustments, &current, -1)
+		}
+		if shouldApplyRechargeAdjustment(entry.Source) {
+			addRechargeAdjustment(adjustments, entry, 1)
+		}
 		if err := tx.Model(&current).Updates(map[string]any{
 			"direction": entry.Direction, "category": entry.Category,
 			"amount": entry.Amount, "currency": entry.Currency,
@@ -210,14 +303,16 @@ func (o *Operations) DeleteLedger(id uint) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&current, id).Error; err != nil {
 			return err
 		}
-		if current.Source != LedgerSourceManual {
+		if !canEditLedgerSource(current.Source) {
 			return errors.New("自动采购成本记录需要在本地号池中删除或修改")
 		}
 		if err := tx.Delete(&current).Error; err != nil {
 			return err
 		}
 		adjustments := map[uint]float64{}
-		addRechargeAdjustment(adjustments, &current, -1)
+		if shouldApplyRechargeAdjustment(current.Source) {
+			addRechargeAdjustment(adjustments, &current, -1)
+		}
 		return applyManualRechargeAdjustments(tx, adjustments)
 	})
 }
