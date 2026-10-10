@@ -23,7 +23,7 @@ export function RateChangeDot({ change, className }: { change?: RateChangeLog | 
   )
 }
 
-export function RateTooltipBody({ rate }: { rate: RateSnapshot }) {
+export function RateTooltipBody({ rate, showChange = true }: { rate: RateSnapshot; showChange?: boolean }) {
   const change = rate.latest_ratio_change
   const lowered = rateChangeLowered(change)
   return (
@@ -34,15 +34,19 @@ export function RateTooltipBody({ rate }: { rate: RateSnapshot }) {
       ) : (
         <p className="mt-0.5 italic text-background/75">{"(无描述)"}</p>
       )}
-      <p className="mt-0.5 text-background/80">
-        {"最近更新："}
-        {change ? relativeTime(change.changed_at) : "未更新"}
-      </p>
-      {change ? (
-        <p className={cn("mt-0.5", lowered ? "text-success" : "text-danger")}>
-          {"最近倍率变动："}
-          {ratioArrow(change.old_ratio, change.new_ratio)}
-        </p>
+      {showChange ? (
+        <>
+          <p className="mt-0.5 text-background/80">
+            {"最近更新："}
+            {change ? relativeTime(change.changed_at) : "未更新"}
+          </p>
+          {change ? (
+            <p className={cn("mt-0.5", lowered ? "text-success" : "text-danger")}>
+              {"最近倍率变动："}
+              {ratioArrow(change.old_ratio, change.new_ratio)}
+            </p>
+          ) : null}
+        </>
       ) : null}
     </>
   )

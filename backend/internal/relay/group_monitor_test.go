@@ -40,6 +40,34 @@ func TestClassifyGroupMonitor(t *testing.T) {
 	}
 }
 
+func TestBuildPublicGroupMonitorLatencyBuckets(t *testing.T) {
+	now := time.Date(2026, 8, 18, 12, 0, 0, 0, time.UTC)
+	firstOne, durationOne := int64(100), int64(1_000)
+	firstTwo, durationTwo := int64(200), int64(2_000)
+	firstThree, durationThree := int64(300), int64(3_000)
+	events := []monitorEvent{
+		{createdAt: now.Add(-5 * time.Minute), success: true, firstTokenMS: &firstOne, durationMS: &durationOne},
+		{createdAt: now.Add(-4 * time.Minute), success: true, firstTokenMS: &firstTwo, durationMS: &durationTwo},
+		{createdAt: now.Add(-time.Minute), firstTokenMS: &firstThree, durationMS: &durationThree},
+	}
+	buckets := buildPublicGroupMonitorLatencyBuckets(events, now.Add(-6*time.Minute), now, 2)
+	if len(buckets) != 2 {
+		t.Fatalf("bucket count = %d, want 2", len(buckets))
+	}
+	if buckets[0].RequestCount != 2 || buckets[0].SuccessRate == nil || *buckets[0].SuccessRate != 1 {
+		t.Fatalf("first bucket summary = %#v", buckets[0])
+	}
+	if buckets[0].FirstTokenP50MS == nil || *buckets[0].FirstTokenP50MS != 150 || buckets[0].FirstTokenP95MS == nil || *buckets[0].FirstTokenP95MS != 195 {
+		t.Fatalf("first token percentiles = %#v", buckets[0])
+	}
+	if buckets[0].DurationP50MS == nil || *buckets[0].DurationP50MS != 1_500 || buckets[0].DurationP95MS == nil || *buckets[0].DurationP95MS != 1_950 {
+		t.Fatalf("duration percentiles = %#v", buckets[0])
+	}
+	if buckets[1].RequestCount != 1 || buckets[1].SuccessRate == nil || *buckets[1].SuccessRate != 0 {
+		t.Fatalf("second bucket summary = %#v", buckets[1])
+	}
+}
+
 func TestErrorMonitorEventsOnlyIncludesUserVisibleFinalFailures(t *testing.T) {
 	items := []remoteRequestError{
 		{CreatedAt: "2026-08-18T12:00:00Z", Phase: "upstream", ErrorOwner: "provider", StatusCode: 502, Message: "Upstream request failed", GroupID: 28, RequestedModel: "gpt-5.6"},

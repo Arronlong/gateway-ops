@@ -7,13 +7,12 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { apiFetch } from "@/lib/api"
-import type { PublicGroupMonitorCall, PublicGroupMonitorGroup, PublicGroupMonitorStatus, PublicGroupMonitorView } from "@/lib/api-types"
+import type { LatencyBucket, PublicGroupMonitorGroup, PublicGroupMonitorStatus, PublicGroupMonitorView } from "@/lib/api-types"
 import { defaultPublicRelayMonitorRange, isPublicRelayMonitorViewForSelection, publicRelayMonitorCacheKey, publicRelayMonitorCacheVersion, publicRelayMonitorPath, publicRelayMonitorRanges, resolvePublicRelayMonitorSelection, type PublicRelayMonitorRange, type PublicRelayMonitorStationOption } from "@/lib/public-relay-monitor"
 import { cn } from "@/lib/utils"
 import { PlatformBadge } from "@/components/relay/platform-badge"
-import { RecentUsageCard, RecentUsageTooltip, recentUsageTooltipNarrowClassName } from "@/components/monitor/recent-usage-tooltip"
+import { LatencyStabilityLane } from "@/components/monitor/latency-stability-lane"
 
 const refreshIntervalSeconds = 30
 const refreshIntervalMS = refreshIntervalSeconds * 1_000
@@ -55,47 +54,6 @@ const statusMeta: Record<PublicGroupMonitorStatus, { label: string; className: s
   unknown: { label: "状态未知", className: "text-warning", pillClassName: "border-warning/25 bg-warning/10", icon: CircleHelp },
 }
 
-type LatencyTone = "good" | "warn" | "slow" | "critical"
-
-function latencyTone(value: number | null | undefined, metric: "first" | "duration"): LatencyTone {
-  if (value == null || !Number.isFinite(value) || value < 0) return "critical"
-  const thresholds = metric === "first"
-    ? { warn: 10_000, slow: 30_000, critical: 60_000 }
-    : { warn: 60_000, slow: 180_000, critical: 300_000 }
-  if (value >= thresholds.critical) return "critical"
-  if (value >= thresholds.slow) return "slow"
-  if (value >= thresholds.warn) return "warn"
-  return "good"
-}
-
-const latencyColor: Record<LatencyTone, string> = {
-  good: "#10b981",
-  warn: "#f59e0b",
-  slow: "#f97316",
-  critical: "#ef4444",
-}
-
-const latencyTextClass: Record<LatencyTone, string> = {
-  good: "text-emerald-600 dark:text-emerald-400",
-  warn: "text-amber-600 dark:text-amber-400",
-  slow: "text-orange-600 dark:text-orange-400",
-  critical: "text-red-600 dark:text-red-400",
-}
-
-function formatLatency(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value) || value < 0) return "-"
-  const milliseconds = Math.round(value)
-  if (milliseconds < 1_000) return `${milliseconds}ms`
-  const totalSeconds = milliseconds / 1_000
-  if (totalSeconds < 60) return `${totalSeconds.toFixed(totalSeconds < 10 ? 1 : 0)}秒`
-  const hours = Math.floor(totalSeconds / 3_600)
-  const minutes = Math.floor((totalSeconds % 3_600) / 60)
-  const seconds = totalSeconds % 60
-  const secondsText = seconds.toFixed(seconds < 10 && seconds % 1 !== 0 ? 1 : 0).padStart(2, "0")
-  if (hours > 0) return `${hours}时 ${String(minutes).padStart(2, "0")}分 ${secondsText}秒`
-  return `${minutes}分 ${secondsText}秒`
-}
-
 function formatTime(value: string | null | undefined) {
   if (!value) return "暂无"
   const date = new Date(value)
@@ -110,44 +68,6 @@ function formatTime(value: string | null | undefined) {
   }).format(date)
 }
 
-function LatencyBars({ calls, groupName }: { calls: PublicGroupMonitorCall[]; groupName: string }) {
-  const ordered = useMemo(() => [...calls].reverse(), [calls])
-  if (ordered.length === 0) {
-    return <span className="block w-full text-xs text-muted-foreground">暂无调用记录</span>
-  }
-  return <Tooltip delayDuration={160}>
-    <TooltipTrigger asChild>
-      <button type="button" className="block h-10 w-full rounded-sm px-1 py-1 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`查看${groupName}最近${ordered.length}次调用`}>
-        <span className="flex h-8 w-full items-stretch gap-px overflow-hidden" aria-hidden="true">
-          {ordered.map((call, index) => call.success ? <span key={`${call.created_at}-${index}`} className="min-w-0 flex-1 rounded-[3px] opacity-90 transition-opacity hover:opacity-100" style={{ background: `linear-gradient(to top, ${latencyColor[latencyTone(call.duration_ms, "duration")]} 0 50%, ${latencyColor[latencyTone(call.first_token_ms, "first")]} 50% 100%)` }} /> : <span key={`${call.created_at}-${index}`} className="min-w-0 flex-1 rounded-[3px] bg-red-500 opacity-90 transition-opacity hover:opacity-100" />)}
-        </span>
-      </button>
-    </TooltipTrigger>
-    <TooltipContent side="bottom" align="end" className={recentUsageTooltipNarrowClassName}>
-      <RecentUsageTooltip count={ordered.length}>
-        {[...ordered].reverse().map((call, index) => {
-          const first = latencyTone(call.first_token_ms, "first")
-          const duration = latencyTone(call.duration_ms, "duration")
-          return (
-            <RecentUsageCard key={`${call.created_at}-detail-${index}`}>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <time dateTime={call.created_at} className="whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-slate-700">{formatTime(call.created_at)}</time>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">#{ordered.length - index}</span>
-              </div>
-              <div className="mt-2 min-w-0 rounded-md bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200/70">
-                <p className="truncate font-mono text-sm font-semibold leading-5 text-slate-950" title={call.model || "-"}>{call.model || "-"}</p>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-slate-50 px-2.5 py-2 font-mono text-xs font-semibold tabular-nums ring-1 ring-slate-200/70">
-                {call.success ? <><span className={latencyTextClass[first]}>首字 {formatLatency(call.first_token_ms)}</span><span className={latencyTextClass[duration]}>总耗时 {formatLatency(call.duration_ms)}</span></> : <span className="text-red-600">调用失败{call.duration_ms != null ? ` · 总耗时 ${formatLatency(call.duration_ms)}` : ""}</span>}
-              </div>
-            </RecentUsageCard>
-          )
-        })}
-      </RecentUsageTooltip>
-    </TooltipContent>
-  </Tooltip>
-}
-
 function Status({ status }: { status: PublicGroupMonitorStatus }) {
   const meta = statusMeta[status]
   const Icon = meta.icon
@@ -159,7 +79,7 @@ function successRate(group: PublicGroupMonitorGroup) {
   return total > 0 ? `${((group.success_count / total) * 100).toFixed(1)}%` : "-"
 }
 
-function MonitorRow({ group }: { group: PublicGroupMonitorGroup }) {
+function MonitorRow({ group, range }: { group: PublicGroupMonitorGroup; range: PublicRelayMonitorRange }) {
   return <article className="group overflow-hidden rounded-[5px] border border-border/80 bg-card shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-brand/40 hover:shadow-md">
     <div className="p-4 sm:p-5">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
@@ -177,14 +97,41 @@ function MonitorRow({ group }: { group: PublicGroupMonitorGroup }) {
         </div>
       </div>
 
-      <div className="mt-4 border-t border-border/70 pt-3.5">
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 text-[11px]">
-          <span className="flex min-w-0 items-center gap-2 text-muted-foreground"><span className="font-medium text-foreground/80">最近调用</span>{group.failure_summary ? <span className="truncate text-xs font-semibold text-warning" title={group.failure_summary}>{group.failure_summary}</span> : null}</span>
-          <span className="shrink-0 font-mono text-sm font-semibold tabular-nums text-foreground">{formatTime(group.latest_call_at)}</span>
-        </div>
-        <div className="mt-2 rounded-md bg-muted/35 px-2 py-1.5">
-          <LatencyBars calls={group.calls} groupName={group.name} />
-        </div>
+      <div className="mt-4 rounded-md bg-muted/35 px-2 py-1.5">
+        <LatencyStabilityLane
+          buckets={group.latency_buckets ?? []}
+          recentSamples={group.calls}
+          range={range}
+          loadSamples={(bucket: LatencyBucket) => {
+            const start = Date.parse(bucket.start)
+            const end = Date.parse(bucket.end)
+            return Promise.resolve(group.calls.filter((call) => {
+              const timestamp = Date.parse(call.created_at)
+              return Number.isFinite(start) && Number.isFinite(end) && Number.isFinite(timestamp) && start <= timestamp && timestamp < end
+            }))
+          }}
+          layout="fill"
+          detailMode="inline"
+          emptyLabel="暂无调用记录"
+          title="最近调用"
+          headerRight={<time className="shrink-0 font-mono tabular-nums text-foreground">{formatTime(group.latest_call_at)}</time>}
+        />
+        <LatencyStabilityLane
+          buckets={group.latency_buckets ?? []}
+          loadSamples={(bucket: LatencyBucket) => {
+            const start = Date.parse(bucket.start)
+            const end = Date.parse(bucket.end)
+            return Promise.resolve(group.calls.filter((call) => {
+              const timestamp = Date.parse(call.created_at)
+              return Number.isFinite(start) && Number.isFinite(end) && Number.isFinite(timestamp) && start <= timestamp && timestamp < end
+            }))
+          }}
+          layout="fill"
+          detailMode="inline"
+          emptyLabel="暂无时间稳定性数据"
+          title="时间稳定性"
+          range={range}
+        />
       </div>
 
     </div>
@@ -238,7 +185,7 @@ export default function PublicRelayMonitorPage() {
       const next = await apiFetch<PublicGroupMonitorView>(publicRelayMonitorPath(numericStationID, range), { skipAuthErrorHandler: true })
       if (requestID !== requestIDRef.current) return
       if (!isPublicRelayMonitorViewForSelection(next, numericStationID, range)) {
-        throw new Error(next?.station_id === numericStationID && true
+        throw new Error(next?.station_id === numericStationID && next.range == null
           ? "当前后端服务尚未更新，24小时数据仍可查看；其他时间范围需要重启后端后生效。"
           : "监控数据的时间范围不匹配")
       }
@@ -313,6 +260,31 @@ export default function PublicRelayMonitorPage() {
         </div>
       </header>
 
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="inline-flex flex-wrap rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="分组监控时间范围">
+          {publicRelayMonitorRanges.map((item) => (
+            <button
+              key={item.value}
+              type="button"
+              aria-pressed={range === item.value}
+              onClick={() => {
+                if (range === item.value) return
+                requestIDRef.current++
+                setData(null)
+                setLoading(true)
+                setRefreshing(false)
+                setError(null)
+                setRange(item.value)
+              }}
+              className={cn("h-11 rounded px-4 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8", range === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-muted-foreground">每个分组展示所选时间范围内最近 60 次调用</p>
+      </div>
+
       {summary ? <section className="grid grid-cols-2 border-b border-border sm:grid-cols-4" aria-label="分组状态统计"><div className="py-4 sm:px-4 sm:first:pl-0"><p className="text-[11px] text-muted-foreground">监控分组</p><p className="mt-1 font-mono text-xl font-bold tabular-nums">{summary.total}</p></div><div className="py-4 sm:px-4"><p className="text-[11px] text-muted-foreground">可用</p><p className="mt-1 font-mono text-xl font-bold tabular-nums text-success">{summary.available}</p></div><div className="py-4 sm:px-4"><p className="text-[11px] text-muted-foreground">不稳定</p><p className="mt-1 font-mono text-xl font-bold tabular-nums text-warning">{summary.degraded}</p></div><div className="py-4 sm:px-4"><p className="text-[11px] text-muted-foreground">不可用</p><p className="mt-1 font-mono text-xl font-bold tabular-nums text-danger">{summary.unavailable}</p></div></section> : null}
 
       <div className="mt-4 flex items-center gap-3 rounded-lg border border-brand/20 bg-brand/5 px-3.5 py-2.5 text-xs text-foreground" role="note"><span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand"><Info className="size-4" aria-hidden="true" /></span><p className="min-w-0 leading-5"><strong className="font-semibold text-brand">监控说明</strong><span className="mx-2 text-muted-foreground/60" aria-hidden="true">·</span><span className="font-semibold text-warning">仅供趋势参考；状态基于最近调用，不代表当前实际可用性。</span></p></div>
@@ -320,7 +292,7 @@ export default function PublicRelayMonitorPage() {
       <section className="mt-5" aria-label="监控分组列表">
         {stationsError && !routeStationID ? <Alert variant="destructive" className="mb-4"><TriangleAlert /><AlertTitle>中转站列表读取失败</AlertTitle><AlertDescription>{stationsError}</AlertDescription></Alert> : null}
         {error ? <Alert variant="destructive" className="mb-4"><TriangleAlert /><AlertTitle>数据更新失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
-        {stationsLoading && !routeStationID ? <LoadingCards /> : selection.mode === "auto" ? <LoadingCards /> : selection.mode === "choose" ? <div className="flex min-h-[420px] flex-col items-center justify-center border border-dashed border-border px-6 text-center"><Activity className="size-8 text-brand" /><p className="mt-3 text-sm font-semibold text-foreground">请选择要查看的中转站</p><p className="mt-1 text-xs text-muted-foreground">检测到多个中转站，请使用右上角的站点选择器进入对应的分组监控。</p></div> : selection.mode === "empty" && !stationsError ? <div className="flex min-h-[420px] items-center justify-center border border-dashed border-border px-6 text-center text-sm text-muted-foreground">当前还没有配置中转站</div> : loading && !data ? <LoadingCards /> : data ? data.groups.length ? <div className="grid min-h-[420px] gap-3 min-[1150px]:grid-cols-2">{data.groups.map((group) => <MonitorRow key={`${numericStationID}:${range}:${group.external_id}`} group={group} />)}</div> : <div className="flex min-h-[420px] items-center justify-center border border-border px-6 text-center text-sm text-muted-foreground">当前没有开启监控的分组</div> : <div className="flex min-h-[420px] items-center justify-center border border-border px-6 text-sm text-muted-foreground">暂无监控数据</div>}
+        {stationsLoading && !routeStationID ? <LoadingCards /> : selection.mode === "auto" ? <LoadingCards /> : selection.mode === "choose" ? <div className="flex min-h-[420px] flex-col items-center justify-center border border-dashed border-border px-6 text-center"><Activity className="size-8 text-brand" /><p className="mt-3 text-sm font-semibold text-foreground">请选择要查看的中转站</p><p className="mt-1 text-xs text-muted-foreground">检测到多个中转站，请使用右上角的站点选择器进入对应的分组监控。</p></div> : selection.mode === "empty" && !stationsError ? <div className="flex min-h-[420px] items-center justify-center border border-dashed border-border px-6 text-center text-sm text-muted-foreground">当前还没有配置中转站</div> : loading && !data ? <LoadingCards /> : data ? data.groups.length ? <div className="grid min-h-[420px] gap-3 min-[1150px]:grid-cols-2">{data.groups.map((group) => <MonitorRow key={`${numericStationID}:${range}:${group.external_id}`} group={group} range={range} />)}</div> : <div className="flex min-h-[420px] items-center justify-center border border-border px-6 text-center text-sm text-muted-foreground">当前没有开启监控的分组</div> : <div className="flex min-h-[420px] items-center justify-center border border-border px-6 text-sm text-muted-foreground">暂无监控数据</div>}
       </section>
       <span className="sr-only" aria-live="polite">{refreshing ? "正在刷新监控数据" : error ? "监控数据刷新失败" : "监控数据已更新"}</span>
     </div>

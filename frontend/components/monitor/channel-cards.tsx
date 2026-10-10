@@ -1,11 +1,17 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react"
+import type { CSSProperties } from "react"
 import { toast } from "sonner"
 import {
+  ArrowDown,
+  ArrowUp,
   CircleAlert,
   CheckCircle2,
   ChevronDown,
+  Columns3,
+  LayoutGrid,
+  List,
   Loader2,
   LogIn,
   Pause,
@@ -15,13 +21,29 @@ import {
   RefreshCw,
   RotateCcw,
   Search,
+  SlidersHorizontal,
   Trash2,
   XCircle,
 } from "lucide-react"
-import { Card } from "@/components/ui/card"
+import { Card, CardContent, CardTitle } from "@/components/ui/card"
+import { TableActionButton } from "@/components/ui/table-action-button"
+import { ListPanelHeader } from "@/components/ui/list-panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import {
   Tooltip,
@@ -29,22 +51,146 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useConfirm } from "@/components/ui/confirm-dialog"
-import { useChannels, useChannelLatencyTrends, useChannelMetrics, useChannelRates } from "@/lib/queries"
+import { useChannels, useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelLatencyTrends, useChannelMetrics, useChannelModelCatalog, useChannelRates, useChannelRelayAssociations } from "@/lib/queries"
 import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { channelTypeLabel, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
-import type { Channel, ChannelAccount, RateBoundAccount, RateSnapshot, RelayLatencySample, RelayUsageRange } from "@/lib/api-types"
+import type { Channel, ChannelAccount, ChannelType, ChannelUsageSample, LatencyBucketGranularity, RateBoundAccount, RateSnapshot, RelayUsageRange, SystemSettings } from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
-import { PlatformBadge } from "@/components/relay/platform-badge"
+import { linkedStationsByChannel as buildLinkedStationsByChannel, relayComparisonsByChannel } from "@/lib/channel-relay-association"
 import { RateChangeDot, RateTooltipBody } from "@/components/monitor/rate-change"
-import { RecentUsageCard, RecentUsageTooltip, recentUsageTooltipClassName } from "@/components/monitor/recent-usage-tooltip"
+import { LatencyStabilityLane } from "@/components/monitor/latency-stability-lane"
+import { ChannelConsumptionTrend } from "@/components/monitor/channel-consumption-trend"
+import { latencyHealthScore } from "@/lib/latency"
+import { channelSectionVisible, type ChannelSection } from "@/lib/system-settings"
+import { channelMatchesSearch } from "@/lib/channel-search"
 
 type Status = "healthy" | "low" | "failed" | "idle"
 type MonitorStatusFilter = "enabled" | "disabled" | "all"
 type ManagementModeFilter = "auto" | "manual" | "all"
 type AccountCountFilter = "multi" | "single" | "all"
+type ChannelTypeFilter = "all" | ChannelType
+type AssociationFilter = "all" | "unlinked" | `station:${number}`
+type ChannelSortKey = "score" | "ratio_change" | "recent_call" | "updated" | "balance" | "consumption" | "usage_cost" | "name" | "account_count" | "status"
+type SortDirection = "asc" | "desc"
+type ChannelViewMode = "gallery" | "list"
+type ChannelColumnKey = "score" | "type" | "status" | "management" | "accounts" | "balance" | "consumption" | "usage_cost" | "recent" | "stability" | "consumption_trend" | "updated" | "remark"
+type ChannelColumnDefinition = { key: ChannelColumnKey; label: string; template: string; minWidth: number }
+
+const channelColumnDefinitions: ChannelColumnDefinition[] = [
+  { key: "score", label: "综合评分", template: "104px", minWidth: 104 },
+  { key: "type", label: "站点类型", template: "104px", minWidth: 104 },
+  { key: "status", label: "状态", template: "96px", minWidth: 96 },
+  { key: "management", label: "管理方式", template: "104px", minWidth: 104 },
+  { key: "accounts", label: "账号", template: "minmax(160px, .8fr)", minWidth: 160 },
+  { key: "balance", label: "余额", template: "132px", minWidth: 132 },
+  { key: "consumption", label: "区间消耗", template: "132px", minWidth: 132 },
+  { key: "usage_cost", label: "区间调用消耗", template: "148px", minWidth: 148 },
+  { key: "recent", label: "最近调用", template: "220px", minWidth: 220 },
+  { key: "stability", label: "时间稳定性", template: "260px", minWidth: 260 },
+  { key: "consumption_trend", label: "调用消耗趋势", template: "220px", minWidth: 220 },
+  { key: "updated", label: "上次更新", template: "128px", minWidth: 128 },
+  { key: "remark", label: "渠道备注", template: "minmax(180px, .8fr)", minWidth: 180 },
+]
+
+const columnVisibilitySections: Partial<Record<ChannelColumnKey, ChannelSection>> = {
+  recent: "recent",
+  stability: "stability",
+  consumption_trend: "consumption_trend",
+}
+
+const defaultChannelColumns = channelColumnDefinitions.map((column) => column.key)
+
+function usePersistedChannelViewMode() {
+  const [mode, setMode] = useState<ChannelViewMode>(() => {
+    try {
+      const stored = window.localStorage.getItem("gatewayops_channel_view_mode")
+      return stored === "list" || stored === "gallery" ? stored : "gallery"
+    } catch {
+      return "gallery"
+    }
+  })
+  useEffect(() => {
+    try { window.localStorage.setItem("gatewayops_channel_view_mode", mode) } catch { /* keep current session state */ }
+  }, [mode])
+  return [mode, setMode] as const
+}
+
+function usePersistedChannelColumns() {
+  const [visibleColumns, setVisibleColumns] = useState<Set<ChannelColumnKey>>(() => {
+    try {
+      const raw = window.localStorage.getItem("gatewayops_channel_list_columns")
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown
+        if (Array.isArray(parsed)) {
+          const valid = parsed.filter((value): value is ChannelColumnKey => defaultChannelColumns.includes(value as ChannelColumnKey))
+          if (valid.length) return new Set(valid)
+        }
+      }
+    } catch {
+      // Fall back to the default set.
+    }
+    return new Set(defaultChannelColumns)
+  })
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("gatewayops_channel_list_columns", JSON.stringify(defaultChannelColumns.filter((key) => visibleColumns.has(key))))
+    } catch {
+      // Column visibility still works for the current session.
+    }
+  }, [visibleColumns])
+  return [visibleColumns, setVisibleColumns] as const
+}
+
+function channelListGridStyle(visibleColumns: Set<ChannelColumnKey>): CSSProperties {
+  const visible = channelColumnDefinitions.filter((column) => visibleColumns.has(column.key))
+  const template = ["minmax(220px, 1.15fr)", ...visible.map((column) => column.template), "220px"].join(" ")
+  const minWidth = 220 + 220 + visible.reduce((sum, column) => sum + column.minWidth, 0)
+  return {
+    "--channel-list-grid-template": template,
+    "--channel-list-grid-min-width": `${minWidth}px`,
+  } as CSSProperties
+}
+
+const channelSortOptions: Array<{ value: ChannelSortKey; label: string }> = [
+  { value: "score", label: "综合评分" },
+  { value: "ratio_change", label: "最近倍率变动" },
+  { value: "recent_call", label: "最近调用" },
+  { value: "updated", label: "上次更新" },
+  { value: "balance", label: "余额" },
+  { value: "consumption", label: "区间消耗" },
+  { value: "usage_cost", label: "区间调用消耗" },
+  { value: "name", label: "渠道名称" },
+  { value: "account_count", label: "账号数量" },
+  { value: "status", label: "状态优先级" },
+]
+
+const monitorStatusLabels: Record<MonitorStatusFilter, string> = { enabled: "监控中", disabled: "已暂停", all: "All" }
+const managementModeLabels: Record<ManagementModeFilter, string> = { all: "All", auto: "自动读取", manual: "手动管理" }
+const accountCountLabels: Record<AccountCountFilter, string> = { all: "All", multi: "多账号渠道", single: "单账号渠道" }
+const channelTypeLabels: Record<ChannelTypeFilter, string> = { all: "All", newapi: "New API", sub2api: "Sub2API" }
+
+function ActiveFilterSubTrigger({ label, value }: { label: string; value?: string | null }) {
+  const active = Boolean(value)
+  return (
+    <DropdownMenuSubTrigger className={cn(active && "text-brand")}>
+      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+        <span className="shrink-0">{label}</span>
+        {active ? (
+          <span className="max-w-24 truncate rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand" title={value ?? undefined}>
+            {value}
+          </span>
+        ) : null}
+      </span>
+    </DropdownMenuSubTrigger>
+  )
+}
+
+function defaultSortDirection(key: ChannelSortKey): SortDirection {
+  return key === "name" ? "asc" : "desc"
+}
 
 function statusOf(c: Channel, balance?: number | null): Status {
   if (c.last_error) return "failed"
@@ -55,10 +201,20 @@ function statusOf(c: Channel, balance?: number | null): Status {
 }
 
 const statusMap: Record<Status, { label: string; cls: string }> = {
-  healthy: { label: "健康", cls: "text-success bg-success/10" },
+  healthy: { label: "正常", cls: "text-success bg-success/10" },
   low: { label: "低余额", cls: "text-warning bg-warning/10" },
-  failed: { label: "登录失败", cls: "text-danger bg-danger/10" },
+  failed: { label: "异常", cls: "text-danger bg-danger/10" },
   idle: { label: "尚未采集", cls: "text-muted-foreground bg-muted/40" },
+}
+
+function managementErrorText(message: string) {
+  return message.replace("token 已失效", "渠道管理凭据失效")
+}
+
+function healthScoreClass(score: number) {
+  if (score >= 85) return "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-400"
+  if (score >= 70) return "bg-amber-400/15 text-amber-700 ring-amber-500/30 dark:text-amber-400"
+  return "bg-red-500/10 text-red-700 ring-red-500/20 dark:text-red-400"
 }
 
 function Row({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
@@ -173,7 +329,7 @@ function AccountBalance({ accounts, total }: { accounts: ChannelAccount[]; total
 }
 
 const usageRanges: { value: RelayUsageRange; label: string }[] = [
-  { value: "all", label: "全部" },
+  { value: "all", label: "All" },
   { value: "today", label: "今天" },
   { value: "24h", label: "24 小时" },
   { value: "7d", label: "7 天" },
@@ -185,50 +341,6 @@ function ratioTone(r: number): string {
   if (r < 1) return "bg-brand/10 text-brand ring-brand/20"
   if (r > 1.2) return "bg-warning/10 text-warning ring-warning/20"
   return "bg-muted text-foreground ring-border"
-}
-
-type LatencyTone = "good" | "warn" | "slow" | "critical"
-
-function latencyTone(value: number | null | undefined, metric: "first" | "duration"): LatencyTone {
-  if (value == null || !Number.isFinite(value) || value < 0) return "critical"
-  const thresholds = metric === "first"
-    ? { warn: 10_000, slow: 30_000, critical: 60_000 }
-    : { warn: 60_000, slow: 180_000, critical: 300_000 }
-  if (value >= thresholds.critical) return "critical"
-  if (value >= thresholds.slow) return "slow"
-  if (value >= thresholds.warn) return "warn"
-  return "good"
-}
-
-const latencyColor: Record<LatencyTone, string> = {
-  good: "#10b981",
-  warn: "#f59e0b",
-  slow: "#f97316",
-  critical: "#ef4444",
-}
-
-const latencyTextClass: Record<LatencyTone, string> = {
-  good: "text-emerald-600 dark:text-emerald-400",
-  warn: "text-amber-600 dark:text-amber-400",
-  slow: "text-orange-600 dark:text-orange-400",
-  critical: "text-red-600 dark:text-red-400",
-}
-
-const latencyTooltipTextClass: Record<LatencyTone, string> = {
-  good: "text-emerald-700",
-  warn: "text-amber-700",
-  slow: "text-orange-700",
-  critical: "text-red-700",
-}
-
-function formatLatency(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value) || value < 0) return "-"
-  const milliseconds = Math.round(value)
-  if (milliseconds < 1_000) return `${milliseconds}ms`
-  const seconds = milliseconds / 1_000
-  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}秒`
-  const minutes = Math.floor(seconds / 60)
-  return `${minutes}分 ${String(Math.round(seconds % 60)).padStart(2, "0")}秒`
 }
 
 function formatSampleTime(value: string | undefined) {
@@ -245,126 +357,42 @@ function formatSampleTime(value: string | undefined) {
   })
 }
 
-function formatTokens(value: number | undefined) {
-  if (value == null || !Number.isFinite(value)) return "-"
-  return Math.max(0, Math.round(value)).toLocaleString("zh-CN")
-}
-
-function ChannelLatencyTrend({ samples }: { samples: RelayLatencySample[] }) {
-  const ordered = useMemo(() => [...samples].reverse(), [samples])
-  const latestSample = useMemo(() => samples.reduce<RelayLatencySample | null>((latest, sample) => {
+/** 最近调用区块标题：展示最后一次调用时间，超过 1 小时标红提示数据陈旧。 */
+function RecentLatencyTitle({ samples, compact = false }: { samples: ChannelUsageSample[]; compact?: boolean }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const latestSample = useMemo(() => samples.reduce<ChannelUsageSample | null>((latest, sample) => {
     if (!latest || new Date(sample.created_at).getTime() > new Date(latest.created_at).getTime()) return sample
     return latest
   }, null), [samples])
+  const latestSampleIsStale = latestSample
+    ? now - new Date(latestSample.created_at).getTime() > 60 * 60 * 1000
+    : false
+
+  if (compact) {
+    return latestSample ? <p className={cn("mt-0.5 truncate text-right font-mono text-[9px] tabular-nums", latestSampleIsStale ? "font-semibold text-danger" : "text-muted-foreground")} title={`最后调用 ${formatSampleTime(latestSample.created_at)}`}>最后 {formatSampleTime(latestSample.created_at)}</p> : null
+  }
+
   return (
-    <div className="mt-3 border-t border-border pt-3">
-      <div className="mb-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
-        <span className="text-[11px] font-medium text-muted-foreground">
-          最近调用延时
-          {latestSample ? <span className="ml-1 inline-flex items-center gap-1 font-mono text-[11px] font-medium tabular-nums text-foreground/80"><span aria-hidden="true">·</span><span>最后调用</span><time dateTime={latestSample.created_at} className="text-xs font-semibold text-foreground">{formatSampleTime(latestSample.created_at)}</time></span> : null}
-        </span>
-        <span className="font-mono text-[10px] tabular-nums text-muted-foreground">最近 {samples.length} / 60 条</span>
-      </div>
-      {ordered.length === 0 ? <div className="flex h-9 items-center rounded-md border border-dashed border-border px-2 text-[10px] text-muted-foreground">暂无延时数据</div> : (
-        <Tooltip delayDuration={160}>
-          <TooltipTrigger asChild>
-            <button type="button" className="block h-10 w-full rounded-md px-1 py-1 transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`查看最近 ${samples.length} 次调用延时`}>
-              <span className="flex h-8 w-full items-stretch gap-px overflow-hidden" aria-hidden="true">
-                {ordered.map((sample, index) => {
-                  const first = latencyTone(sample.first_token_ms, "first")
-                  const duration = latencyTone(sample.duration_ms, "duration")
-                  return <span key={`${sample.created_at}-${index}`} className="min-w-0 flex-1 rounded-[2px] opacity-90 transition-opacity hover:opacity-100" style={{ background: `linear-gradient(to top, ${latencyColor[duration]} 0 50%, ${latencyColor[first]} 50% 100%)` }} />
-                })}
-              </span>
-            </button>
-          </TooltipTrigger>
-          <TooltipContent side="top" align="end" className={recentUsageTooltipClassName}>
-            <RecentUsageTooltip count={samples.length}>
-              {[...ordered].reverse().map((sample, index) => {
-                const first = latencyTone(sample.first_token_ms, "first")
-                const duration = latencyTone(sample.duration_ms, "duration")
-                const sub2apiGroup = sample.group_name?.trim() || "未标记分组"
-                const sub2apiMultiplier = sample.group_multiplier == null ? "-" : `${sample.group_multiplier.toFixed(3)}×`
-                const channelMultiplier = sample.channel_group_multiplier == null ? "-" : `${sample.channel_group_multiplier.toFixed(3)}×`
-                const cacheCreationTokens = sample.cache_creation_tokens ?? 0
-                const cacheCreation5mTokens = sample.cache_creation_5m_tokens ?? 0
-                const cacheCreation1hTokens = sample.cache_creation_1h_tokens ?? 0
-                const cacheCreationTotal = cacheCreationTokens || cacheCreation5mTokens + cacheCreation1hTokens
-                const totalTokens = (sample.input_tokens ?? 0) + (sample.output_tokens ?? 0) + (sample.cache_read_tokens ?? 0) + cacheCreationTotal
-                return (
-                  <RecentUsageCard key={`${sample.created_at}-detail-${index}`} className="rounded-lg bg-white p-2.5 shadow-sm ring-1 ring-slate-200/80">
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <time dateTime={sample.created_at} className="whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-slate-700">{formatSampleTime(sample.created_at)}</time>
-                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">#{samples.length - index}</span>
-                    </div>
-                    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_7.5rem]">
-                      <div className="min-w-0 rounded-md bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200/70">
-                        <div className="flex min-w-0 flex-wrap items-center gap-2">
-                          <PlatformBadge platform={sample.platform} />
-                          <span className="min-w-0 flex-1 truncate font-mono text-sm font-semibold leading-5 text-slate-950" title={sample.model || "-"}>{sample.model || "-"}</span>
-                          {sample.request_type ? <span className="shrink-0 text-[11px] font-medium text-slate-600">{sample.request_type}</span> : null}
-                        </div>
-                      </div>
-                      <div className="rounded-md bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200/70">
-                        <p className="text-[9px] font-semibold uppercase text-slate-500">Token</p>
-                        <p className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-slate-950">{formatTokens(totalTokens)}</p>
-                      </div>
-                    </div>
-                    <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                      <div className="min-w-0 rounded-md bg-emerald-50/80 px-2.5 py-2 ring-1 ring-emerald-200/70">
-                        <p className="text-[9px] font-semibold uppercase text-emerald-700">Sub2API 分组</p>
-                        <p className="mt-0.5 flex min-w-0 items-center gap-1.5 whitespace-nowrap text-emerald-950">
-                          <span className="min-w-0 truncate font-semibold" title={sub2apiGroup}>{sub2apiGroup}</span>
-                          <span className="shrink-0 rounded bg-emerald-600 px-1.5 py-0.5 font-mono text-xs font-semibold tabular-nums text-white">{sub2apiMultiplier}</span>
-                        </p>
-                      </div>
-                      <div className="min-w-0 rounded-md bg-sky-50/80 px-2.5 py-2 ring-1 ring-sky-200/70">
-                        <p className="text-[9px] font-semibold uppercase text-sky-700">渠道倍率</p>
-                        <p className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-sky-950">{channelMultiplier}</p>
-                      </div>
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-slate-50 px-2.5 py-2 font-mono text-xs font-semibold tabular-nums ring-1 ring-slate-200/70">
-                      <span className={latencyTooltipTextClass[first]}>首字 {formatLatency(sample.first_token_ms)}</span>
-                      <span className={latencyTooltipTextClass[duration]}>总耗时 {formatLatency(sample.duration_ms)}</span>
-                    </div>
-                  </RecentUsageCard>
-                )
-              })}
-            </RecentUsageTooltip>
-          </TooltipContent>
-        </Tooltip>
-      )}
-    </div>
+    <>
+      最近调用延时
+      {latestSample ? <span className={cn("ml-1 inline-flex items-center gap-1 font-mono text-[11px] font-medium tabular-nums", latestSampleIsStale ? "text-danger" : "text-foreground/80")}><span aria-hidden="true">·</span><span>最后调用</span><time dateTime={latestSample.created_at} className={cn("text-xs font-semibold", latestSampleIsStale ? "text-danger" : "text-foreground")}>{formatSampleTime(latestSample.created_at)}</time></span> : null}
+    </>
   )
 }
 
-/** InlineRates 在渠道卡片内部展示当前所有分组倍率，默认完整展开。 */
-function InlineRates({ channelID }: { channelID: number }) {
+/** InlineRates 在渠道卡片内部展示当前所有分组倍率，默认收起。 */
+function InlineRates({ channelID, showRateChanges, defaultExpanded }: { channelID: number; showRateChanges: boolean; defaultExpanded: boolean }) {
   const { data, loading } = useChannelRates(channelID)
   const rates = [...(data ?? [])].sort((a, b) => a.ratio - b.ratio)
-  const [expanded, setExpanded] = useState(true)
-  const [hasOverflow, setHasOverflow] = useState(false)
-  const chipBoxRef = useRef<HTMLDivElement>(null)
-
-  // 监听 chip 容器尺寸变化，决定是否要显示"展开"按钮。
-  // 收起状态下 scrollHeight > clientHeight 表示有内容被裁剪。
-  useEffect(() => {
-    const el = chipBoxRef.current
-    if (!el) return
-    const check = () => {
-      if (expanded) return
-      setHasOverflow(el.scrollHeight > el.clientHeight + 1)
-    }
-    check()
-    const ro = new ResizeObserver(check)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [rates.length, expanded])
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  useEffect(() => setExpanded(defaultExpanded), [defaultExpanded])
 
   if (loading) return null
   if (rates.length === 0) return null
-
-  const showToggle = hasOverflow || expanded
 
   return (
     <div className="py-3">
@@ -372,32 +400,19 @@ function InlineRates({ channelID }: { channelID: number }) {
         <p className="text-[11px] text-muted-foreground">
           {rates.length} 个分组
         </p>
-        {showToggle ? (
-          <button
-            type="button"
-            onClick={() => setExpanded((v) => !v)}
-            className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground"
-          >
-            {expanded ? "收起" : "展开"}
-            <ChevronDown
-              className={cn(
-                "size-3 transition-transform duration-200",
-                expanded && "rotate-180",
-              )}
-            />
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="inline-flex items-center gap-0.5 text-[11px] text-muted-foreground hover:text-foreground"
+          aria-expanded={expanded}
+        >
+          {expanded ? "收起" : "展开"}
+          <ChevronDown className={cn("size-3 transition-transform duration-200", expanded && "rotate-180")} />
+        </button>
       </div>
 
-      <div className="relative">
-        <div
-          ref={chipBoxRef}
-          className={cn(
-            "flex flex-wrap gap-1.5 overflow-hidden pt-1.5 transition-[max-height] duration-300 ease-out",
-            // 收起：max-h-16 为两行标签及其右上角标留出空间；展开：足够大的上限，留点缓冲让 transition 不立即消失。
-            expanded ? "max-h-150" : "max-h-16",
-          )}
-        >
+      {expanded ? <div className="relative">
+        <div className="flex flex-wrap gap-1.5 pt-1.5">
           {rates.map((r) => {
             return (
               <Tooltip key={r.id} delayDuration={150}>
@@ -408,23 +423,19 @@ function InlineRates({ channelID }: { channelID: number }) {
                       ratioTone(r.ratio),
                     )}
                   >
-                    <RateChangeDot change={r.latest_ratio_change} className="absolute -right-0.5 -top-0.5" />
+                    {showRateChanges ? <RateChangeDot change={r.latest_ratio_change} className="absolute -right-0.5 -top-0.5" /> : null}
                     <span className="font-medium">{r.model_name}</span>
                     <span className="font-semibold tabular-nums">{r.ratio.toFixed(3)}</span>
                   </span>
                 </TooltipTrigger>
                 <TooltipContent side="top" className="max-w-xs text-xs">
-                  <RateTooltipBody rate={r} />
+                  <RateTooltipBody rate={r} showChange={showRateChanges} />
                 </TooltipContent>
               </Tooltip>
             )
           })}
         </div>
-        {/* 折叠时底部淡出，提示还有更多内容 */}
-        {!expanded && hasOverflow ? (
-          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-4 bg-linear-to-t from-background to-transparent" />
-        ) : null}
-      </div>
+      </div> : null}
     </div>
   )
 }
@@ -468,12 +479,14 @@ function BoundAccountsPreview({ accounts }: { accounts?: RateBoundAccount[] }) {
   )
 }
 
-function ManualRatesEditor({ channelID }: { channelID: number }) {
+function ManualRatesEditor({ channelID, showRateChanges, defaultExpanded }: { channelID: number; showRateChanges: boolean; defaultExpanded: boolean }) {
   const { data, loading, refetch } = useChannelRates(channelID)
   const [editingID, setEditingID] = useState<number | null>(null)
   const [name, setName] = useState("")
   const [ratio, setRatio] = useState("1")
   const [saving, setSaving] = useState(false)
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  useEffect(() => setExpanded(defaultExpanded), [defaultExpanded])
 
   function reset() {
     setEditingID(null)
@@ -523,13 +536,14 @@ function ManualRatesEditor({ channelID }: { channelID: number }) {
 
   return (
     <div className="mt-3 flex-1 border-t border-border pt-3">
-      <div className="mb-2.5 flex items-center justify-between gap-2">
+      <button type="button" className="mb-2.5 flex w-full items-center justify-between gap-2 text-left" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
         <div className="flex min-w-0 items-center gap-2">
           <p className="text-xs font-semibold text-foreground">渠道分组</p>
           <span className="rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">成本绑定</span>
         </div>
-        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{(data ?? []).length} 个</span>
-      </div>
+        <span className="inline-flex shrink-0 items-center gap-1 text-[10px] tabular-nums text-muted-foreground">{(data ?? []).length} 个<ChevronDown className={cn("size-3 transition-transform duration-200", expanded && "rotate-180")} /></span>
+      </button>
+      {expanded ? <>
       <div className="rounded-lg border border-border bg-muted/20 p-2">
         <div className="mb-1.5 flex items-center justify-between px-0.5">
           <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{editingID ? "编辑分组" : "新增分组"}</span>
@@ -553,11 +567,11 @@ function ManualRatesEditor({ channelID }: { channelID: number }) {
                   <TooltipTrigger asChild>
                     <span className="inline-flex min-w-0 flex-1 items-center gap-1.5 rounded-sm pt-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" tabIndex={0}>
                       <span className="min-w-0 truncate text-xs font-medium" title={rate.model_name}>{rate.model_name}</span>
-                      <RateChangeDot change={rate.latest_ratio_change} />
+                      {showRateChanges ? <RateChangeDot change={rate.latest_ratio_change} /> : null}
                     </span>
                   </TooltipTrigger>
                   <TooltipContent side="top" className="max-w-xs text-xs">
-                    <RateTooltipBody rate={rate} />
+                    <RateTooltipBody rate={rate} showChange={showRateChanges} />
                   </TooltipContent>
                 </Tooltip>
                 {rate.source === "relay_account" ? null : <div className="-mr-1 -mt-1 flex shrink-0 items-center"><Button type="button" variant="ghost" size="icon" aria-label={`编辑 ${rate.model_name}`} className="size-9 text-muted-foreground opacity-70 transition-opacity hover:text-foreground group-hover:opacity-100" onClick={() => beginEdit(rate)}><Pencil className="size-3.5" /></Button><Button type="button" variant="ghost" size="icon" aria-label={`删除 ${rate.model_name}`} className="size-9 text-muted-foreground opacity-70 transition-opacity hover:text-destructive group-hover:opacity-100" onClick={() => void remove(rate)}><Trash2 className="size-3.5" /></Button></div>}
@@ -571,6 +585,7 @@ function ManualRatesEditor({ channelID }: { channelID: number }) {
           ))}
         </div>
       )}
+      </> : null}
     </div>
   )
 }
@@ -671,32 +686,166 @@ function SyncProgressStrip({ state }: { state: ChannelSyncState }) {
   )
 }
 
-export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsageRange }) {
+const DebouncedChannelSearchInput = memo(function DebouncedChannelSearchInput({ initialValue, resetVersion, onValueChange }: { initialValue: string; resetVersion: number; onValueChange: (value: string) => void }) {
+  const [draft, setDraft] = useState(initialValue)
+  const lastSubmittedValue = useRef(initialValue)
+  const lastResetVersion = useRef(resetVersion)
+
+  useEffect(() => {
+    if (lastResetVersion.current === resetVersion) return
+    lastResetVersion.current = resetVersion
+    lastSubmittedValue.current = ""
+    setDraft("")
+  }, [resetVersion])
+
+  useEffect(() => {
+    if (draft === lastSubmittedValue.current) return
+    const timer = window.setTimeout(() => {
+      lastSubmittedValue.current = draft
+      startTransition(() => onValueChange(draft))
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [draft, onValueChange])
+
+  return <div className="relative min-w-0 flex-1 basis-64"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="搜索渠道 / 模型 / 渠道备注 / 域名" aria-label="按渠道名称、模型、渠道备注或站点地址搜索" className="h-11 w-full pl-8 text-xs sm:h-9" /></div>
+})
+
+export function ChannelCards({ usageRange = "today", latencyGranularity = "auto", uiSettings }: { usageRange?: RelayUsageRange; latencyGranularity?: LatencyBucketGranularity; uiSettings: SystemSettings }) {
   const { data: channels, loading, error, refetch } = useChannels()
+  const associations = useChannelRelayAssociations()
+  const modelCatalog = useChannelModelCatalog()
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatusFilter>("enabled")
   const [managementMode, setManagementMode] = useState<ManagementModeFilter>("all")
   const [accountCount, setAccountCount] = useState<AccountCountFilter>("all")
-  const [channelNameQuery, setChannelNameQuery] = useState("")
-  const [remarkQuery, setRemarkQuery] = useState("")
-  const hasActiveFilters = monitorStatus !== "enabled" || managementMode !== "all" || accountCount !== "all" || channelNameQuery.trim() !== "" || remarkQuery.trim() !== ""
+  const [channelType, setChannelType] = useState<ChannelTypeFilter>("all")
+  const [associationFilter, setAssociationFilter] = useState<AssociationFilter>("all")
+  const [searchQuery, setSearchQuery] = useState("")
+  const [channelSearchResetVersion, setChannelSearchResetVersion] = useState(0)
+  const [viewMode, setViewMode] = usePersistedChannelViewMode()
+  const [preferredColumns, setVisibleColumns] = usePersistedChannelColumns()
+  const visibleColumns = useMemo(() => new Set([...preferredColumns].filter((column) => {
+    const section = columnVisibilitySections[column]
+    return !section || channelSectionVisible(uiSettings, section)
+  })), [preferredColumns, uiSettings])
+  const recentLatencyLimit = 60
+  const listGridStyle = useMemo(() => channelListGridStyle(visibleColumns), [visibleColumns])
+  const [sortKey, setSortKey] = useState<ChannelSortKey>("score")
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
+  const activeFilterCount = Number(monitorStatus !== "all") + Number(managementMode !== "all") + Number(accountCount !== "all") + Number(channelType !== "all") + Number(associationFilter !== "all")
+  const activeAssociationLabel = associationFilter === "unlinked"
+    ? "未关联"
+    : associationFilter.startsWith("station:")
+      ? (associations.data?.stations ?? []).find((station) => station.id === Number(associationFilter.slice("station:".length)))?.name ?? "指定中转站"
+      : null
+  const hasActiveFilters = activeFilterCount > 0 || searchQuery.trim() !== ""
+  const usageRangeLabel = usageRanges.find((item) => item.value === usageRange)?.label ?? usageRange
   const metrics = useChannelMetrics(usageRange)
-  const latencyTrends = useChannelLatencyTrends(60)
-  const metricByChannel = new Map((metrics.data ?? []).map((item) => [item.channel_id, item]))
-  const latencyByChannel = new Map((latencyTrends.data ?? []).map((item) => [item.channel_id, item.samples]))
+  const displayBucketCount = viewMode === "list" ? 30 : 60
+  const stabilityVisible = channelSectionVisible(uiSettings, "stability") && (viewMode === "gallery" || visibleColumns.has("stability"))
+  const consumptionVisible = channelSectionVisible(uiSettings, "consumption_trend") && (viewMode === "gallery" || visibleColumns.has("consumption_trend"))
+  const latencyTrends = useChannelLatencyTrends(60, true)
+  const scoreLatencyBuckets = useChannelLatencyBuckets(usageRange, "auto", 60, true)
+  const listAutoLatencyBuckets = useChannelLatencyBuckets(usageRange, "auto", 30, viewMode === "list" && latencyGranularity === "auto" && stabilityVisible)
+  const fixedLatencyBuckets = useChannelLatencyBuckets(usageRange, latencyGranularity, displayBucketCount, latencyGranularity !== "auto" && stabilityVisible)
+  const latencyBuckets = latencyGranularity === "auto" ? (viewMode === "list" ? listAutoLatencyBuckets : scoreLatencyBuckets) : fixedLatencyBuckets
+  const consumptionBuckets = useChannelConsumptionBuckets(usageRange, latencyGranularity, displayBucketCount, consumptionVisible)
+  const metricByChannel = useMemo(() => new Map((metrics.data ?? []).map((item) => [item.channel_id, item])), [metrics.data])
+  const latencyByChannel = useMemo(() => new Map((latencyTrends.data ?? []).map((item) => [item.channel_id, item.samples])), [latencyTrends.data])
+  const latencyBucketsByChannel = useMemo(() => new Map((latencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [latencyBuckets.data])
+  const scoreLatencyBucketsByChannel = useMemo(() => new Map((scoreLatencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [scoreLatencyBuckets.data])
+  const consumptionBucketsByChannel = useMemo(() => new Map((consumptionBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [consumptionBuckets.data])
+  const relayLinksByChannel = useMemo(() => relayComparisonsByChannel(associations.data), [associations.data])
+  const healthScoreByChannel = useMemo(() => {
+    const scores = new Map<number, ReturnType<typeof latencyHealthScore>>()
+    for (const channel of channels ?? []) {
+      scores.set(channel.id, latencyHealthScore(latencyByChannel.get(channel.id) ?? [], scoreLatencyBucketsByChannel.get(channel.id) ?? []))
+    }
+    return scores
+  }, [channels, latencyByChannel, scoreLatencyBucketsByChannel])
+  const latestCallByChannel = useMemo(() => {
+    const latest = new Map<number, number>()
+    for (const series of latencyTrends.data ?? []) {
+      for (const sample of series.samples) {
+        const at = Date.parse(sample.created_at)
+        if (!Number.isFinite(at)) continue
+        if (at > (latest.get(series.channel_id) ?? 0)) latest.set(series.channel_id, at)
+      }
+    }
+    return latest
+  }, [latencyTrends.data])
+  const linkedStationsByChannel = useMemo(() => buildLinkedStationsByChannel(associations.data), [associations.data])
+  const associatedModelsByChannel = useMemo(() => new Map((modelCatalog.data ?? []).map((item) => [item.channel_id, item.models])), [modelCatalog.data])
   const filteredChannels = useMemo(() => {
     if (!channels) return []
-    const nameQuery = channelNameQuery.trim().toLocaleLowerCase()
-    const normalizedRemarkQuery = remarkQuery.trim().toLocaleLowerCase()
+    const statusPriority: Record<Status, number> = { failed: 4, low: 3, idle: 2, healthy: 1 }
+    const timestamp = (value: string | null | undefined) => {
+      if (!value) return null
+      const parsed = Date.parse(value)
+      return Number.isFinite(parsed) ? parsed : null
+    }
+    const finite = (value: number | null | undefined) => value != null && Number.isFinite(value) ? value : null
+    const currentBalance = (channel: Channel) => {
+      const metric = metricByChannel.get(channel.id)
+      return channel.balance_mode === "manual" ? finite(metric?.current_balance ?? channel.manual_balance) : finite(channel.last_balance)
+    }
+    const compareNumber = (left: number | null, right: number | null) => {
+      if (left == null && right == null) return 0
+      if (left == null) return 1
+      if (right == null) return -1
+      const result = left - right
+      return sortDirection === "asc" ? result : -result
+    }
+
     return channels.filter((channel) => {
       const statusMatches = monitorStatus === "all" || channel.monitor_enabled === (monitorStatus === "enabled")
       const managementMatches = managementMode === "all" || channel.balance_mode === managementMode
       const isMultiAccount = (channel.accounts?.length ?? 0) > 1
       const accountCountMatches = accountCount === "all" || isMultiAccount === (accountCount === "multi")
-      const nameMatches = nameQuery === "" || channel.name.toLocaleLowerCase().includes(nameQuery)
-      const remarkMatches = normalizedRemarkQuery === "" || channel.remark?.toLocaleLowerCase().includes(normalizedRemarkQuery)
-      return statusMatches && managementMatches && accountCountMatches && nameMatches && remarkMatches
+      const typeMatches = channelType === "all" || channel.type === channelType
+      const linkedStations = linkedStationsByChannel.get(channel.id) ?? new Set<number>()
+      const associationMatches = associationFilter === "all"
+        || associationFilter === "unlinked" && linkedStations.size === 0
+        || associationFilter.startsWith("station:") && linkedStations.has(Number(associationFilter.slice("station:".length)))
+      const searchMatches = channelMatchesSearch(channel, searchQuery, associatedModelsByChannel.get(channel.id))
+      return statusMatches && managementMatches && accountCountMatches && typeMatches && associationMatches && searchMatches
+    }).sort((left, right) => {
+      let result = 0
+      switch (sortKey) {
+        case "score":
+          result = compareNumber(healthScoreByChannel.get(left.id)?.score ?? null, healthScoreByChannel.get(right.id)?.score ?? null)
+          break
+        case "recent_call":
+          result = compareNumber(latestCallByChannel.get(left.id) ?? null, latestCallByChannel.get(right.id) ?? null)
+          break
+        case "updated":
+          result = compareNumber(timestamp(left.last_balance_at ?? left.updated_at), timestamp(right.last_balance_at ?? right.updated_at))
+          break
+        case "balance":
+          result = compareNumber(currentBalance(left), currentBalance(right))
+          break
+        case "consumption":
+          result = compareNumber(finite(metricByChannel.get(left.id)?.consumption_amount), finite(metricByChannel.get(right.id)?.consumption_amount))
+          break
+        case "usage_cost":
+          result = compareNumber(finite(metricByChannel.get(left.id)?.usage_cost_amount), finite(metricByChannel.get(right.id)?.usage_cost_amount))
+          break
+        case "name":
+          result = left.name.localeCompare(right.name, "zh-CN", { numeric: true, sensitivity: "base" }) * (sortDirection === "asc" ? 1 : -1)
+          break
+        case "account_count":
+          result = compareNumber(Math.max(1, left.accounts?.length ?? 0), Math.max(1, right.accounts?.length ?? 0))
+          break
+        case "status":
+          result = compareNumber(statusPriority[statusOf(left, currentBalance(left))], statusPriority[statusOf(right, currentBalance(right))])
+          break
+        case "ratio_change":
+        default:
+          result = compareNumber(timestamp(left.latest_ratio_changed_at), timestamp(right.latest_ratio_changed_at))
+          break
+      }
+      return result || left.id - right.id
     })
-  }, [accountCount, channelNameQuery, channels, managementMode, monitorStatus, remarkQuery])
+  }, [accountCount, associatedModelsByChannel, associationFilter, channelType, channels, healthScoreByChannel, latestCallByChannel, linkedStationsByChannel, managementMode, metricByChannel, monitorStatus, searchQuery, sortDirection, sortKey])
   const refresh = useTriggerRefresh()
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [editing, setEditing] = useState<Channel | null>(null)
@@ -821,61 +970,25 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
   }
 
   function resetFilters() {
-    setMonitorStatus("enabled")
+    setMonitorStatus("all")
     setManagementMode("all")
     setAccountCount("all")
-    setChannelNameQuery("")
-    setRemarkQuery("")
+    setChannelType("all")
+    setAssociationFilter("all")
+    setSearchQuery("")
+    setChannelSearchResetVersion((value) => value + 1)
   }
 
   return (
     <section>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-baseline gap-3">
-          <h2 className="text-base font-semibold text-foreground">{"渠道列表"}</h2>
-          <p className="text-xs text-muted-foreground">{"监控状态、当前余额与最近同步结果"}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <Input value={channelNameQuery} onChange={(event) => setChannelNameQuery(event.target.value)} placeholder="筛选渠道名称" aria-label="按渠道名称筛选" className="h-11 w-40 pl-8 text-xs sm:h-9" />
-          </div>
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-            <Input value={remarkQuery} onChange={(event) => setRemarkQuery(event.target.value)} placeholder="筛选备注" aria-label="按渠道备注筛选" className="h-11 w-40 pl-8 text-xs sm:h-9" />
-          </div>
-          <Select value={monitorStatus} onValueChange={(value) => setMonitorStatus(value as MonitorStatusFilter)}>
-            <SelectTrigger className="h-11 w-28 text-xs sm:h-9" aria-label="渠道监控状态筛选"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="enabled">监控中</SelectItem>
-              <SelectItem value="disabled">已暂停</SelectItem>
-              <SelectItem value="all">全部状态</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={managementMode} onValueChange={(value) => setManagementMode(value as ManagementModeFilter)}>
-            <SelectTrigger className="h-11 w-28 text-xs sm:h-9" aria-label="渠道管理类型筛选"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部管理</SelectItem>
-              <SelectItem value="auto">自动读取</SelectItem>
-              <SelectItem value="manual">手动管理</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select value={accountCount} onValueChange={(value) => setAccountCount(value as AccountCountFilter)}>
-            <SelectTrigger className="h-11 w-32 text-xs sm:h-9" aria-label="渠道账号数量筛选"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">全部账号</SelectItem>
-              <SelectItem value="multi">多账号渠道</SelectItem>
-              <SelectItem value="single">单账号渠道</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button type="button" size="sm" variant="outline" className="h-11 gap-1.5 text-xs sm:h-9" disabled={!hasActiveFilters} onClick={resetFilters}>
-            <RotateCcw className="size-3.5" />
-            重置
-          </Button>
-          <span className="text-xs text-muted-foreground">
-            {filteredChannels.length}{filteredChannels.length === channels?.length ? " 个渠道" : ` / ${channels?.length ?? 0} 个渠道`}
-          </span>
-          <Button
+      <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
+      <ListPanelHeader
+          secondaryPlacement="inline"
+          actionsPlacement="secondary"
+          title={<CardTitle role="heading" aria-level={2} className="flex items-center gap-2 text-sm font-semibold"><LayoutGrid className="size-4 text-brand" />{"渠道列表"}</CardTitle>}
+          description={<p className="mt-1 truncate text-xs text-muted-foreground">{"监控状态、当前余额与最近同步结果"}</p>}
+actions={<>
+<Button
             size="sm"
             variant="outline"
             className="h-11 gap-1.5 text-xs sm:h-9"
@@ -885,7 +998,7 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
             <RefreshCw className={cn("size-3.5", busyAction === "sync-all" && "animate-spin")} />
             {"同步全部"}
           </Button>
-          <Button
+<Button
             size="sm"
             className="h-11 gap-1.5 text-xs sm:h-9"
             onClick={() => {
@@ -896,11 +1009,127 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
             <Plus className="size-3.5" />
             {"新增"}
           </Button>
-        </div>
-      </div>
+</>}
+          secondary={<>
+<DebouncedChannelSearchInput initialValue={searchQuery} resetVersion={channelSearchResetVersion} onValueChange={setSearchQuery} />
+<DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant="outline" className="h-11 gap-1.5 text-xs sm:h-9">
+                <SlidersHorizontal className="size-3.5" />
+                筛选
+                {activeFilterCount > 0 ? <span className="rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand">{activeFilterCount}</span> : null}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">渠道筛选</DropdownMenuLabel>
+              <DropdownMenuSeparator />
 
+              <DropdownMenuSub>
+                <ActiveFilterSubTrigger label="监控状态" value={monitorStatus !== "all" ? monitorStatusLabels[monitorStatus] : null} />
+                <DropdownMenuSubContent className="w-44">
+                  <DropdownMenuRadioGroup value={monitorStatus} onValueChange={(value) => setMonitorStatus(value as MonitorStatusFilter)}>
+                    {(["enabled", "disabled", "all"] as MonitorStatusFilter[]).map((value) => <DropdownMenuRadioItem key={value} value={value}>{monitorStatusLabels[value]}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              <DropdownMenuSub>
+                <ActiveFilterSubTrigger label="管理方式" value={managementMode !== "all" ? managementModeLabels[managementMode] : null} />
+                <DropdownMenuSubContent className="w-44">
+                  <DropdownMenuRadioGroup value={managementMode} onValueChange={(value) => setManagementMode(value as ManagementModeFilter)}>
+                    {(["all", "auto", "manual"] as ManagementModeFilter[]).map((value) => <DropdownMenuRadioItem key={value} value={value}>{managementModeLabels[value]}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              <DropdownMenuSub>
+                <ActiveFilterSubTrigger label="账号数量" value={accountCount !== "all" ? accountCountLabels[accountCount] : null} />
+                <DropdownMenuSubContent className="w-44">
+                  <DropdownMenuRadioGroup value={accountCount} onValueChange={(value) => setAccountCount(value as AccountCountFilter)}>
+                    {(["all", "multi", "single"] as AccountCountFilter[]).map((value) => <DropdownMenuRadioItem key={value} value={value}>{accountCountLabels[value]}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              <DropdownMenuSub>
+                <ActiveFilterSubTrigger label="站点类型" value={channelType !== "all" ? channelTypeLabels[channelType] : null} />
+                <DropdownMenuSubContent className="w-44">
+                  <DropdownMenuRadioGroup value={channelType} onValueChange={(value) => setChannelType(value as ChannelTypeFilter)}>
+                    {(["all", "newapi", "sub2api"] as ChannelTypeFilter[]).map((value) => <DropdownMenuRadioItem key={value} value={value}>{channelTypeLabels[value]}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              <DropdownMenuSub>
+                <ActiveFilterSubTrigger label="关联" value={activeAssociationLabel} />
+                <DropdownMenuSubContent className="w-48">
+                  <DropdownMenuRadioGroup value={associationFilter} onValueChange={(value) => setAssociationFilter(value as AssociationFilter)}>
+                    <DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="unlinked">未关联</DropdownMenuRadioItem>
+                    {(associations.data?.stations ?? []).map((station) => (
+                      <DropdownMenuRadioItem key={station.id} value={`station:${station.id}`}>{station.name}</DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={!hasActiveFilters} onSelect={resetFilters}>
+                <RotateCcw className="size-3.5" />
+                清除筛选与搜索
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+<DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant="outline" className="h-11 gap-1.5 text-xs sm:h-9">
+                排序：{channelSortOptions.find((item) => item.value === sortKey)?.label}
+                {sortDirection === "desc" ? <ArrowDown className="size-3.5" /> : <ArrowUp className="size-3.5" />}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">排序维度</DropdownMenuLabel>
+              <DropdownMenuRadioGroup
+                value={sortKey}
+                onValueChange={(value) => {
+                  const next = value as ChannelSortKey
+                  setSortKey(next)
+                  setSortDirection(defaultSortDirection(next))
+                }}
+              >
+                {channelSortOptions.map((item) => <DropdownMenuRadioItem key={item.value} value={item.value}>{item.label}</DropdownMenuRadioItem>)}
+              </DropdownMenuRadioGroup>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs text-muted-foreground">排序方向</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={sortDirection} onValueChange={(value) => setSortDirection(value as SortDirection)}>
+                <DropdownMenuRadioItem value="desc"><ArrowDown className="size-3.5" />降序（高 → 低 / 新 → 旧）</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="asc"><ArrowUp className="size-3.5" />升序（低 → 高 / 旧 → 新）</DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+<div className="inline-flex items-center rounded-md border border-border bg-muted/20 p-0.5" aria-label="渠道列表展示模式">
+            <Button type="button" size="sm" variant={viewMode === "gallery" ? "secondary" : "ghost"} className="h-8 gap-1.5 px-2.5 text-xs shadow-none" aria-pressed={viewMode === "gallery"} onClick={() => setViewMode("gallery")}><LayoutGrid className="size-3.5" />画册</Button>
+            <Button type="button" size="sm" variant={viewMode === "list" ? "secondary" : "ghost"} className="h-8 gap-1.5 px-2.5 text-xs shadow-none" aria-pressed={viewMode === "list"} onClick={() => setViewMode("list")}><List className="size-3.5" />列表</Button>
+          </div>
+{viewMode === "list" ? <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button type="button" size="sm" variant="outline" className="h-11 gap-1.5 text-xs sm:h-9"><Columns3 className="size-3.5" />列设置</Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuLabel>渠道列表列</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {channelColumnDefinitions.map((column) => <DropdownMenuCheckboxItem key={column.key} checked={preferredColumns.has(column.key)} disabled={Boolean(columnVisibilitySections[column.key] && !channelSectionVisible(uiSettings, columnVisibilitySections[column.key]!))} onSelect={(event) => event.preventDefault()} onCheckedChange={(checked) => setVisibleColumns((current) => { const next = new Set(current); if (checked === true) next.add(column.key); else if (next.size > 1) next.delete(column.key); return next })}>{column.label}</DropdownMenuCheckboxItem>)}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setVisibleColumns(new Set(defaultChannelColumns))}>恢复默认列</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu> : null}
+</>}
+          meta={<><span className="whitespace-nowrap text-xs text-muted-foreground">
+            {filteredChannels.length}{filteredChannels.length === channels?.length ? " 个渠道" : ` / ${channels?.length ?? 0} 个渠道`}
+          </span></>}
+        ></ListPanelHeader>
+
+      <CardContent className="border-t border-border p-0">
       {error ? (
-        <Alert variant="destructive">
+        <Alert variant="destructive" className="rounded-none border-0">
           <CircleAlert />
           <AlertTitle>{"渠道信息读取失败"}</AlertTitle>
           <AlertDescription>
@@ -912,11 +1141,11 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
           </AlertDescription>
         </Alert>
       ) : loading ? (
-        <p className="rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+        <p className="px-4 py-8 text-center text-sm text-muted-foreground">
           {"加载中…"}
         </p>
       ) : !channels || channels.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
+        <div className="px-4 py-10 text-center">
           <p className="text-sm text-muted-foreground">{"还没有任何渠道。"}</p>
           <Button
             size="sm"
@@ -931,20 +1160,24 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
           </Button>
         </div>
       ) : filteredChannels.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
+        <div className="px-4 py-10 text-center">
           <p className="text-sm text-muted-foreground">当前筛选没有渠道。</p>
           <Button type="button" size="sm" variant="outline" className="mt-3 h-11 sm:h-9" onClick={resetFilters}>
             清除筛选
           </Button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+      ) : viewMode === "gallery" ? (
+        <div className="grid grid-cols-1 items-stretch gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
           {filteredChannels.map((c) => {
             const metric = metricByChannel.get(c.id)
             const currentBalance = c.balance_mode === "manual" ? (metric?.current_balance ?? c.manual_balance) : c.last_balance
 			const accounts = channelAccounts(c)
             const status = statusOf(c, currentBalance)
             const meta = statusMap[status]
+            const healthScore = healthScoreByChannel.get(c.id)
+            const scoreTitle = healthScore
+              ? `综合评分 ${healthScore.score} · 最近成功率 ${healthScore.recentSuccess ?? "-"}% · 最近延迟分 ${healthScore.recentLatency ?? "-"} · 时间稳定性分 ${healthScore.stability ?? "-"}`
+              : "暂无足够调用数据计算综合评分"
             return (
               <Card key={c.id} className="@container flex h-full flex-col gap-0 border border-border p-4 shadow-none">
                 <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
@@ -956,12 +1189,21 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
                   >
                     {c.name}
                   </a>
-                  {c.latest_ratio_changed_at ? (
+                  {channelSectionVisible(uiSettings, "rate_changes") && c.latest_ratio_changed_at ? (
                     <span className="text-[10px] text-muted-foreground" title="最近一次分组倍率变动">
                       {relativeTime(c.latest_ratio_changed_at)}
                     </span>
                   ) : null}
                   <div className="ml-auto flex shrink-0 items-center gap-2">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset",
+                        healthScore ? healthScoreClass(healthScore.score) : "bg-muted/50 text-muted-foreground ring-border",
+                      )}
+                      title={scoreTitle}
+                    >
+                      评分 {healthScore?.score ?? "--"}
+                    </span>
                     {accounts.length > 1 ? (
                       <span className="inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium ring-1 ring-inset bg-cyan-500/10 text-cyan-700 ring-cyan-500/20 dark:text-cyan-400">
                         多账号渠道
@@ -990,7 +1232,7 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
                   </div>
                 </div>
 
-                <div className="mt-3 grid grid-cols-1 gap-px overflow-hidden rounded-md border border-border bg-border @sm:grid-cols-2">
+                <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border">
                   <Row label="站点">
                     <a href={c.site_url} target="_blank" rel="noreferrer" title={c.site_url} className="hover:text-brand hover:underline">
                       {siteHost(c.site_url)}
@@ -1000,28 +1242,53 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
                   <Row label="管理">{c.balance_mode === "manual" ? "手动余额" : "自动读取"}</Row>
                   {c.balance_mode !== "manual" ? <Row label="凭据">{c.credential_mode === "token" ? "Token" : "账号密码"}</Row> : null}
 				  <Row label="余额"><span className={cn("font-mono text-base font-bold tabular-nums", balanceTone({ ...c, last_balance: currentBalance }))}>{metrics.loading && c.balance_mode === "manual" ? "读取中…" : c.balance_mode === "auto" ? <AccountBalance accounts={accounts} total={currentBalance} /> : money(currentBalance)}</span></Row>
-                  <Row label="区间消耗"><span className="font-mono font-bold tabular-nums text-warning" title={c.balance_mode === "manual" ? `${usageRanges.find((item) => item.value === usageRange)?.label ?? usageRange}归属账号的上游成本消耗` : `${usageRanges.find((item) => item.value === usageRange)?.label ?? usageRange}余额下降累计，充值不计入`}>{metrics.loading && !metric ? "读取中…" : money(metric?.consumption_amount)}</span></Row>
+                  <Row label="区间消耗"><span className="font-mono font-bold tabular-nums text-warning" title={`${usageRangeLabel}余额下降累计，充值不计入`}>{metrics.loading && !metric ? "读取中…" : money(metric?.consumption_amount)}</span></Row>
                   <Row label="累计充值"><span className="font-mono tabular-nums">{metrics.loading && !metric ? "读取中…" : cny(metric?.cumulative_recharge_amount)}</span></Row>
-                  <Row label="区间调用消耗"><span className="font-mono tabular-nums" title={metric ? `${usageRange} · 渠道自身 usage/log · ${metric.usage_request_count} 次请求` : metrics.error ?? ""}>{metrics.loading && !metric ? "读取中…" : charge(metric?.usage_cost_amount)}</span></Row>
+                  <Row label="区间调用消耗"><span className="font-mono tabular-nums" title={metric ? `${usageRangeLabel} · 渠道自身 usage/log · ${metric.usage_request_count} 次请求` : metrics.error ?? ""}>{metrics.loading && !metric ? "读取中…" : charge(metric?.usage_cost_amount)}</span></Row>
                   <Row label="阈值">{c.balance_threshold > 0 ? money(c.balance_threshold) : "未设置"}</Row>
                   <Row label="状态">
                     <span className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium", meta.cls)}>
                       {meta.label}
                     </span>
                   </Row>
-                  <Row label="备注"><span title={c.remark || "未填写备注"}>{c.remark || "未填写"}</span></Row>
+                  <Row label="渠道备注"><span title={c.remark || "未填写渠道备注"}>{c.remark || "未填写"}</span></Row>
                   <Row label="上次更新">{relativeTime(c.last_balance_at ?? c.updated_at)}</Row>
                   {c.last_error ? (
-                    <Row label="错误信息" className="col-span-full">
-                      <p className="truncate text-[11px] font-medium text-danger" title={c.last_error}>
-                        {c.last_error.length > 80 ? c.last_error.slice(0, 80) + "…" : c.last_error}
+                    <Row label="管理采集异常" className="col-span-full">
+                      <p className="truncate text-[11px] font-medium text-danger" title={managementErrorText(c.last_error)}>
+                        {managementErrorText(c.last_error).length > 80 ? managementErrorText(c.last_error).slice(0, 80) + "…" : managementErrorText(c.last_error)}
                       </p>
                     </Row>
                   ) : null}
                 </div>
 
-                <ChannelLatencyTrend samples={latencyByChannel.get(c.id) ?? []} />
-                {c.balance_mode !== "manual" ? <div className="mt-3 flex-1 border-t border-border"><InlineRates channelID={c.id} /></div> : <ManualRatesEditor channelID={c.id} />}
+                {channelSectionVisible(uiSettings, "recent") ? <LatencyStabilityLane
+                  buckets={latencyBucketsByChannel.get(c.id) ?? []}
+                  recentSamples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)}
+                  loading={latencyBuckets.loading}
+                  title={<RecentLatencyTitle samples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} />}
+                  headerRight={<span className="font-mono text-[10px] tabular-nums text-muted-foreground">最近 {Math.min(latencyByChannel.get(c.id)?.length ?? 0, recentLatencyLimit)} / {recentLatencyLimit} 条</span>}
+                  layout="fill"
+                  granularity={latencyGranularity}
+                  relayLinks={relayLinksByChannel.get(c.id) ?? []}
+                  range={usageRange}
+                  bucketCount={displayBucketCount}
+                  emptyLabel={`${usageRangeLabel}暂无调用数据`}
+                  loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")}
+                /> : null}
+                {channelSectionVisible(uiSettings, "stability") ? <LatencyStabilityLane
+                  buckets={latencyBucketsByChannel.get(c.id) ?? []}
+                  loading={latencyBuckets.loading}
+                  layout={latencyGranularity === "auto" ? "fill" : "fixed"}
+                  granularity={latencyGranularity}
+                  relayLinks={relayLinksByChannel.get(c.id) ?? []}
+                  range={usageRange}
+                  bucketCount={displayBucketCount}
+                  emptyLabel={`${usageRangeLabel}暂无调用数据`}
+                  loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")}
+                /> : null}
+                {channelSectionVisible(uiSettings, "consumption_trend") ? <ChannelConsumptionTrend buckets={consumptionBucketsByChannel.get(c.id) ?? []} loading={consumptionBuckets.loading} granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无消费数据`} /> : null}
+                {channelSectionVisible(uiSettings, "groups") ? (c.balance_mode !== "manual" ? <div className="mt-3 flex-1 border-t border-border"><InlineRates channelID={c.id} showRateChanges={channelSectionVisible(uiSettings, "rate_changes")} defaultExpanded={uiSettings.channels_groups_expanded} /></div> : <ManualRatesEditor channelID={c.id} showRateChanges={channelSectionVisible(uiSettings, "rate_changes")} defaultExpanded={uiSettings.channels_groups_expanded} />) : null}
 
 				<div className="mt-3 grid grid-cols-3 gap-2">
 				  <Button
@@ -1109,7 +1376,73 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
             )
           })}
         </div>
+      ) : (
+        <div className="relative isolate max-h-[min(72vh,760px)] overflow-auto bg-card">
+          <div style={listGridStyle} className="sticky top-0 z-40 hidden border-b border-border bg-muted text-[11px] font-medium text-foreground/90 lg:grid lg:grid-cols-[var(--channel-list-grid-template)] lg:min-w-[var(--channel-list-grid-min-width)] lg:[&>*]:px-4 lg:[&>*]:py-2">
+            <span className="sticky left-0 z-50 flex items-center bg-muted">渠道</span>
+            {visibleColumns.has("score") ? <span>综合评分</span> : null}
+            {visibleColumns.has("type") ? <span>站点类型</span> : null}
+            {visibleColumns.has("status") ? <span>状态</span> : null}
+            {visibleColumns.has("management") ? <span>管理方式</span> : null}
+            {visibleColumns.has("accounts") ? <span>账号</span> : null}
+            {visibleColumns.has("balance") ? <span>余额</span> : null}
+            {visibleColumns.has("consumption") ? <span>区间消耗</span> : null}
+            {visibleColumns.has("usage_cost") ? <span>区间调用消耗</span> : null}
+            {visibleColumns.has("recent") ? <span>最近调用</span> : null}
+            {visibleColumns.has("stability") ? <span>时间稳定性</span> : null}
+            {visibleColumns.has("consumption_trend") ? <span>调用消耗趋势</span> : null}
+            {visibleColumns.has("updated") ? <span>上次更新</span> : null}
+            {visibleColumns.has("remark") ? <span>渠道备注</span> : null}
+            <span className="sticky right-0 z-50 flex items-center justify-end bg-muted">操作</span>
+          </div>
+          {filteredChannels.map((c) => {
+            const metric = metricByChannel.get(c.id)
+            const currentBalance = c.balance_mode === "manual" ? (metric?.current_balance ?? c.manual_balance) : c.last_balance
+            const accounts = channelAccounts(c)
+            const status = statusOf(c, currentBalance)
+            const meta = statusMap[status]
+            const displayStatus = c.monitor_enabled ? meta : { label: "已暂停", cls: "text-muted-foreground bg-muted/60" }
+            const healthScore = healthScoreByChannel.get(c.id)
+            const scoreTitle = healthScore
+              ? `综合评分 ${healthScore.score} · 最近成功率 ${healthScore.recentSuccess ?? "-"}% · 最近延迟分 ${healthScore.recentLatency ?? "-"} · 时间稳定性分 ${healthScore.stability ?? "-"}`
+              : "暂无足够调用数据计算综合评分"
+            return <div key={c.id} style={listGridStyle} className="grid gap-3 border-b border-border px-4 py-3 last:border-b-0 lg:grid-cols-[var(--channel-list-grid-template)] lg:min-w-[var(--channel-list-grid-min-width)] lg:items-center lg:gap-0 lg:p-0 lg:[&>*]:px-4 lg:[&>*]:py-2.5">
+              <div className="min-w-0 lg:sticky lg:left-0 lg:z-20 lg:flex lg:self-stretch lg:flex-col lg:justify-center lg:bg-card">
+                <div className="flex min-w-0 items-center gap-2">
+                  <a href={c.site_url} target="_blank" rel="noreferrer" className="min-w-0 truncate text-sm font-semibold text-foreground hover:text-brand hover:underline" title={c.name}>{c.name}</a>
+                  {accounts.length > 1 ? <span className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:text-cyan-400">多账号</span> : null}
+                </div>
+                <a href={c.site_url} target="_blank" rel="noreferrer" className="mt-1 truncate text-[11px] text-muted-foreground hover:text-brand" title={c.site_url}>{siteHost(c.site_url)}</a>
+                {c.last_error ? <p className="mt-1 truncate text-[10px] font-medium text-danger" title={managementErrorText(c.last_error)}>{managementErrorText(c.last_error)}</p> : null}
+              </div>
+
+              {visibleColumns.has("score") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">综合评分</span><span className={cn("inline-flex items-center rounded px-2 py-1 font-mono text-xs font-semibold tabular-nums ring-1 ring-inset", healthScore ? healthScoreClass(healthScore.score) : "bg-muted/50 text-muted-foreground ring-border")} title={scoreTitle}>{healthScore?.score ?? "--"}</span></div> : null}
+              {visibleColumns.has("type") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">站点类型</span><span className={cn("inline-flex rounded px-2 py-1 text-[11px] font-medium ring-1 ring-inset", c.type === "sub2api" ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-400" : "bg-brand/10 text-brand ring-brand/20")}>{channelTypeLabel(c.type)}</span></div> : null}
+              {visibleColumns.has("status") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">状态</span><span className={cn("inline-flex rounded px-2 py-1 text-[11px] font-medium", displayStatus.cls)}>{displayStatus.label}</span></div> : null}
+              {visibleColumns.has("management") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">管理方式</span><span className={cn("inline-flex rounded px-2 py-1 text-[11px] font-medium ring-1 ring-inset", c.balance_mode === "manual" ? "bg-amber-400/15 text-amber-700 ring-amber-500/30 dark:text-amber-400" : "bg-sky-500/10 text-sky-700 ring-sky-500/20 dark:text-sky-400")}>{c.balance_mode === "manual" ? "手动管理" : "自动读取"}</span></div> : null}
+              {visibleColumns.has("accounts") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">账号</p>{c.balance_mode === "manual" ? <span className="text-xs text-muted-foreground">手动渠道</span> : <div className="min-w-0 text-xs"><AccountPreview accounts={accounts} /><p className="mt-1 text-[10px] text-muted-foreground">{accounts.length} 个账号</p></div>}</div> : null}
+              {visibleColumns.has("balance") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">余额</span><span className={cn("font-mono text-sm font-semibold tabular-nums", balanceTone({ ...c, last_balance: currentBalance }))}>{metrics.loading && c.balance_mode === "manual" ? "读取中…" : c.balance_mode === "auto" ? <AccountBalance accounts={accounts} total={currentBalance} /> : money(currentBalance)}</span></div> : null}
+              {visibleColumns.has("consumption") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">区间消耗</span><span className="font-mono text-sm font-semibold tabular-nums text-warning">{metrics.loading && !metric ? "读取中…" : money(metric?.consumption_amount)}</span></div> : null}
+              {visibleColumns.has("usage_cost") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">区间调用消耗</span><span className="font-mono text-xs font-semibold tabular-nums" title={metric ? `渠道自身 usage/log · ${metric.usage_request_count} 次请求` : metrics.error ?? ""}>{metrics.loading && !metric ? "读取中…" : charge(metric?.usage_cost_amount)}</span></div> : null}
+              {channelSectionVisible(uiSettings, "recent") && visibleColumns.has("recent") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">最近调用</p><LatencyStabilityLane buckets={latencyBucketsByChannel.get(c.id) ?? []} recentSamples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} loading={latencyBuckets.loading} layout="fill" compact granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无调用数据`} loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /><RecentLatencyTitle samples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} compact /></div> : null}
+              {channelSectionVisible(uiSettings, "stability") && visibleColumns.has("stability") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">时间稳定性</p><LatencyStabilityLane buckets={latencyBucketsByChannel.get(c.id) ?? []} loading={latencyBuckets.loading} layout="fill" compact granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无调用数据`} loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /></div> : null}
+              {channelSectionVisible(uiSettings, "consumption_trend") && visibleColumns.has("consumption_trend") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">调用消耗趋势</p><ChannelConsumptionTrend buckets={consumptionBucketsByChannel.get(c.id) ?? []} loading={consumptionBuckets.loading} granularity={latencyGranularity} compact relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无消费数据`} /></div> : null}
+              {visibleColumns.has("updated") ? <div className="flex items-center justify-between gap-2 text-xs lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">上次更新</span><span className="text-muted-foreground" title={c.last_balance_at ?? c.updated_at}>{relativeTime(c.last_balance_at ?? c.updated_at)}</span></div> : null}
+              {visibleColumns.has("remark") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">渠道备注</p><p className="line-clamp-2 text-xs text-muted-foreground" title={c.remark || "未填写渠道备注"}>{c.remark || "未填写"}</p></div> : null}
+
+              <div className="flex min-w-0 flex-nowrap justify-start gap-1.5 lg:sticky lg:right-0 lg:z-30 lg:self-stretch lg:items-center lg:justify-end lg:bg-card">
+                <Tooltip delayDuration={200}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0" aria-label={c.balance_mode === "manual" ? "计算余额" : "同步渠道"} disabled={!!syncState[c.id]?.running} onClick={() => startStream(c, "sync")}><RefreshCw className={cn("size-3.5", syncState[c.id]?.running && "animate-spin")} /></TableActionButton></TooltipTrigger><TooltipContent side="top">{c.balance_mode === "manual" ? "计算余额" : "同步"}</TooltipContent></Tooltip>
+                <Tooltip delayDuration={200}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0" aria-label="测试登录" disabled={c.balance_mode === "manual" || !!syncState[c.id]?.running} onClick={() => startStream(c, "test-login")}><LogIn className="size-3.5" /></TableActionButton></TooltipTrigger><TooltipContent side="top">{c.balance_mode === "manual" ? "手动渠道无需登录" : "测试登录"}</TooltipContent></Tooltip>
+                <Tooltip delayDuration={200}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0" aria-label="编辑渠道" onClick={() => { setEditing(c); setCreating(true) }}><Pencil className="size-3.5" /></TableActionButton></TooltipTrigger><TooltipContent side="top">{c.balance_mode === "auto" ? "渠道 / 账号" : "编辑"}</TooltipContent></Tooltip>
+                <Tooltip delayDuration={200}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0" aria-label={c.monitor_enabled ? "暂停监控" : "恢复监控"} disabled={busyAction === `toggle-${c.id}`} onClick={() => withBusy(`toggle-${c.id}`, () => apiFetch(`/channels/${c.id}/${c.monitor_enabled ? "disable" : "enable"}`, { method: "POST" }))}>{c.monitor_enabled ? <Pause className="size-3.5" /> : <Play className="size-3.5" />}</TableActionButton></TooltipTrigger><TooltipContent side="top">{c.monitor_enabled ? "暂停监控" : "恢复监控"}</TooltipContent></Tooltip>
+                <Tooltip delayDuration={200}><TooltipTrigger asChild><TableActionButton destructive type="button" className="shrink-0" aria-label="删除渠道" disabled={busyAction === `delete-${c.id}`} onClick={async () => { const ok = await confirm({ title: `删除渠道 ${c.name}？`, description: "删除后该渠道的余额历史、倍率快照与登录凭据都将一并清除，且无法恢复。", confirmLabel: "删除", destructive: true }); if (!ok) return; void withBusy(`delete-${c.id}`, () => apiFetch(`/channels/${c.id}`, { method: "DELETE" })) }}><Trash2 className="size-3.5" /></TableActionButton></TooltipTrigger><TooltipContent side="top">删除</TooltipContent></Tooltip>
+              </div>
+            </div>
+          })}
+        </div>
       )}
+      </CardContent>
+      </Card>
 
       <ChannelFormDialog
         open={creating}
@@ -1118,6 +1451,8 @@ export function ChannelCards({ usageRange = "today" }: { usageRange?: RelayUsage
           if (!v) setEditing(null)
         }}
         channel={editing}
+        associationSnapshot={associations.data ?? null}
+        onAssociationChanged={associations.refetch}
       />
 
       {confirmDialog}

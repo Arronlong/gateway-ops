@@ -3,6 +3,9 @@
 import { useCallback, useContext, useEffect, useRef, useState } from "react"
 import { SyncSettingsContext, SystemSettingsContext } from "@/lib/settings-context"
 import { apiFetch } from "@/lib/api"
+import { createSharedRequestRegistry } from "@/lib/shared-request"
+import { scheduleQueryUpdate } from "@/lib/query-transition"
+import { latencyBucketQuery } from "@/lib/latency"
 import { useRefreshTick } from "@/lib/refresh-context"
 import type {
   BalanceTrendPoint,
@@ -13,6 +16,10 @@ import type {
   ChannelMetric,
   ChannelSummary,
   ChannelLatencyTrend,
+  ChannelLatencyBucketSeries,
+  ChannelConsumptionBucketSeries,
+  RelayAccountLatencyBucketSeries,
+  RelayAccountConsumptionBucketSeries,
   RelayAccountModelCatalogItem,
   DashboardSummary,
   NotificationChannel,
@@ -30,6 +37,7 @@ import type {
   RelayStation,
   DashboardRange,
   RelayUsageRange,
+  LatencyBucketGranularity,
   SyncSettings,
   SystemSettings,
   LocalAccountListResponse,
@@ -53,7 +61,7 @@ export interface QueryState<T> {
  * 为什么需要：useDashboardSummary() 在 5 个组件里都被调用，没去重的话每次 mount /
  * refresh 都会发 5 个相同请求。开发环境叠加 StrictMode 翻倍后会更夸张。
  */
-const inflight = new Map<string, Promise<unknown>>()
+const inflight = createSharedRequestRegistry<unknown>()
 
 /** Cache 已完成的响应一小段时间，便于同一帧内挂载的多个组件共享结果（即使第一次的 Promise 已经 resolve）。 */
 interface CacheEntry {
@@ -62,6 +70,11 @@ interface CacheEntry {
 }
 const cache = new Map<string, CacheEntry>()
 const CACHE_TTL_MS = 800
+const RELAY_OVERVIEW_CACHE_TTL_MS = 30_000
+
+export function cancelInFlightQueries() {
+  inflight.cancelAll()
+}
 
 interface ApiState<T> {
   path: string | null
@@ -75,28 +88,28 @@ function cacheKey(path: string, tick: number, bump: number) {
   return `${path}#${tick}#${bump}`
 }
 
-function fetchShared<T>(path: string, key: string): Promise<T> {
-  const now = Date.now()
-
+function readCached<T>(key: string) {
   const cached = cache.get(key)
-  if (cached && cached.expiresAt > now) {
-    return Promise.resolve(cached.data as T)
+  if (!cached) return null
+  if (cached.expiresAt <= Date.now()) {
+    cache.delete(key)
+    return null
   }
+  return cached.data as T
+}
 
-  const existing = inflight.get(key) as Promise<T> | undefined
-  if (existing) return existing
+function fetchShared<T>(path: string, key: string, cancelOnNavigation = true, cacheTTL = CACHE_TTL_MS) {
+  const cached = readCached<T>(key)
+  if (cached !== null) return { promise: Promise.resolve(cached), release: () => {} }
 
-  const p = apiFetch<T>(path)
-    .then((d) => {
-      cache.set(key, { data: d, expiresAt: Date.now() + CACHE_TTL_MS })
-      return d
-    })
-    .finally(() => {
-      // 让下一帧（refresh tick++）拉到新的数据，不要永远 hold 住旧 promise
-      inflight.delete(key)
-    })
-  inflight.set(key, p)
-  return p
+  const request = inflight.acquire(key, (signal) =>
+    apiFetch<T>(path, { signal }).then((data) => {
+      cache.set(key, { data, expiresAt: Date.now() + cacheTTL })
+      return data
+    }),
+    { cancelOnNavigation },
+  )
+  return { promise: request.promise as Promise<T>, release: request.release }
 }
 
 /**
@@ -106,7 +119,7 @@ function fetchShared<T>(path: string, key: string): Promise<T> {
  * - 请求路径变化：清空旧 data，避免把上一条查询的结果展示成新查询
  * - 同 URL + 同 tick 的并发调用共享一次请求
  */
-function useApi<T>(path: string | null): QueryState<T> {
+function useApi<T>(path: string | null, cancelOnNavigation = true, cacheTTL = CACHE_TTL_MS): QueryState<T> {
   const [state, setState] = useState<ApiState<T>>({
     path,
     data: null,
@@ -136,40 +149,50 @@ function useApi<T>(path: string | null): QueryState<T> {
     let cancelled = false
     setState((previous) => {
       if (previous.path !== path) {
-        return { path, data: null, loading: true, refreshing: true, error: null }
+        const cached = readCached<T>(cacheKey(path, globalTick, 0))
+        return { path, data: cached, loading: cached === null, refreshing: true, error: null }
       }
       if (previous.data === null) {
         return { ...previous, loading: true, refreshing: true, error: null }
       }
       return { ...previous, loading: false, refreshing: true, error: null }
     })
-    fetchShared<T>(path, cacheKey(path, globalTick, bump))
+    const request = fetchShared<T>(path, cacheKey(path, globalTick, bump), cancelOnNavigation, cacheTTL)
+    request.promise
       .then((d) => {
         if (cancelled) return
-        setState({ path, data: d, loading: false, refreshing: false, error: null })
+        scheduleQueryUpdate(() => {
+          setState({ path, data: d, loading: false, refreshing: false, error: null })
+        })
         const waiters = refetchWaiters.current.filter((waiter) => waiter.path === path && waiter.bump <= requestBump)
         refetchWaiters.current = refetchWaiters.current.filter((waiter) => waiter.path !== path || waiter.bump > requestBump)
         waiters.forEach(({ resolve }) => resolve())
       })
       .catch((e: Error) => {
-        if (cancelled) return
-        setState((previous) => (
-          previous.path === path
-            ? { ...previous, loading: false, refreshing: false, error: e.message }
-            : previous
-        ))
+        if (cancelled || e.name === "AbortError") return
+        scheduleQueryUpdate(() => {
+          setState((previous) => (
+            previous.path === path
+              ? { ...previous, loading: false, refreshing: false, error: e.message }
+              : previous
+          ))
+        })
         const waiters = refetchWaiters.current.filter((waiter) => waiter.path === path && waiter.bump <= requestBump)
         refetchWaiters.current = refetchWaiters.current.filter((waiter) => waiter.path !== path || waiter.bump > requestBump)
         waiters.forEach(({ reject }) => reject(e))
       })
     return () => {
       cancelled = true
+      request.release()
     }
-  }, [path, bump, globalTick])
+  }, [path, bump, globalTick, cancelOnNavigation])
 
   const current = state.path === path
     ? state
-    : { path, data: null, loading: path !== null, refreshing: path !== null, error: null }
+    : (() => {
+      const cached = path === null ? null : readCached<T>(cacheKey(path, globalTick, 0))
+      return { path, data: cached, loading: path !== null && cached === null, refreshing: path !== null, error: null }
+    })()
 
   return {
     data: current.data,
@@ -199,7 +222,7 @@ export function useBalanceTrend(range: BalanceTrendRange = "7d") {
 }
 
 export function useChannels(cancelOnNavigation = true) {
-  return useApi<Channel[]>("/channels")
+  return useApi<Channel[]>("/channels", cancelOnNavigation)
 }
 
 export function useChannelRelayAssociations() {
@@ -218,8 +241,36 @@ export function useChannelMetrics(range: RelayUsageRange = "today") {
   return useApi<ChannelMetric[]>(`/channels/metrics?range=${range}`)
 }
 
-export function useChannelLatencyTrends(limit = 60) {
-  return useApi<ChannelLatencyTrend[]>(`/channels/latency-trends?limit=${limit}`)
+export function useChannelLatencyTrends(limit = 60, enabled = true) {
+  return useApi<ChannelLatencyTrend[]>(enabled ? `/channels/latency-trends?limit=${limit}` : null)
+}
+
+export function useChannelLatencyBuckets(range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 60, enabled = true) {
+  const normalized = range === "all" ? "30d" : range
+  const query = latencyBucketQuery(granularity, targetCount)
+  query.set("range", normalized)
+  return useApi<ChannelLatencyBucketSeries[]>(enabled ? `/channels/latency-buckets?${query.toString()}` : null)
+}
+
+export function useChannelConsumptionBuckets(range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 60, enabled = true) {
+  const normalized = range === "all" ? "30d" : range
+  const query = latencyBucketQuery(granularity, targetCount)
+  query.set("range", normalized)
+  return useApi<ChannelConsumptionBucketSeries[]>(enabled ? `/channels/consumption-buckets?${query.toString()}` : null)
+}
+
+export function useRelayLatencyBuckets(stationID: number | null, range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 30) {
+  const normalized = range === "all" ? "30d" : range
+  const query = latencyBucketQuery(granularity, targetCount)
+  query.set("range", normalized)
+  return useApi<RelayAccountLatencyBucketSeries[]>(stationID == null ? null : `/relay-stations/${stationID}/latency-buckets?${query.toString()}`)
+}
+
+export function useRelayAccountConsumptionBuckets(stationID: number | null, range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 30) {
+  const normalized = range === "all" ? "30d" : range
+  const query = latencyBucketQuery(granularity, targetCount)
+  query.set("range", normalized)
+  return useApi<RelayAccountConsumptionBucketSeries[]>(stationID == null ? null : `/relay-stations/${stationID}/consumption-buckets?${query.toString()}`)
 }
 
 export function useChannelRates(channelID: number | null) {
@@ -258,7 +309,24 @@ export function useRelayStations() {
 }
 
 export function useRelayOverview(stationID: number | null) {
-  return useApi<RelayOverview>(stationID == null ? null : `/relay-stations/${stationID}`)
+  return useApi<RelayOverview>(stationID == null ? null : `/relay-stations/${stationID}`, true, RELAY_OVERVIEW_CACHE_TTL_MS)
+}
+
+export function usePrefetchRelayOverviews(stationIDs: readonly number[]) {
+  const globalTick = useRefreshTick()
+  const stationKey = stationIDs.join(",")
+
+  useEffect(() => {
+    if (stationIDs.length === 0) return
+    const requests = stationIDs.map((stationID) => fetchShared<RelayOverview>(
+      `/relay-stations/${stationID}`,
+      cacheKey(`/relay-stations/${stationID}`, globalTick, 0),
+      false,
+      RELAY_OVERVIEW_CACHE_TTL_MS,
+    ))
+    requests.forEach(({ promise }) => { void promise.catch(() => {}) })
+    return () => requests.forEach(({ release }) => release())
+  }, [globalTick, stationKey])
 }
 
 export function useRelayAccountModelCatalog(stationID: number | null, enabled = true) {
@@ -319,21 +387,22 @@ export function useSystemSettings() {
 }
 
 export function useSyncSettingsQuery() {
-  return useApi<SyncSettings>("/sync-settings")
+  return useApi<SyncSettings>("/sync-settings", false)
 }
 
 export function useSystemSettingsQuery() {
-  return useApi<SystemSettings>("/system-settings")
+  return useApi<SystemSettings>("/system-settings", false)
 }
 
 export function useOperationSummary(range: OperationRange = "today") {
   return useApi<OperationSummary>(`/operations/summary?range=${range}`)
 }
 
-export function useOperationLedger(range: OperationRange = "30d", filters: { direction?: string; category?: string } = {}) {
+export function useOperationLedger(range: OperationRange = "30d", filters: { direction?: string; category?: string; q?: string } = {}) {
   const query = new URLSearchParams({ range })
   if (filters.direction && filters.direction !== "all") query.set("direction", filters.direction)
   if (filters.category && filters.category !== "all") query.set("category", filters.category)
+  if (filters.q?.trim()) query.set("q", filters.q.trim())
   return useApi<OperationLedgerEntry[]>(`/operations/ledger?${query.toString()}`)
 }
 

@@ -3,6 +3,7 @@ package api
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/guliansheng/gateway-ops/internal/storage"
@@ -49,7 +50,17 @@ func publicRelayGroupMonitor(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, errors.New("无效的中转站 ID"))
 		return
 	}
-	view, err := d.Relay.PublicGroupMonitor(c.Request.Context(), stationID)
+	rangeName := strings.ToLower(strings.TrimSpace(c.DefaultQuery("range", "24h")))
+	if rangeName == "" {
+		rangeName = "24h"
+	}
+	switch rangeName {
+	case "today", "24h", "7d", "30d":
+	default:
+		fail(c, http.StatusBadRequest, errors.New("时间范围仅支持 today、24h、7d 或 30d"))
+		return
+	}
+	view, err := d.Relay.PublicGroupMonitorForRange(c.Request.Context(), stationID, rangeName)
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			fail(c, http.StatusNotFound, errors.New("中转站不存在"))

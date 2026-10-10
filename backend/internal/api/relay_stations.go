@@ -24,6 +24,9 @@ func registerRelayStations(g *gin.RouterGroup, d *Deps) {
 	gp.GET("/:id/usage", func(c *gin.Context) { relayStationUsage(c, d) })
 	gp.GET("/:id/usage/daily", func(c *gin.Context) { relayStationDailyConsumption(c, d) })
 	gp.GET("/:id/usage/recent", func(c *gin.Context) { relayStationRecentUsage(c, d) })
+	gp.GET("/:id/latency-buckets", func(c *gin.Context) { relayStationLatencyBuckets(c, d) })
+	gp.GET("/:id/consumption-buckets", func(c *gin.Context) { relayStationConsumptionBuckets(c, d) })
+	gp.GET("/:id/accounts/:external_id/latency-samples", func(c *gin.Context) { relayStationAccountLatencySamples(c, d) })
 	gp.GET("/:id/users", func(c *gin.Context) { relayStationUsers(c, d) })
 	gp.PUT("/:id/users/:user_id/status", func(c *gin.Context) { updateRelayStationUserStatus(c, d) })
 	gp.POST("/:id/users/batch-limits", func(c *gin.Context) { updateRelayStationUserLimits(c, d) })
@@ -253,6 +256,7 @@ type relayAccountView struct {
 	UsageTotalTokens      int64                        `json:"usage_total_tokens"`
 	UserChargeAmount      float64                      `json:"user_charge_amount"`
 	AccountPlan           string                       `json:"account_plan,omitempty"`
+	ExpiresAt             *time.Time                   `json:"expires_at,omitempty"`
 	ModelType             string                       `json:"model_type,omitempty"`
 	LastUsedAt            *time.Time                   `json:"last_used_at,omitempty"`
 }
@@ -1117,7 +1121,7 @@ func relayStationOverview(c *gin.Context, d *Deps) {
 			Platform: risk.Account.Platform, Type: risk.Account.Type, Status: risk.Account.Status, Schedulable: risk.Account.Schedulable,
 			Concurrency: risk.Account.Concurrency, CurrentConcurrency: risk.Account.CurrentConcurrency, Priority: risk.Account.Priority,
 			PoolMode: risk.Account.PoolMode, PoolModeRetryCount: risk.Account.PoolModeRetryCount,
-			AccountPlan: risk.Account.AccountPlan, LastUsedAt: risk.Account.LastUsedAt, ModelType: risk.Account.ModelType,
+			AccountPlan: risk.Account.AccountPlan, ExpiresAt: risk.Account.ExpiresAt, LastUsedAt: risk.Account.LastUsedAt, ModelType: risk.Account.ModelType,
 			CostMultiplier: risk.Account.RateMultiplier, CurrentGroups: groupOptions(risk.CurrentGroups),
 			CostSource: risk.Account.RateSource, CostObservedAt: risk.Account.RateObservedAt,
 			UnsafeGroups: groupOptions(risk.UnsafeGroups), NoProfitGroups: groupOptions(risk.NoProfitGroups), DowngradeGroups: groupOptions(risk.DowngradeGroups), SuggestedGroupIDs: risk.SuggestedGroupIDs,
