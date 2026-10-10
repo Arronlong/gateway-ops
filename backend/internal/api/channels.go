@@ -24,6 +24,7 @@ func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp.GET("/metrics", func(c *gin.Context) { channelMetrics(c, d) })
 	gp.GET("/latency-trends", func(c *gin.Context) { channelLatencyTrends(c, d) })
 	gp.GET("/associations", func(c *gin.Context) { channelRelayAssociations(c, d) })
+	gp.GET("/model-catalog", func(c *gin.Context) { channelModelCatalog(c, d) })
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllChannels(c, d) })
 	gp.POST("", func(c *gin.Context) { createChannel(c, d) })
 	gp.GET("/:id", func(c *gin.Context) { getChannel(c, d) })

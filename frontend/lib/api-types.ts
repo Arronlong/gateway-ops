@@ -63,7 +63,13 @@ export interface Channel {
   created_at: string
   updated_at: string
   latest_ratio_changed_at?: string | null
+	model_names?: string[]
 	accounts: ChannelAccount[]
+}
+
+export interface ChannelModelCatalogItem {
+  channel_id: number
+  models: string[]
 }
 
 export interface ChannelAccount {
@@ -359,6 +365,11 @@ export interface RelayAccountView {
   usage_total_tokens: number | null
   user_charge_amount: number | null
   account_cost_amount: number | null
+}
+
+export interface RelayAccountModelCatalogItem {
+  account_id: number
+  models: string[]
 }
 
 export interface RelayAccountBatchActionResult {

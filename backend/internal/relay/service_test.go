@@ -149,6 +149,23 @@ func TestExtractAccountModelIDs(t *testing.T) {
 	}
 }
 
+func TestFetchAccountModelCatalogKeepsSuccessfulAccounts(t *testing.T) {
+	items := fetchAccountModelCatalog(context.Background(), []int64{3, 1, 2}, 2, func(_ context.Context, accountID int64) ([]string, error) {
+		if accountID == 2 {
+			return nil, errors.New("upstream unavailable")
+		}
+		return []string{fmt.Sprintf("model-%d", accountID), "gpt-6.1-sol"}, nil
+	})
+
+	want := []AccountModelCatalogItem{
+		{AccountID: 1, Models: []string{"model-1", "gpt-6.1-sol"}},
+		{AccountID: 3, Models: []string{"model-3", "gpt-6.1-sol"}},
+	}
+	if !reflect.DeepEqual(items, want) {
+		t.Fatalf("catalog = %#v, want %#v", items, want)
+	}
+}
+
 func TestSelectAdminGroupAPIKey(t *testing.T) {
 	groupID, otherGroupID := int64(42), int64(7)
 	user := func(role string) *remoteUser { return &remoteUser{Role: role} }
