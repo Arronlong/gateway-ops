@@ -3,7 +3,7 @@
 import { ArrowUpRight, CircleDollarSign, DollarSign, MessageSquare, WalletCards } from "lucide-react"
 import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
-import { useDashboardSummary } from "@/lib/queries"
+import { useChannelSummary, useDashboardSummary, useSystemSettings } from "@/lib/queries"
 import type { RelayUsageRange } from "@/lib/api-types"
 import { money } from "@/lib/format"
 import type { LucideIcon } from "lucide-react"
@@ -18,20 +18,26 @@ interface Kpi {
   footer: ReactNode
 }
 
-export function KpiRow({ range = "today" }: { range?: RelayUsageRange }) {
-  const summary = useDashboardSummary(range)
+export function KpiRow({ range = "today", source = "dashboard" }: { range?: RelayUsageRange; source?: "dashboard" | "channels" }) {
+  const dashboardSummary = useDashboardSummary(range, source === "dashboard")
+  const channelSummary = useChannelSummary(range, source === "channels")
+  const systemSettings = useSystemSettings()
 
-  const data = summary.data
+  const dashboardData = dashboardSummary.data
+  const channelData = channelSummary.data
+  const data = source === "channels" ? channelData : dashboardData
   const total = data?.total_channels ?? 0
   const active = data?.active_channels ?? 0
   const failed = data?.failed_channels ?? 0
   const totalBalance = data?.total_balance ?? 0
   const cumulativeRechargeAmount = data?.cumulative_recharge_amount ?? 0
   const consumptionAmount = data?.consumption_amount ?? 0
-  const userChargeAmount = data?.user_charge_amount ?? 0
+  const usageCostAmount = source === "channels" ? channelData?.usage_cost_amount ?? 0 : dashboardData?.user_charge_amount ?? 0
+  const usageRequestCount = source === "channels" ? channelData?.usage_request_count ?? 0 : dashboardData?.matched_account_count ?? 0
   const lowest = data?.lowest_balance ?? null
 
   const changeCount = data?.rate_change_count ?? 0
+  const showRateChanges = systemSettings.data?.channels_show_rate_changes === true
   const rangeLabel = range === "all" ? "全部时间" : range === "today" ? "今日" : range === "24h" ? "24 小时" : range === "7d" ? "7 天" : "30 天"
 
   const kpis: Kpi[] = [
@@ -74,11 +80,11 @@ export function KpiRow({ range = "today" }: { range?: RelayUsageRange }) {
       iconColor: "text-success",
       footer: (
         <span className="text-muted-foreground">
-          <span className="text-success font-medium">{active} 健康</span>
+          <span className="text-success font-medium">{active} 正常</span>
           {failed > 0 ? (
             <>
               {" · "}
-              <span className="text-danger font-medium">{failed} 失败</span>
+              <span className="text-danger font-medium">{failed} 异常</span>
             </>
           ) : null}
         </span>
@@ -93,20 +99,22 @@ export function KpiRow({ range = "today" }: { range?: RelayUsageRange }) {
       footer: <span className="text-muted-foreground">余额下降累计，充值不计入</span>,
     },
     {
-      label: `${rangeLabel}用户扣费`,
-      value: money(userChargeAmount, { precise: true }),
+      label: source === "channels" ? `${rangeLabel}调用消耗` : `${rangeLabel}用户扣费`,
+      value: money(usageCostAmount, { precise: true }),
       icon: CircleDollarSign,
       iconBg: "bg-brand/10",
       iconColor: "text-brand",
-      footer: (
-        <span className={cn(data && !data.user_charge_complete ? "text-warning" : "text-muted-foreground")}>
-          {data && !data.user_charge_complete
-            ? `匹配 ${data.matched_account_count} 个账号，部分统计失败`
-            : `匹配 ${data?.matched_account_count ?? 0} 个归属账号`}
+      footer: source === "channels" ? (
+        <span className="text-muted-foreground">渠道自身日志 · {usageRequestCount} 次请求</span>
+      ) : (
+        <span className={cn(dashboardData && !dashboardData.user_charge_complete ? "text-warning" : "text-muted-foreground")}>
+          {dashboardData && !dashboardData.user_charge_complete
+            ? `匹配 ${dashboardData.matched_account_count} 个账号，部分统计失败`
+            : `匹配 ${dashboardData?.matched_account_count ?? 0} 个归属账号`}
         </span>
       ),
     },
-    {
+    ...(showRateChanges ? [{
       label: `${rangeLabel}倍率变动`,
       value: (
         <span className={cn(changeCount > 0 ? "text-danger" : "text-foreground")}>
@@ -121,11 +129,11 @@ export function KpiRow({ range = "today" }: { range?: RelayUsageRange }) {
           {changeCount > 0 ? `检测到 ${changeCount} 次变动` : `${rangeLabel}无变动`}
         </span>
       ),
-    },
+    }] : []),
   ]
 
   return (
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
+    <div className={cn("grid grid-cols-1 gap-3 sm:grid-cols-2", showRateChanges ? "xl:grid-cols-6" : "xl:grid-cols-5")}>
       {kpis.map((k) => (
         <Card
           key={k.label}

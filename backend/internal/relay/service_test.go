@@ -129,6 +129,48 @@ func TestBatchCloneAccountTypeAllowed(t *testing.T) {
 	}
 }
 
+func TestBuildRecentUsageItemsKeepsAllRowsAndSortsNewestFirst(t *testing.T) {
+	usages := make([]remoteUsage, 0, 125)
+	for index := 0; index < 125; index++ {
+		usages = append(usages, remoteUsage{
+			ID:          int64(index + 1),
+			UserID:      7,
+			UserName:    "tester",
+			UserEmail:   "tester@example.com",
+			AccountID:   11,
+			AccountName: "account-a",
+			GroupID:     22,
+			GroupName:   "group-a",
+			CreatedAt:   time.Date(2026, 9, 20, 0, index, 0, 0, time.UTC).Format(time.RFC3339Nano),
+		})
+	}
+
+	items := buildRecentUsageItems(usages, nil, nil, nil, nil)
+	if len(items) != 125 {
+		t.Fatalf("len(items) = %d, want 125 without a recent-record cap", len(items))
+	}
+	if items[0].ID != 125 || items[len(items)-1].ID != 1 {
+		t.Fatalf("order = first %d last %d, want newest 125 then oldest 1", items[0].ID, items[len(items)-1].ID)
+	}
+}
+
+func TestFilterRecentUsageRangeUsesExactTimestamps(t *testing.T) {
+	since := time.Date(2026, 9, 20, 10, 0, 0, 0, time.UTC)
+	until := since.Add(24 * time.Hour)
+	usages := []remoteUsage{
+		{ID: 1, CreatedAt: since.Add(-time.Second).Format(time.RFC3339Nano)},
+		{ID: 2, CreatedAt: since.Format(time.RFC3339Nano)},
+		{ID: 3, CreatedAt: until.Add(-time.Second).Format(time.RFC3339Nano)},
+		{ID: 4, CreatedAt: until.Format(time.RFC3339Nano)},
+		{ID: 5, CreatedAt: "invalid"},
+	}
+
+	got := filterRecentUsageRange(usages, since, until)
+	if len(got) != 2 || got[0].ID != 2 || got[1].ID != 3 {
+		t.Fatalf("filtered usages = %#v, want IDs 2 and 3", got)
+	}
+}
+
 func TestExtractAccountModelIDs(t *testing.T) {
 	tests := []struct {
 		name string

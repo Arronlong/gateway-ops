@@ -60,6 +60,7 @@ type Service struct {
 	ipLocationCache    map[string]ipLocationCacheEntry
 	latencyMu          sync.Mutex
 	latencyCache       map[string]latencyCacheEntry
+	usageBackfillGroup singleflight.Group
 	publicMonitorMu    sync.Mutex
 	publicMonitorCache map[uint]publicMonitorCacheEntry
 	publicPricingMu    sync.Mutex
@@ -168,8 +169,8 @@ type GroupSortOrderUpdate struct {
 }
 
 type AccountUsageStats struct {
-	TotalTokens      int64   `json:"total_tokens"`
-	UserCharge       float64 `json:"user_charge"`
+	TotalTokens int64   `json:"total_tokens"`
+	UserCharge  float64 `json:"user_charge"`
 	// AccountCost is recalculated from BaseCost and the account's current
 	// effective cost multiplier by UsageStats.
 	AccountCost      float64 `json:"account_cost"`
@@ -1237,36 +1238,43 @@ type remoteBatchUpdateResult struct {
 }
 
 type remoteUsage struct {
-	ID                    int64   `json:"id"`
-	RequestID             string  `json:"request_id"`
-	ClientRequestID       string  `json:"client_request_id"`
-	AccountID             int64   `json:"account_id"`
-	AccountName           string  `json:"account_name"`
-	UserID                int64   `json:"user_id"`
-	UserName              string  `json:"user_name"`
-	UserEmail             string  `json:"user_email"`
-	IPAddress             string  `json:"ip_address"`
-	GroupID               int64   `json:"group_id"`
-	GroupName             string  `json:"group_name"`
-	FirstTokenMS          int64   `json:"first_token_ms"`
-	DurationMS            int64   `json:"duration_ms"`
-	CreatedAt             string  `json:"created_at"`
-	Model                 string  `json:"model"`
-	RequestedModel        string  `json:"requested_model"`
-	RequestType           string  `json:"request_type"`
-	InputTokens           int64   `json:"input_tokens"`
-	OutputTokens          int64   `json:"output_tokens"`
-	CacheReadTokens       int64   `json:"cache_read_tokens"`
-	CacheCreationTokens   int64   `json:"cache_creation_tokens"`
-	CacheCreation5mTokens int64   `json:"cache_creation_5m_tokens"`
-	CacheCreation1hTokens int64   `json:"cache_creation_1h_tokens"`
-	CacheTTLOverridden    bool    `json:"cache_ttl_overridden"`
-	ActualCost            float64 `json:"actual_cost"`
-	TotalCost             float64 `json:"total_cost"`
+	ID                    int64    `json:"id"`
+	RequestID             string   `json:"request_id"`
+	ClientRequestID       string   `json:"client_request_id"`
+	AccountID             int64    `json:"account_id"`
+	AccountName           string   `json:"account_name"`
+	UserID                int64    `json:"user_id"`
+	UserName              string   `json:"user_name"`
+	UserEmail             string   `json:"user_email"`
+	IPAddress             string   `json:"ip_address"`
+	GroupID               int64    `json:"group_id"`
+	GroupName             string   `json:"group_name"`
+	FirstTokenMS          int64    `json:"first_token_ms"`
+	DurationMS            int64    `json:"duration_ms"`
+	StatusCode            int      `json:"status_code"`
+	CreatedAt             string   `json:"created_at"`
+	Model                 string   `json:"model"`
+	RequestedModel        string   `json:"requested_model"`
+	RequestType           string   `json:"request_type"`
+	InputTokens           int64    `json:"input_tokens"`
+	OutputTokens          int64    `json:"output_tokens"`
+	CacheReadTokens       int64    `json:"cache_read_tokens"`
+	CacheCreationTokens   int64    `json:"cache_creation_tokens"`
+	CacheCreation5mTokens int64    `json:"cache_creation_5m_tokens"`
+	CacheCreation1hTokens int64    `json:"cache_creation_1h_tokens"`
+	CacheTTLOverridden    bool     `json:"cache_ttl_overridden"`
+	ActualCost            float64  `json:"actual_cost"`
+	TotalCost             float64  `json:"total_cost"`
+	AccountRateMultiplier *float64 `json:"account_rate_multiplier,omitempty"`
+	AccountStatsCost      *float64 `json:"account_stats_cost,omitempty"`
 }
 
 type remoteUsagePage struct {
-	Items []remoteUsage `json:"items"`
+	Items    []remoteUsage `json:"items"`
+	Total    int           `json:"total"`
+	Page     int           `json:"page"`
+	PageSize int           `json:"page_size"`
+	Pages    int           `json:"pages"`
 }
 
 type remoteUsageStats struct {
@@ -1566,8 +1574,6 @@ func (s *Service) UsageStats(ctx context.Context, stationID uint, rangeName stri
 		stats.AccountCostKnown = ok
 		if ok {
 			stats.AccountCost = stats.BaseCost * multiplier
-		} else {
-			stats.AccountCost = 0
 		}
 		usage.Accounts[accountID] = stats
 	}
@@ -2137,10 +2143,7 @@ func hostLabelsEmbedded(shorter, longer []string) bool {
 	return false
 }
 
-func (s *Service) RecentUsage(ctx context.Context, stationID uint, limit int) ([]RecentUsageItem, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 100
-	}
+func (s *Service) RecentUsage(ctx context.Context, stationID uint, since, until time.Time) ([]RecentUsageItem, error) {
 	station, err := s.stations.FindByID(stationID)
 	if err != nil {
 		return nil, err
@@ -2149,23 +2152,32 @@ func (s *Service) RecentUsage(ctx context.Context, stationID uint, limit int) ([
 	if err != nil {
 		return nil, fmt.Errorf("decrypt admin API key: %w", err)
 	}
-	var page remoteUsagePage
-	endpoint := fmt.Sprintf("%s/api/v1/admin/usage?page=1&page_size=%d", station.BaseURL, limit)
-	if err := s.get(ctx, endpoint, apiKey, &page); err != nil {
+	usages, err := s.fetchStationUsageItems(ctx, station.BaseURL, apiKey, since, until)
+	if err != nil {
 		return nil, err
 	}
+	usages = filterRecentUsageRange(usages, since, until)
 	users := make(map[int64]remoteUser)
-	for pageNumber := 1; pageNumber <= 100; pageNumber++ {
-		var userPage remoteUserPage
-		userEndpoint := fmt.Sprintf("%s/api/v1/admin/users?page=%d&page_size=100", station.BaseURL, pageNumber)
-		if err := s.get(ctx, userEndpoint, apiKey, &userPage); err != nil {
+	needsUserFallback := false
+	for _, usage := range usages {
+		if strings.TrimSpace(usage.UserEmail) == "" || strings.TrimSpace(usage.UserName) == "" {
+			needsUserFallback = true
 			break
 		}
-		for _, user := range userPage.Items {
-			users[user.ID] = user
-		}
-		if len(userPage.Items) == 0 || userPage.Pages <= pageNumber {
-			break
+	}
+	if needsUserFallback {
+		for pageNumber := 1; pageNumber <= 100; pageNumber++ {
+			var userPage remoteUserPage
+			userEndpoint := fmt.Sprintf("%s/api/v1/admin/users?page=%d&page_size=100", station.BaseURL, pageNumber)
+			if err := s.get(ctx, userEndpoint, apiKey, &userPage); err != nil {
+				break
+			}
+			for _, user := range userPage.Items {
+				users[user.ID] = user
+			}
+			if len(userPage.Items) == 0 || userPage.Pages <= pageNumber {
+				break
+			}
 		}
 	}
 	groups, _ := s.stations.ListGroups(stationID)
@@ -2178,9 +2190,31 @@ func (s *Service) RecentUsage(ctx context.Context, stationID uint, limit int) ([
 	for _, account := range accounts {
 		accountNames[account.ExternalID] = account.Name
 	}
-	locations := s.resolveIPLocations(ctx, page.Items)
-	items := make([]RecentUsageItem, 0, len(page.Items))
-	for _, usage := range page.Items {
+	locations := s.resolveIPLocations(ctx, usages)
+	return buildRecentUsageItems(usages, users, groupNames, accountNames, locations), nil
+}
+
+func filterRecentUsageRange(usages []remoteUsage, since, until time.Time) []remoteUsage {
+	filtered := make([]remoteUsage, 0, len(usages))
+	for _, usage := range usages {
+		createdAt, err := time.Parse(time.RFC3339Nano, usage.CreatedAt)
+		if err != nil {
+			continue
+		}
+		if !since.IsZero() && createdAt.Before(since) {
+			continue
+		}
+		if !until.IsZero() && !createdAt.Before(until) {
+			continue
+		}
+		filtered = append(filtered, usage)
+	}
+	return filtered
+}
+
+func buildRecentUsageItems(usages []remoteUsage, users map[int64]remoteUser, groupNames map[int64]string, accountNames map[int64]string, locations map[string]string) []RecentUsageItem {
+	items := make([]RecentUsageItem, 0, len(usages))
+	for _, usage := range usages {
 		created, err := time.Parse(time.RFC3339Nano, usage.CreatedAt)
 		if err != nil {
 			continue
@@ -2221,7 +2255,13 @@ func (s *Service) RecentUsage(ctx context.Context, stationID uint, limit int) ([
 			UserCharge:         usage.ActualCost, OriginalCost: usage.TotalCost,
 			FirstTokenMS: usage.FirstTokenMS, DurationMS: usage.DurationMS, CreatedAt: created.UTC()})
 	}
-	return items, nil
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].CreatedAt.After(items[j].CreatedAt)
+	})
+	return items
 }
 
 type ipLocationResponse struct {

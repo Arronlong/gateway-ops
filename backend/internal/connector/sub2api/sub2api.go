@@ -209,6 +209,90 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 	return out, nil
 }
 
+func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *connector.AuthSession, query connector.UsageQuery) (*connector.UsagePage, error) {
+	if session == nil || session.AccessToken == "" {
+		return nil, errors.New("missing sub2api access_token")
+	}
+	page := query.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := query.PageSize
+	if pageSize <= 0 || pageSize > 1000 {
+		pageSize = 100
+	}
+	req := c.http.R().SetContext(ctx).
+		SetHeader("Authorization", "Bearer "+session.AccessToken).
+		SetQueryParam("page", strconv.Itoa(page)).
+		SetQueryParam("page_size", strconv.Itoa(pageSize)).
+		SetQueryParam("sort_by", "created_at").
+		SetQueryParam("sort_order", "desc").
+		SetQueryParam("timezone", "UTC")
+	if !query.Since.IsZero() {
+		req.SetQueryParam("start_date", query.Since.UTC().Format("2006-01-02"))
+	}
+	if !query.Until.IsZero() {
+		end := query.Until.UTC()
+		if end.After(time.Time{}) {
+			end = end.Add(-time.Nanosecond)
+		}
+		req.SetQueryParam("end_date", end.Format("2006-01-02"))
+	}
+	resp, err := req.Get(strings.TrimRight(ch.SiteURL, "/") + "/api/v1/usage")
+	if err != nil {
+		return nil, fmt.Errorf("sub2api usage http: %w", err)
+	}
+	if resp.IsError() {
+		return nil, fmt.Errorf("sub2api usage: %w", connector.HTTPStatusError(resp.StatusCode(), resp.Body()))
+	}
+	var wrapped sub2Resp
+	if err := json.Unmarshal(resp.Body(), &wrapped); err != nil {
+		return nil, fmt.Errorf("sub2api usage decode: %w", err)
+	}
+	if wrapped.Code != 0 {
+		return nil, fmt.Errorf("sub2api usage: %s", wrapped.Message)
+	}
+	var data struct {
+		Items []struct {
+			ID                  int64   `json:"id"`
+			RequestID           string  `json:"request_id"`
+			Model               string  `json:"model"`
+			InputTokens         int64   `json:"input_tokens"`
+			OutputTokens        int64   `json:"output_tokens"`
+			CacheReadTokens     int64   `json:"cache_read_tokens"`
+			CacheCreationTokens int64   `json:"cache_creation_tokens"`
+			TotalCost           float64 `json:"total_cost"`
+			ActualCost          float64 `json:"actual_cost"`
+			DurationMS          *int64  `json:"duration_ms"`
+			FirstTokenMS        *int64  `json:"first_token_ms"`
+			CreatedAt           string  `json:"created_at"`
+		} `json:"items"`
+		Total    int64 `json:"total"`
+		Page     int   `json:"page"`
+		PageSize int   `json:"page_size"`
+		Pages    int   `json:"pages"`
+	}
+	if err := json.Unmarshal(wrapped.Data, &data); err != nil {
+		return nil, fmt.Errorf("sub2api usage data decode: %w", err)
+	}
+	out := &connector.UsagePage{Total: data.Total, Page: data.Page, PageSize: data.PageSize, Pages: data.Pages}
+	out.Records = make([]connector.UsageRecord, 0, len(data.Items))
+	for _, item := range data.Items {
+		createdAt, err := time.Parse(time.RFC3339, item.CreatedAt)
+		if err != nil {
+			continue
+		}
+		out.Records = append(out.Records, connector.UsageRecord{
+			RemoteID: strconv.FormatInt(item.ID, 10), RequestID: item.RequestID, CreatedAt: createdAt,
+			Model: item.Model, FirstTokenMS: item.FirstTokenMS, DurationMS: item.DurationMS,
+			SuccessKnown: false, Success: true, InputTokens: item.InputTokens, OutputTokens: item.OutputTokens,
+			CacheReadTokens: item.CacheReadTokens, CacheCreationTokens: item.CacheCreationTokens,
+			ActualCost: item.ActualCost, TotalCost: item.TotalCost,
+		})
+	}
+	return out, nil
+}
+
 func (c *Client) getJSON(ctx context.Context, url string, session *connector.AuthSession) ([]byte, error) {
 	req := c.http.R().SetContext(ctx)
 	if session != nil && session.AccessToken != "" {

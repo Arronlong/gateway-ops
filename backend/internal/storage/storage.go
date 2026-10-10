@@ -70,6 +70,19 @@ func AutoMigrate(db *gorm.DB) error {
 	if err := db.Exec("DROP TABLE IF EXISTS relay_cost_fallbacks").Error; err != nil {
 		return err
 	}
+	// Channel and relay data are separate domains. Legacy Base-URL inference
+	// created synthetic auto_link bindings and relay_account rate snapshots;
+	// remove only those inferred rows while preserving explicit user mappings.
+	if db.Migrator().HasTable(&RelayAccountCostOverride{}) {
+		if err := db.Where("mode = ?", "auto_link").Delete(&RelayAccountCostOverride{}).Error; err != nil {
+			return err
+		}
+	}
+	if db.Migrator().HasTable(&RateSnapshot{}) {
+		if err := db.Where("source = ?", RateSnapshotSourceRelayAccount).Delete(&RateSnapshot{}).Error; err != nil {
+			return err
+		}
+	}
 	for _, column := range []string{"min_margin", "max_auto_adjustments_per_sync"} {
 		if db.Migrator().HasColumn(&RelayStation{}, column) {
 			if err := db.Migrator().DropColumn(&RelayStation{}, column); err != nil {
@@ -112,6 +125,10 @@ func AutoMigrate(db *gorm.DB) error {
 		&RelayChannelMapping{},
 		&RelayChannelPricingChange{},
 		&RelayAccount{},
+		&ChannelUsageEvent{},
+		&ChannelUsageSyncState{},
+		&RelayUsageEvent{},
+		&RelayUsageSyncState{},
 		&RelayAccountGroup{},
 		&RelayAccountCostOverride{},
 		&RelayAccountAdjustmentLog{},

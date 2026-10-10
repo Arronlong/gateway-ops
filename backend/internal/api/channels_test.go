@@ -62,3 +62,32 @@ func TestNewAPIEditMetadataPreservesTemplateAndMasksLiteralToken(t *testing.T) {
 		})
 	}
 }
+
+func TestSub2APIEditMetadataReportsRefreshTokenConfigured(t *testing.T) {
+	cipher, err := appcrypto.NewCipher("test-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name string
+		raw  string
+		want bool
+	}{
+		{name: "refresh configured", raw: `{"access_token":"access","refresh_token":"refresh"}`, want: true},
+		{name: "legacy access only", raw: `{"access_token":"access"}`, want: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			encrypted, err := cipher.Encrypt(tt.raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := sub2APIRefreshTokenConfigured(&Deps{Cipher: cipher}, storage.ChannelTypeSub2API, storage.CredentialModeToken, encrypted)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got != tt.want {
+				t.Fatalf("configured = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}

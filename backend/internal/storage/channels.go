@@ -134,6 +134,18 @@ func (r *Channels) ReplaceAdditionalAccounts(channelID uint, accounts []ChannelA
 
 func (r *Channels) DeleteAccounts(channelID uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		// Switching away from automatic channel accounts must also remove their
+		// channel-owned usage history. Relay history is a separate domain.
+		if err := tx.Where("channel_id = ?", channelID).Delete(&ChannelUsageEvent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("channel_id = ?", channelID).Delete(&ChannelUsageSyncState{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("channel_account_id IN (?)", tx.Model(&ChannelAccount{}).Select("id").Where("channel_id = ?", channelID)).
+			Delete(&ChannelRelayAccountLink{}).Error; err != nil {
+			return err
+		}
 		var ids []uint
 		if err := tx.Model(&ChannelAccount{}).Where("channel_id = ? AND is_primary = ?", channelID, false).Pluck("id", &ids).Error; err != nil {
 			return err
@@ -219,6 +231,8 @@ func (r *Channels) Delete(id uint) error {
 			&NotificationLog{},
 			&NotificationCooldown{},
 			&MonitorLog{},
+			&ChannelUsageEvent{},
+			&ChannelUsageSyncState{},
 		} {
 			if err := tx.Where("channel_id = ?", id).Delete(target).Error; err != nil {
 				return err
@@ -262,7 +276,8 @@ func (r *Channels) ListForManagement() ([]Channel, error) {
 			JOIN rate_snapshots AS snapshots
 				ON snapshots.channel_id = changes.channel_id
 				AND snapshots.model_name = changes.model_name
-			WHERE changes.old_ratio IS NOT NULL
+			WHERE snapshots.source <> 'relay_account'
+				AND changes.old_ratio IS NOT NULL
 				AND changes.old_ratio <> changes.new_ratio
 				AND ABS(changes.new_ratio - snapshots.ratio) <= 0.000000001
 			GROUP BY changes.channel_id

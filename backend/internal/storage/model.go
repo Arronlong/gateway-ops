@@ -556,11 +556,103 @@ type RelayAccount struct {
 
 func (RelayAccount) TableName() string { return "relay_accounts" }
 
+// ChannelUsageEvent is a request record collected directly from the monitored
+// channel's own user-facing usage/log API. It is intentionally separate from
+// RelayUsageEvent: channel monitoring must never infer requests from a relay
+// station, even when an explicit account association exists.
+type ChannelUsageEvent struct {
+	ID                  uint      `gorm:"primaryKey" json:"id"`
+	ChannelID           uint      `gorm:"not null;uniqueIndex:idx_channel_usage_remote,priority:1;index:idx_channel_usage_channel_time,priority:1" json:"channel_id"`
+	ChannelAccountID    uint      `gorm:"not null;uniqueIndex:idx_channel_usage_remote,priority:2;index" json:"channel_account_id"`
+	Source              string    `gorm:"size:32;not null;uniqueIndex:idx_channel_usage_remote,priority:3" json:"source"`
+	RemoteUsageID       string    `gorm:"size:128;not null;uniqueIndex:idx_channel_usage_remote,priority:4" json:"remote_usage_id"`
+	RequestID           string    `gorm:"size:128;index" json:"request_id,omitempty"`
+	Model               string    `gorm:"size:256" json:"model,omitempty"`
+	FirstTokenMS        *int64    `json:"first_token_ms,omitempty"`
+	DurationMS          *int64    `json:"duration_ms,omitempty"`
+	SuccessKnown        bool      `gorm:"not null;default:false" json:"success_known"`
+	Success             bool      `gorm:"not null;default:true" json:"success"`
+	InputTokens         int64     `gorm:"not null;default:0" json:"input_tokens"`
+	OutputTokens        int64     `gorm:"not null;default:0" json:"output_tokens"`
+	CacheReadTokens     int64     `gorm:"not null;default:0" json:"cache_read_tokens"`
+	CacheCreationTokens int64     `gorm:"not null;default:0" json:"cache_creation_tokens"`
+	ActualCost          float64   `gorm:"not null;default:0" json:"actual_cost"`
+	TotalCost           float64   `gorm:"not null;default:0" json:"total_cost"`
+	OccurredAt          time.Time `gorm:"not null;index:idx_channel_usage_channel_time,priority:2" json:"occurred_at"`
+	SyncedAt            time.Time `gorm:"not null;index" json:"synced_at"`
+}
+
+func (ChannelUsageEvent) TableName() string { return "channel_usage_events" }
+
+type ChannelUsageSyncState struct {
+	ChannelID        uint       `gorm:"primaryKey" json:"channel_id"`
+	ChannelAccountID uint       `gorm:"primaryKey" json:"channel_account_id"`
+	ForwardSyncedAt  *time.Time `json:"forward_synced_at,omitempty"`
+	BackfilledAt     *time.Time `json:"backfilled_at,omitempty"`
+	UpdatedAt        time.Time  `gorm:"not null" json:"updated_at"`
+}
+
+func (ChannelUsageSyncState) TableName() string { return "channel_usage_sync_states" }
+
+type ChannelUsageSample struct {
+	FirstTokenMS        *int64    `json:"first_token_ms"`
+	DurationMS          *int64    `json:"duration_ms"`
+	SuccessKnown        bool      `json:"success_known"`
+	Success             bool      `json:"success"`
+	CreatedAt           time.Time `json:"created_at"`
+	Model               string    `json:"model,omitempty"`
+	InputTokens         int64     `json:"input_tokens,omitempty"`
+	OutputTokens        int64     `json:"output_tokens,omitempty"`
+	CacheReadTokens     int64     `json:"cache_read_tokens,omitempty"`
+	CacheCreationTokens int64     `json:"cache_creation_tokens,omitempty"`
+}
+
+// RelayUsageEvent is the durable local copy of a Sub2API relay-station usage row.
+// It remains relay-only and is never a channel-monitoring source.
+type RelayUsageEvent struct {
+	ID                    uint      `gorm:"primaryKey" json:"id"`
+	RelayStationID        uint      `gorm:"not null;uniqueIndex:idx_relay_usage_remote;index:idx_relay_usage_station_time,priority:1" json:"relay_station_id"`
+	RemoteUsageID         int64     `gorm:"not null;uniqueIndex:idx_relay_usage_remote" json:"remote_usage_id"`
+	AccountExternalID     int64     `gorm:"not null;index:idx_relay_usage_account_time,priority:1" json:"account_external_id"`
+	GroupExternalID       int64     `gorm:"not null;default:0" json:"group_external_id"`
+	GroupName             string    `gorm:"size:256" json:"group_name,omitempty"`
+	UserEmail             string    `gorm:"size:512" json:"user_email,omitempty"`
+	Model                 string    `gorm:"size:256" json:"model,omitempty"`
+	RequestType           string    `gorm:"size:64" json:"request_type,omitempty"`
+	FirstTokenMS          int64     `gorm:"not null;default:0" json:"first_token_ms"`
+	DurationMS            int64     `gorm:"not null;default:0" json:"duration_ms"`
+	StatusCode            int       `gorm:"not null;default:0" json:"status_code"`
+	InputTokens           int64     `gorm:"not null;default:0" json:"input_tokens"`
+	OutputTokens          int64     `gorm:"not null;default:0" json:"output_tokens"`
+	CacheReadTokens       int64     `gorm:"not null;default:0" json:"cache_read_tokens"`
+	CacheCreationTokens   int64     `gorm:"not null;default:0" json:"cache_creation_tokens"`
+	CacheCreation5mTokens int64     `gorm:"not null;default:0" json:"cache_creation_5m_tokens"`
+	CacheCreation1hTokens int64     `gorm:"not null;default:0" json:"cache_creation_1h_tokens"`
+	ActualCost            float64   `gorm:"not null;default:0" json:"actual_cost"`
+	TotalCost             float64   `gorm:"not null;default:0" json:"total_cost"`
+	AccountRateMultiplier *float64  `json:"account_rate_multiplier,omitempty"`
+	AccountStatsCost      *float64  `json:"account_stats_cost,omitempty"`
+	OccurredAt            time.Time `gorm:"not null;index:idx_relay_usage_station_time,priority:2;index:idx_relay_usage_account_time,priority:2" json:"occurred_at"`
+	SyncedAt              time.Time `gorm:"not null;index" json:"synced_at"`
+}
+
+func (RelayUsageEvent) TableName() string { return "relay_usage_events" }
+
+type RelayUsageSyncState struct {
+	RelayStationID  uint       `gorm:"primaryKey" json:"relay_station_id"`
+	ForwardSyncedAt *time.Time `json:"forward_synced_at,omitempty"`
+	BackfilledAt    *time.Time `json:"backfilled_at,omitempty"`
+	UpdatedAt       time.Time  `gorm:"not null" json:"updated_at"`
+}
+
+func (RelayUsageSyncState) TableName() string { return "relay_usage_sync_states" }
+
 // RelayLatencySample is the small, stable subset of a Sub2API usage row that
 // is useful for the account health table.
 type RelayLatencySample struct {
 	FirstTokenMS           int64     `json:"first_token_ms"`
 	DurationMS             int64     `json:"duration_ms"`
+	StatusCode             int       `json:"status_code,omitempty"`
 	CreatedAt              time.Time `json:"created_at"`
 	Model                  string    `json:"model,omitempty"`
 	Platform               string    `json:"platform,omitempty"`

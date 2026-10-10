@@ -27,6 +27,7 @@ type Deps struct {
 	Cipher        *crypto.Cipher
 	Auth          *auth.Service
 	Channels      *storage.Channels
+	ChannelUsage  *storage.ChannelUsage
 	Sessions      *storage.AuthSessions
 	Captchas      *storage.Captchas
 	Notifies      *storage.Notifications

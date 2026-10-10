@@ -21,6 +21,7 @@ import (
 func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp := g.Group("/channels")
 	gp.GET("", func(c *gin.Context) { listChannels(c, d) })
+	gp.GET("/summary", func(c *gin.Context) { channelSummary(c, d) })
 	gp.GET("/metrics", func(c *gin.Context) { channelMetrics(c, d) })
 	gp.GET("/latency-trends", func(c *gin.Context) { channelLatencyTrends(c, d) })
 	gp.GET("/associations", func(c *gin.Context) { channelRelayAssociations(c, d) })
@@ -182,6 +183,7 @@ type channelView struct {
 	storage.Channel
 	LoginHeaders                  []channel.RequestKV  `json:"login_headers"`
 	LoginParams                   []channel.RequestKV  `json:"login_params"`
+	ModelNames                    []string             `json:"model_names"`
 	NewAPIAuthType                string               `json:"newapi_auth_type,omitempty"`
 	NewAPIUserID                  string               `json:"newapi_user_id,omitempty"`
 	NewAPITokenHeaders            []channel.RequestKV  `json:"newapi_token_headers,omitempty"`
@@ -205,6 +207,13 @@ func channelViews(d *Deps, channels []storage.Channel) ([]channelView, error) {
 	accountsByChannel, err := d.Channels.ListAccountsForChannels(ids)
 	if err != nil {
 		return nil, err
+	}
+	modelNamesByChannel := make(map[uint][]string, len(ids))
+	if d.ChannelUsage != nil {
+		modelNamesByChannel, err = d.ChannelUsage.DistinctModelsByChannels(ids)
+		if err != nil {
+			return nil, err
+		}
 	}
 	views := make([]channelView, 0, len(channels))
 	for _, item := range channels {
@@ -232,7 +241,7 @@ func channelViews(d *Deps, channels []storage.Channel) ([]channelView, error) {
 		if err != nil {
 			return nil, err
 		}
-		views = append(views, channelView{Channel: item, LoginHeaders: headers, LoginParams: params, NewAPIAuthType: authType, NewAPIUserID: userID, NewAPITokenHeaders: tokenHeaders, Sub2APIRefreshTokenConfigured: refreshConfigured, Accounts: accounts})
+		views = append(views, channelView{Channel: item, LoginHeaders: headers, LoginParams: params, ModelNames: modelNamesByChannel[item.ID], NewAPIAuthType: authType, NewAPIUserID: userID, NewAPITokenHeaders: tokenHeaders, Sub2APIRefreshTokenConfigured: refreshConfigured, Accounts: accounts})
 	}
 	return views, nil
 }
@@ -316,19 +325,84 @@ type channelMetricView struct {
 	ChannelID                uint    `json:"channel_id"`
 	ConsumptionAmount        float64 `json:"consumption_amount"`
 	CumulativeRechargeAmount float64 `json:"cumulative_recharge_amount"`
-	UserChargeAmount         float64 `json:"user_charge_amount"`
-	MatchedAccountCount      int     `json:"matched_account_count"`
-	UserChargeComplete       bool    `json:"user_charge_complete"`
+	UsageCostAmount          float64 `json:"usage_cost_amount"`
+	UsageRequestCount        int64   `json:"usage_request_count"`
 	CurrentBalance           float64 `json:"current_balance"`
 }
 
 type channelLatencyTrendView struct {
 	ChannelID uint                         `json:"channel_id"`
-	Samples   []storage.RelayLatencySample `json:"samples"`
+	Samples   []storage.ChannelUsageSample `json:"samples"`
+}
+
+func channelSummary(c *gin.Context, d *Deps) {
+	since, rangeName := operationSince(c.DefaultQuery("range", "today"))
+	channels, err := d.Channels.List()
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	consumption, err := d.Rates.ChannelConsumptionTotals(since)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	recharges, err := d.Operations.ChannelRechargeTotals()
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	usageCost, usageRequests, err := d.ChannelUsage.CostTotals(since)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	var totalBalance, consumptionAmount, usageCostAmount float64
+	var usageRequestCount int64
+	var activeCount, failedCount int
+	var lowest *dashboardLowest
+	for _, item := range channels {
+		balance := item.LastBalance
+		if item.BalanceMode == storage.BalanceModeManual && balance == nil {
+			value := item.ManualBalance
+			balance = &value
+		}
+		if item.LastError != "" {
+			failedCount++
+		} else if item.MonitorEnabled {
+			activeCount++
+		}
+		if balance != nil {
+			totalBalance += *balance
+			if item.MonitorEnabled && (lowest == nil || lowest.Balance == nil || *balance < *lowest.Balance) {
+				value := *balance
+				lowest = &dashboardLowest{ChannelID: item.ID, Name: item.Name, Balance: &value}
+			}
+		}
+		consumptionAmount += consumption[item.ID]
+		usageCostAmount += usageCost[item.ID]
+		usageRequestCount += usageRequests[item.ID]
+	}
+	rateChangeCount, err := d.Rates.CountOwnedChangesSince(since)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	recentRateChanges, err := d.Rates.ListOwnedChangesSince(since, 20)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{
+		"range": rangeName, "total_channels": len(channels), "active_channels": activeCount, "failed_channels": failedCount,
+		"total_balance": totalBalance, "cumulative_recharge_amount": dashboardCumulativeRecharge(channels, recharges),
+		"consumption_amount": consumptionAmount, "usage_cost_amount": usageCostAmount, "usage_request_count": usageRequestCount,
+		"lowest_balance": lowest, "rate_change_count": rateChangeCount, "recent_rate_changes": recentRateChanges,
+	}})
 }
 
 func channelMetrics(c *gin.Context, d *Deps) {
-	since, rangeName := operationSince(c.DefaultQuery("range", "today"))
+	since, _ := operationSince(c.DefaultQuery("range", "today"))
 	channels, err := d.Channels.List()
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -344,14 +418,13 @@ func channelMetrics(c *gin.Context, d *Deps) {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	usage, err := d.Relay.ChannelUsageTotals(c.Request.Context(), channels, rangeName, since)
+	usageCost, usageRequests, err := d.ChannelUsage.CostTotals(since)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
 	result := make([]channelMetricView, 0, len(channels))
 	for _, item := range channels {
-		interval := usage[item.ID]
 		currentBalance := float64(0)
 		if item.LastBalance != nil {
 			currentBalance = *item.LastBalance
@@ -359,13 +432,9 @@ func channelMetrics(c *gin.Context, d *Deps) {
 		if item.BalanceMode == storage.BalanceModeManual && item.LastBalance == nil {
 			currentBalance = item.ManualBalance
 		}
-		if item.BalanceMode == storage.BalanceModeManual {
-			consumption[item.ID] = interval.Cost
-		}
 		result = append(result, channelMetricView{
 			ChannelID: item.ID, ConsumptionAmount: consumption[item.ID], CumulativeRechargeAmount: recharges[item.ID],
-			UserChargeAmount: interval.UserCharge, MatchedAccountCount: interval.MatchedAccountCount,
-			UserChargeComplete: interval.Complete, CurrentBalance: currentBalance,
+			UsageCostAmount: usageCost[item.ID], UsageRequestCount: usageRequests[item.ID], CurrentBalance: currentBalance,
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": result})
@@ -378,20 +447,121 @@ func channelLatencyTrends(c *gin.Context, d *Deps) {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	trends, err := d.Relay.ChannelLatencyTrends(channels, limit)
-	if err != nil {
-		fail(c, http.StatusInternalServerError, err)
-		return
-	}
 	result := make([]channelLatencyTrendView, 0, len(channels))
 	for _, channel := range channels {
-		samples := trends[channel.ID]
-		if samples == nil {
-			samples = []storage.RelayLatencySample{}
+		samples, err := d.ChannelUsage.RecentSamples(channel.ID, limit)
+		if err != nil {
+			fail(c, http.StatusInternalServerError, err)
+			return
 		}
 		result = append(result, channelLatencyTrendView{ChannelID: channel.ID, Samples: samples})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": result})
+}
+
+func latencyRangeWindow(raw string) (time.Time, time.Time, string) {
+	return latencyRangeWindowAt(time.Now(), raw)
+}
+
+func latencyRangeWindowAt(now time.Time, raw string) (time.Time, time.Time, string) {
+	until := now.UTC().Truncate(time.Minute)
+	localNow := until.In(now.Location())
+	since, rangeName := dashboardSinceAt(localNow, raw)
+	if since.IsZero() {
+		since = localNow.Add(-30 * 24 * time.Hour)
+		rangeName = "30d"
+	}
+	return since.UTC(), until, rangeName
+}
+
+func latencySampleWindow(c *gin.Context) (time.Time, time.Time, int, error) {
+	start, err := time.Parse(time.RFC3339, c.Query("start"))
+	if err != nil {
+		return time.Time{}, time.Time{}, 0, errors.New("start 必须是 RFC3339 时间")
+	}
+	end, err := time.Parse(time.RFC3339, c.Query("end"))
+	if err != nil {
+		return time.Time{}, time.Time{}, 0, errors.New("end 必须是 RFC3339 时间")
+	}
+	if !end.After(start) {
+		return time.Time{}, time.Time{}, 0, errors.New("end 必须晚于 start")
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "30"))
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	return start.UTC(), end.UTC(), limit, nil
+}
+
+func channelLatencyBuckets(c *gin.Context, d *Deps) {
+	since, until, rangeName := latencyRangeWindow(c.DefaultQuery("range", "today"))
+	spec, err := latencyBucketSpecFromQuery(c, 60)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	channels, err := d.Channels.List()
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]gin.H, 0, len(channels))
+	for _, channel := range channels {
+		events, err := d.ChannelUsage.EventsBetween(channel.ID, since, until)
+		if err != nil {
+			fail(c, http.StatusInternalServerError, err)
+			return
+		}
+		out = append(out, gin.H{"channel_id": channel.ID, "buckets": buildChannelLatencyBuckets(events, since, until, spec)})
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out, "range": rangeName})
+}
+
+func channelConsumptionBuckets(c *gin.Context, d *Deps) {
+	since, until, rangeName := latencyRangeWindow(c.DefaultQuery("range", "today"))
+	spec, err := latencyBucketSpecFromQuery(c, 60)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	channels, err := d.Channels.List()
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]gin.H, 0, len(channels))
+	for _, channel := range channels {
+		events, err := d.ChannelUsage.EventsBetween(channel.ID, since, until)
+		if err != nil {
+			fail(c, http.StatusInternalServerError, err)
+			return
+		}
+		out = append(out, gin.H{"channel_id": channel.ID, "buckets": buildChannelConsumptionBuckets(events, since, until, spec)})
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out, "range": rangeName})
+}
+
+func channelLatencySamples(c *gin.Context, d *Deps) {
+	id, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	start, end, limit, err := latencySampleWindow(c)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	if _, err := d.Channels.FindByID(id); err != nil {
+		fail(c, http.StatusNotFound, err)
+		return
+	}
+	samples, err := d.ChannelUsage.SamplesBetween(id, start, end, limit)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": samples})
 }
 
 func syncAllChannels(c *gin.Context, d *Deps) {
@@ -604,12 +774,12 @@ func channelRates(c *gin.Context, d *Deps) {
 		fail(c, http.StatusNotFound, err)
 		return
 	}
-	list, err := d.Rates.ListByChannel(id)
+	list, err := d.Rates.ListOwnedByChannel(id)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	latestChanges, err := d.Rates.ListLatestRatioChanges(id)
+	latestChanges, err := d.Rates.ListLatestOwnedRatioChanges(id)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -618,44 +788,19 @@ func channelRates(c *gin.Context, d *Deps) {
 	for i := range latestChanges {
 		latestChangeByGroup[latestChanges[i].ModelName] = &latestChanges[i]
 	}
-	bindings, err := d.RelayStations.ListChannelRateBoundAccounts(id)
-	if err != nil {
-		fail(c, http.StatusInternalServerError, err)
-		return
-	}
-	bindingsByGroup := make(map[string][]channelRateBoundAccountView)
-	for _, binding := range bindings {
-		accountName := strings.TrimSpace(binding.RelayAccountName)
-		if accountName == "" {
-			accountName = "账号 #" + strconv.FormatInt(binding.RelayAccountExternalID, 10)
-		}
-		bindingsByGroup[binding.UpstreamGroup] = append(bindingsByGroup[binding.UpstreamGroup], channelRateBoundAccountView{
-			RelayStationID: binding.RelayStationID, RelayStationName: binding.RelayStationName,
-			RelayAccountExternalID: binding.RelayAccountExternalID, RelayAccountName: accountName,
-		})
-	}
 	result := make([]channelRateView, 0, len(list))
 	for _, rate := range list {
 		result = append(result, channelRateView{
 			RateSnapshot:      rate,
-			BoundAccounts:     bindingsByGroup[rate.ModelName],
 			LatestRatioChange: latestChangeByGroup[rate.ModelName],
 		})
 	}
 	c.JSON(http.StatusOK, gin.H{"data": result})
 }
 
-type channelRateBoundAccountView struct {
-	RelayStationID         uint   `json:"relay_station_id"`
-	RelayStationName       string `json:"relay_station_name"`
-	RelayAccountExternalID int64  `json:"relay_account_external_id"`
-	RelayAccountName       string `json:"relay_account_name"`
-}
-
 type channelRateView struct {
 	storage.RateSnapshot
-	BoundAccounts     []channelRateBoundAccountView `json:"bound_accounts"`
-	LatestRatioChange *storage.RateChangeLog        `json:"latest_ratio_change,omitempty"`
+	LatestRatioChange *storage.RateChangeLog `json:"latest_ratio_change,omitempty"`
 }
 
 type channelRateInput struct {
@@ -705,7 +850,7 @@ func saveChannelRate(c *gin.Context, d *Deps, id uint, rateID uint) {
 		return
 	}
 	if rateID == 0 {
-		list, listErr := d.Rates.ListByChannel(id)
+		list, listErr := d.Rates.ListOwnedByChannel(id)
 		if listErr != nil {
 			fail(c, http.StatusInternalServerError, listErr)
 			return
@@ -884,18 +1029,14 @@ func syncChannel(c *gin.Context, d *Deps) {
 	obs := setupSSE(c)
 	ctx := progress.WithObserver(c.Request.Context(), obs)
 
-	// 串行执行：先余额，再倍率。任一步失败仍尝试下一个，但用 done 表示整体状态。
+	// 串行执行：余额、倍率、渠道自身调用日志。任一步失败仍尝试后续步骤。
 	balErr := d.Monitor.RefreshBalance(ctx, ch)
 	rateErr := d.Monitor.RefreshRates(ctx, ch)
+	usageErr := d.Monitor.RefreshUsage(ctx, ch)
 
-	switch {
-	case balErr != nil && rateErr != nil:
-		progress.Fail(ctx, progress.StageError, balErr.Error()+" | "+rateErr.Error())
-	case balErr != nil:
-		progress.Fail(ctx, progress.StageError, balErr.Error())
-	case rateErr != nil:
-		progress.Fail(ctx, progress.StageError, rateErr.Error())
-	default:
+	if err := errors.Join(balErr, rateErr, usageErr); err != nil {
+		progress.Fail(ctx, progress.StageError, err.Error())
+	} else {
 		progress.OK(ctx, progress.StageDone, "同步完成")
 	}
 }

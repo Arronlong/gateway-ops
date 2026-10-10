@@ -22,6 +22,7 @@ func registerRelayStations(g *gin.RouterGroup, d *Deps) {
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllRelayStations(c, d) })
 	gp.GET("/:id", func(c *gin.Context) { relayStationOverview(c, d) })
 	gp.GET("/:id/usage", func(c *gin.Context) { relayStationUsage(c, d) })
+	gp.GET("/:id/usage/daily", func(c *gin.Context) { relayStationDailyConsumption(c, d) })
 	gp.GET("/:id/usage/recent", func(c *gin.Context) { relayStationRecentUsage(c, d) })
 	gp.GET("/:id/users", func(c *gin.Context) { relayStationUsers(c, d) })
 	gp.PUT("/:id/users/:user_id/status", func(c *gin.Context) { updateRelayStationUserStatus(c, d) })
@@ -193,11 +194,11 @@ type relayOverview struct {
 }
 
 type relayUsageAccountView struct {
-	ExternalID        int64   `json:"external_id"`
-	UsageTotalTokens  int64   `json:"usage_total_tokens"`
-	UserChargeAmount  float64 `json:"user_charge_amount"`
-	AccountCostAmount  *float64 `json:"account_cost_amount"`
-	RequestCount      int64   `json:"request_count"`
+	ExternalID        int64    `json:"external_id"`
+	UsageTotalTokens  int64    `json:"usage_total_tokens"`
+	UserChargeAmount  float64  `json:"user_charge_amount"`
+	AccountCostAmount *float64 `json:"account_cost_amount"`
+	RequestCount      int64    `json:"request_count"`
 }
 
 type relayUsageView struct {
@@ -1186,6 +1187,104 @@ func relayStationOverview(c *gin.Context, d *Deps) {
 	}})
 }
 
+func relayStationLatencyBuckets(c *gin.Context, d *Deps) {
+	id, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	since, until, rangeName := latencyRangeWindow(c.DefaultQuery("range", "today"))
+	spec, err := latencyBucketSpecFromQuery(c, 30)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	buckets, err := d.Relay.StationLatencyBuckets(c.Request.Context(), id, since, until, spec)
+	if err != nil {
+		fail(c, http.StatusBadGateway, err)
+		return
+	}
+	out := make([]gin.H, 0, len(buckets))
+	for accountID, accountBuckets := range buckets {
+		out = append(out, gin.H{"account_id": accountID, "buckets": accountBuckets})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i]["account_id"].(int64) < out[j]["account_id"].(int64)
+	})
+	c.JSON(http.StatusOK, gin.H{"data": out, "range": rangeName})
+}
+
+func relayStationConsumptionBuckets(c *gin.Context, d *Deps) {
+	id, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	since, until, rangeName := latencyRangeWindow(c.DefaultQuery("range", "today"))
+	spec, err := latencyBucketSpecFromQuery(c, 30)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	buckets, err := d.Relay.StationAccountConsumptionBuckets(c.Request.Context(), id, since, until, spec)
+	if err != nil {
+		fail(c, http.StatusBadGateway, err)
+		return
+	}
+	out := make([]gin.H, 0, len(buckets))
+	for accountID, accountBuckets := range buckets {
+		out = append(out, gin.H{"account_id": accountID, "buckets": accountBuckets})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		return out[i]["account_id"].(int64) < out[j]["account_id"].(int64)
+	})
+	c.JSON(http.StatusOK, gin.H{"data": out, "range": rangeName})
+}
+
+func relayStationAccountLatencySamples(c *gin.Context, d *Deps) {
+	id, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	accountID, err := strconv.ParseInt(c.Param("external_id"), 10, 64)
+	if err != nil || accountID <= 0 {
+		fail(c, http.StatusBadRequest, errors.New("invalid account id"))
+		return
+	}
+	start, end, limit, err := latencySampleWindow(c)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	samples, err := d.Relay.AccountLatencySamples(c.Request.Context(), id, accountID, start, end, limit)
+	if err != nil {
+		fail(c, http.StatusBadGateway, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": samples})
+}
+
+func relayStationDailyConsumption(c *gin.Context, d *Deps) {
+	id, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	rawRange := c.DefaultQuery("range", "today")
+	if rawRange != "today" && rawRange != "24h" && rawRange != "7d" && rawRange != "30d" && rawRange != "all" {
+		fail(c, http.StatusBadRequest, errors.New("range 仅支持 today、24h、7d、30d 或 all"))
+		return
+	}
+	_, rangeName := operationSince(rawRange)
+	points, err := d.Relay.StationDailyConsumptionRange(c.Request.Context(), id, rangeName, time.Now())
+	if err != nil {
+		fail(c, http.StatusBadGateway, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": points, "range": rangeName})
+}
+
 func relayStationUsage(c *gin.Context, d *Deps) {
 	id, err := uintParam(c, "id")
 	if err != nil {
@@ -1226,8 +1325,8 @@ func relayStationRecentUsage(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "100"))
-	items, err := d.Relay.RecentUsage(c.Request.Context(), id, limit)
+	since, _ := operationSince(c.DefaultQuery("range", "today"))
+	items, err := d.Relay.RecentUsage(c.Request.Context(), id, since, time.Now())
 	if err != nil {
 		fail(c, http.StatusBadGateway, err)
 		return
