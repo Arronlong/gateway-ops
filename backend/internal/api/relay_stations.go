@@ -29,6 +29,7 @@ func registerRelayStations(g *gin.RouterGroup, d *Deps) {
 	gp.POST("/:id/users/batch-delete", func(c *gin.Context) { deleteRelayStationUsers(c, d) })
 	gp.POST("/:id/accounts/batch-clone", func(c *gin.Context) { batchCloneRelayAccounts(c, d) })
 	gp.GET("/:id/users/:user_id/balance-history", func(c *gin.Context) { relayStationUserBalanceHistory(c, d) })
+	gp.GET("/:id/account-models", func(c *gin.Context) { relayStationAccountModelCatalog(c, d) })
 	gp.GET("/:id/accounts/:external_id/models", func(c *gin.Context) { relayStationAccountModels(c, d) })
 	gp.POST("/:id/accounts/:external_id/test", func(c *gin.Context) { relayStationTestAccount(c, d) })
 	gp.DELETE("/:id/accounts/:external_id", func(c *gin.Context) { deleteRelayStationAccount(c, d) })
@@ -1371,6 +1372,20 @@ func relayStationAccountModels(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": models})
+}
+
+func relayStationAccountModelCatalog(c *gin.Context, d *Deps) {
+	stationID, err := uintParam(c, "id")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	items, err := d.Relay.AccountModelCatalog(c.Request.Context(), stationID)
+	if err != nil {
+		fail(c, http.StatusBadGateway, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
 }
 
 func relayStationTestAccount(c *gin.Context, d *Deps) {

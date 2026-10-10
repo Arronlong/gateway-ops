@@ -8,9 +8,11 @@ import type {
   BalanceTrendPoint,
   CaptchaConfig,
   Channel,
+  ChannelModelCatalogItem,
   ChannelRelayAssociationSnapshot,
   ChannelMetric,
   ChannelLatencyTrend,
+  RelayAccountModelCatalogItem,
   DashboardSummary,
   NotificationChannel,
   NotificationLog,
@@ -202,6 +204,10 @@ export function useChannelRelayAssociations() {
   return useApi<ChannelRelayAssociationSnapshot>("/channels/associations")
 }
 
+export function useChannelModelCatalog() {
+  return useApi<ChannelModelCatalogItem[]>("/channels/model-catalog")
+}
+
 export function useChannelMetrics(range: RelayUsageRange = "today") {
   return useApi<ChannelMetric[]>(`/channels/metrics?range=${range}`)
 }
@@ -247,6 +253,10 @@ export function useRelayStations() {
 
 export function useRelayOverview(stationID: number | null) {
   return useApi<RelayOverview>(stationID == null ? null : `/relay-stations/${stationID}`)
+}
+
+export function useRelayAccountModelCatalog(stationID: number | null, enabled = true) {
+  return useApi<RelayAccountModelCatalogItem[]>(stationID == null || !enabled ? null : `/relay-stations/${stationID}/account-models`)
 }
 
 export function useRelayUsage(stationID: number | null, range: RelayUsageRange = "today") {

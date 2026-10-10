@@ -24,6 +24,7 @@ import (
 
 	"github.com/guliansheng/gateway-ops/internal/crypto"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"golang.org/x/sync/singleflight"
 )
 
 const requestTimeout = 45 * time.Second
@@ -32,6 +33,8 @@ const requestTimeout = 45 * time.Second
 // fan out one usage request per account on every tick and overload Sub2API.
 const latencyCacheTTL = 5 * time.Minute
 const latencySampleLimit = 60
+
+const accountModelCatalogTTL = 5 * time.Minute
 
 const (
 	ipLocationEndpoint = "http://ip-api.com/batch?fields=status,message,query,countryCode,regionName,city"
@@ -61,6 +64,9 @@ type Service struct {
 	publicMonitorCache map[uint]publicMonitorCacheEntry
 	publicPricingMu    sync.Mutex
 	publicPricingCache map[uint]publicModelPricingCacheEntry
+	accountModelsMu    sync.Mutex
+	accountModelsCache map[uint]accountModelCatalogCacheEntry
+	accountModelsGroup singleflight.Group
 }
 
 func NewService(stations *storage.RelayStations, cipher *crypto.Cipher, deps ...any) *Service {
@@ -84,6 +90,7 @@ func NewService(stations *storage.RelayStations, cipher *crypto.Cipher, deps ...
 		latencyCache:       make(map[string]latencyCacheEntry),
 		publicMonitorCache: make(map[uint]publicMonitorCacheEntry),
 		publicPricingCache: make(map[uint]publicModelPricingCacheEntry),
+		accountModelsCache: make(map[uint]accountModelCatalogCacheEntry),
 	}
 }
 
@@ -1343,6 +1350,129 @@ type GroupTestResult struct {
 	Results   []GroupTestCallResult `json:"results"`
 }
 
+type AccountModelCatalogItem struct {
+	AccountID int64    `json:"account_id"`
+	Models    []string `json:"models"`
+}
+
+type accountModelCatalogCacheEntry struct {
+	Items     []AccountModelCatalogItem
+	ExpiresAt time.Time
+}
+
+func cloneAccountModelCatalog(items []AccountModelCatalogItem) []AccountModelCatalogItem {
+	cloned := make([]AccountModelCatalogItem, len(items))
+	for i, item := range items {
+		cloned[i] = AccountModelCatalogItem{AccountID: item.AccountID, Models: append([]string(nil), item.Models...)}
+	}
+	return cloned
+}
+
+func fetchAccountModelCatalog(ctx context.Context, accountIDs []int64, concurrency int, fetch func(context.Context, int64) ([]string, error)) []AccountModelCatalogItem {
+	if len(accountIDs) == 0 {
+		return []AccountModelCatalogItem{}
+	}
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	if concurrency > len(accountIDs) {
+		concurrency = len(accountIDs)
+	}
+	jobs := make(chan int64)
+	results := make(chan AccountModelCatalogItem, len(accountIDs))
+	var workers sync.WaitGroup
+	for range concurrency {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for accountID := range jobs {
+				models, err := fetch(ctx, accountID)
+				if err != nil || len(models) == 0 {
+					continue
+				}
+				results <- AccountModelCatalogItem{AccountID: accountID, Models: models}
+			}
+		}()
+	}
+	for _, accountID := range accountIDs {
+		select {
+		case <-ctx.Done():
+			close(jobs)
+			workers.Wait()
+			close(results)
+			items := make([]AccountModelCatalogItem, 0, len(results))
+			for item := range results {
+				items = append(items, item)
+			}
+			sort.Slice(items, func(i, j int) bool { return items[i].AccountID < items[j].AccountID })
+			return items
+		case jobs <- accountID:
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	close(results)
+	items := make([]AccountModelCatalogItem, 0, len(results))
+	for item := range results {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].AccountID < items[j].AccountID })
+	return items
+}
+
+func (s *Service) AccountModelCatalog(ctx context.Context, stationID uint) ([]AccountModelCatalogItem, error) {
+	now := time.Now()
+	s.accountModelsMu.Lock()
+	if cached, ok := s.accountModelsCache[stationID]; ok && cached.ExpiresAt.After(now) {
+		items := cloneAccountModelCatalog(cached.Items)
+		s.accountModelsMu.Unlock()
+		return items, nil
+	}
+	s.accountModelsMu.Unlock()
+
+	value, err, _ := s.accountModelsGroup.Do(strconv.FormatUint(uint64(stationID), 10), func() (any, error) {
+		now := time.Now()
+		s.accountModelsMu.Lock()
+		if cached, ok := s.accountModelsCache[stationID]; ok && cached.ExpiresAt.After(now) {
+			items := cloneAccountModelCatalog(cached.Items)
+			s.accountModelsMu.Unlock()
+			return items, nil
+		}
+		s.accountModelsMu.Unlock()
+
+		station, err := s.stations.FindByID(stationID)
+		if err != nil {
+			return nil, err
+		}
+		apiKey, err := s.cipher.Decrypt(station.APIKeyCipher)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt admin API key: %w", err)
+		}
+		accounts, err := s.stations.ListAccounts(stationID)
+		if err != nil {
+			return nil, err
+		}
+		accountIDs := make([]int64, 0, len(accounts))
+		for _, account := range accounts {
+			if strings.EqualFold(strings.TrimSpace(account.Type), "oauth") {
+				continue
+			}
+			accountIDs = append(accountIDs, account.ExternalID)
+		}
+		items := fetchAccountModelCatalog(ctx, accountIDs, 8, func(fetchCtx context.Context, accountID int64) ([]string, error) {
+			return s.accountModelsFromUpstream(fetchCtx, station.BaseURL, apiKey, accountID)
+		})
+		s.accountModelsMu.Lock()
+		s.accountModelsCache[stationID] = accountModelCatalogCacheEntry{Items: cloneAccountModelCatalog(items), ExpiresAt: time.Now().Add(accountModelCatalogTTL)}
+		s.accountModelsMu.Unlock()
+		return items, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cloneAccountModelCatalog(value.([]AccountModelCatalogItem)), nil
+}
+
 func (s *Service) AccountModels(ctx context.Context, stationID uint, accountID int64) ([]string, error) {
 	station, err := s.stations.FindByID(stationID)
 	if err != nil {
@@ -1352,8 +1482,12 @@ func (s *Service) AccountModels(ctx context.Context, stationID uint, accountID i
 	if err != nil {
 		return nil, fmt.Errorf("decrypt admin API key: %w", err)
 	}
+	return s.accountModelsFromUpstream(ctx, station.BaseURL, apiKey, accountID)
+}
+
+func (s *Service) accountModelsFromUpstream(ctx context.Context, baseURL, apiKey string, accountID int64) ([]string, error) {
 	var raw json.RawMessage
-	endpoint := fmt.Sprintf("%s/api/v1/admin/accounts/%d/models", station.BaseURL, accountID)
+	endpoint := fmt.Sprintf("%s/api/v1/admin/accounts/%d/models", baseURL, accountID)
 	if err := s.get(ctx, endpoint, apiKey, &raw); err != nil {
 		return nil, err
 	}
