@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +16,7 @@ import (
 
 const (
 	groupMonitorLimit    = 60
+	groupMonitorPageSize = 200
 	groupMonitorCacheTTL = 15 * time.Second
 	groupMonitorWorkers  = 6
 )
@@ -23,6 +26,7 @@ const (
 type PublicGroupMonitor struct {
 	StationID   uint                      `json:"station_id"`
 	StationName string                    `json:"station_name"`
+	Range       string                    `json:"range"`
 	UpdatedAt   time.Time                 `json:"updated_at"`
 	Groups      []PublicGroupMonitorGroup `json:"groups"`
 	Summary     PublicGroupMonitorSummary `json:"summary"`
@@ -39,22 +43,23 @@ type PublicGroupMonitorSummary struct {
 }
 
 type PublicGroupMonitorGroup struct {
-	ExternalID          int64                    `json:"external_id"`
-	Name                string                   `json:"name"`
-	Description         string                   `json:"description,omitempty"`
-	Platform            string                   `json:"platform,omitempty"`
-	RateMultiplier      float64                  `json:"rate_multiplier"`
-	Enabled             bool                     `json:"enabled"`
-	GroupStatus         string                   `json:"group_status,omitempty"`
-	Status              string                   `json:"status"`
-	DataComplete        bool                     `json:"data_complete"`
-	UpdatedAt           time.Time                `json:"updated_at"`
-	LatestCallAt        *time.Time               `json:"latest_call_at,omitempty"`
-	SuccessCount        int                      `json:"success_count"`
-	FailureCount        int                      `json:"failure_count"`
-	ConsecutiveFailures int                      `json:"consecutive_failures"`
-	FailureSummary      string                   `json:"failure_summary,omitempty"`
-	Calls               []PublicGroupMonitorCall `json:"calls"`
+	ExternalID          int64                             `json:"external_id"`
+	Name                string                            `json:"name"`
+	Description         string                            `json:"description,omitempty"`
+	Platform            string                            `json:"platform,omitempty"`
+	RateMultiplier      float64                           `json:"rate_multiplier"`
+	Enabled             bool                              `json:"enabled"`
+	GroupStatus         string                            `json:"group_status,omitempty"`
+	Status              string                            `json:"status"`
+	DataComplete        bool                              `json:"data_complete"`
+	UpdatedAt           time.Time                         `json:"updated_at"`
+	LatestCallAt        *time.Time                        `json:"latest_call_at,omitempty"`
+	SuccessCount        int                               `json:"success_count"`
+	FailureCount        int                               `json:"failure_count"`
+	ConsecutiveFailures int                               `json:"consecutive_failures"`
+	FailureSummary      string                            `json:"failure_summary,omitempty"`
+	Calls               []PublicGroupMonitorCall          `json:"calls"`
+	LatencyBuckets      []PublicGroupMonitorLatencyBucket `json:"latency_buckets"`
 }
 
 type PublicGroupMonitorCall struct {
@@ -63,6 +68,22 @@ type PublicGroupMonitorCall struct {
 	Model        string    `json:"model,omitempty"`
 	FirstTokenMS *int64    `json:"first_token_ms,omitempty"`
 	DurationMS   *int64    `json:"duration_ms,omitempty"`
+}
+
+type PublicGroupMonitorLatencyBucket struct {
+	Start           time.Time `json:"start"`
+	End             time.Time `json:"end"`
+	FirstTokenP50MS *int64    `json:"first_token_p50_ms"`
+	FirstTokenP95MS *int64    `json:"first_token_p95_ms"`
+	DurationP50MS   *int64    `json:"duration_p50_ms"`
+	DurationP95MS   *int64    `json:"duration_p95_ms"`
+	SuccessRate     *float64  `json:"success_rate"`
+	RequestCount    int       `json:"request_count"`
+}
+
+type publicMonitorCacheKey struct {
+	stationID uint
+	rangeName string
 }
 
 type publicMonitorCacheEntry struct {
@@ -111,7 +132,11 @@ type remoteRequestError struct {
 }
 
 type remoteRequestErrorPage struct {
-	Items []remoteRequestError `json:"items"`
+	Items    []remoteRequestError `json:"items"`
+	Total    int                  `json:"total"`
+	Page     int                  `json:"page"`
+	PageSize int                  `json:"page_size"`
+	Pages    int                  `json:"pages"`
 }
 
 type monitorFetchKind uint8
@@ -131,8 +156,171 @@ type monitorFetchResult struct {
 
 func (s *Service) invalidatePublicMonitor(stationID uint) {
 	s.publicMonitorMu.Lock()
-	delete(s.publicMonitorCache, stationID)
+	for key := range s.publicMonitorCache {
+		if key.stationID == stationID {
+			delete(s.publicMonitorCache, key)
+		}
+	}
 	s.publicMonitorMu.Unlock()
+}
+
+func publicGroupMonitorWindowAt(now time.Time, rawRange string) (string, time.Time, time.Time) {
+	rangeName := strings.ToLower(strings.TrimSpace(rawRange))
+	switch rangeName {
+	case "today", "24h", "7d", "30d":
+	default:
+		rangeName = "24h"
+	}
+	since, until := dailyConsumptionWindowAt(now, rangeName)
+	return rangeName, since.UTC(), until.UTC()
+}
+
+func groupMonitorEndpoint(baseURL string, groupID int64, kind monitorFetchKind, since, until time.Time) string {
+	return groupMonitorEndpointForPage(baseURL, groupID, kind, since, until, 1)
+}
+
+func groupMonitorEndpointForPage(baseURL string, groupID int64, kind monitorFetchKind, since, until time.Time, page int) string {
+	if page < 1 {
+		page = 1
+	}
+	query := url.Values{
+		"page":      {strconv.Itoa(page)},
+		"page_size": {strconv.Itoa(groupMonitorPageSize)},
+		"group_id":  {strconv.FormatInt(groupID, 10)},
+	}
+	path := "/api/v1/admin/usage"
+	if kind == monitorFetchUsage {
+		setUsageDateRange(query, since, until)
+	} else {
+		path = "/api/v1/admin/ops/request-errors"
+		query.Set("start_time", since.UTC().Format(time.RFC3339Nano))
+		query.Set("end_time", until.UTC().Format(time.RFC3339Nano))
+	}
+	return strings.TrimRight(baseURL, "/") + path + "?" + query.Encode()
+}
+
+func fetchGroupMonitorUsageEvents(ctx context.Context, client *Service, baseURL, apiKey string, groupID int64, since, until time.Time) ([]monitorEvent, error) {
+	items, err := fetchGroupMonitorUsagePages(ctx, client, baseURL, apiKey, groupID, since, until)
+	if err != nil {
+		return nil, err
+	}
+	return usageMonitorEvents(items), nil
+}
+
+func fetchGroupMonitorErrorEvents(ctx context.Context, client *Service, baseURL, apiKey string, groupID int64, since, until time.Time) ([]monitorEvent, error) {
+	items, err := fetchGroupMonitorErrorPages(ctx, client, baseURL, apiKey, groupID, since, until)
+	if err != nil {
+		return nil, err
+	}
+	return errorMonitorEvents(items, groupID), nil
+}
+
+func groupMonitorPageCount(total, pages int) int {
+	if pages > 0 {
+		return pages
+	}
+	if total <= 0 {
+		return 0
+	}
+	return (total + groupMonitorPageSize - 1) / groupMonitorPageSize
+}
+
+func fetchGroupMonitorUsagePages(ctx context.Context, client *Service, baseURL, apiKey string, groupID int64, since, until time.Time) ([]remoteUsage, error) {
+	var first remoteUsagePage
+	if err := client.get(ctx, groupMonitorEndpointForPage(baseURL, groupID, monitorFetchUsage, since, until, 1), apiKey, &first); err != nil {
+		return nil, err
+	}
+	items := append([]remoteUsage(nil), first.Items...)
+	pageCount := groupMonitorPageCount(first.Total, first.Pages)
+	if pageCount <= 1 {
+		if len(first.Items) < groupMonitorPageSize {
+			return items, nil
+		}
+		pageCount = 1000
+	}
+	pages, err := fetchGroupMonitorUsagePagesConcurrent(ctx, client, baseURL, apiKey, groupID, since, until, 2, pageCount)
+	if err != nil {
+		return nil, err
+	}
+	return append(items, pages...), nil
+}
+
+func fetchGroupMonitorUsagePagesConcurrent(ctx context.Context, client *Service, baseURL, apiKey string, groupID int64, since, until time.Time, startPage, endPage int) ([]remoteUsage, error) {
+	if startPage > endPage {
+		return nil, nil
+	}
+	type result struct {
+		page  int
+		items []remoteUsage
+		err   error
+	}
+	pageCount := endPage - startPage + 1
+	workerCount := groupMonitorWorkers
+	if workerCount > pageCount {
+		workerCount = pageCount
+	}
+	jobs := make(chan int, pageCount)
+	results := make(chan result, pageCount)
+	var workers sync.WaitGroup
+	for worker := 0; worker < workerCount; worker++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for page := range jobs {
+				var response remoteUsagePage
+				err := client.get(ctx, groupMonitorEndpointForPage(baseURL, groupID, monitorFetchUsage, since, until, page), apiKey, &response)
+				results <- result{page: page, items: response.Items, err: err}
+			}
+		}()
+	}
+	for page := startPage; page <= endPage; page++ {
+		jobs <- page
+	}
+	close(jobs)
+	workers.Wait()
+	close(results)
+	byPage := make(map[int][]remoteUsage, pageCount)
+	for response := range results {
+		if response.err != nil {
+			return nil, response.err
+		}
+		byPage[response.page] = response.items
+	}
+	items := make([]remoteUsage, 0, pageCount*groupMonitorPageSize)
+	for page := startPage; page <= endPage; page++ {
+		pageItems := byPage[page]
+		items = append(items, pageItems...)
+		if len(pageItems) < groupMonitorPageSize {
+			break
+		}
+	}
+	return items, nil
+}
+
+func fetchGroupMonitorErrorPages(ctx context.Context, client *Service, baseURL, apiKey string, groupID int64, since, until time.Time) ([]remoteRequestError, error) {
+	var first remoteRequestErrorPage
+	if err := client.get(ctx, groupMonitorEndpointForPage(baseURL, groupID, monitorFetchErrors, since, until, 1), apiKey, &first); err != nil {
+		return nil, err
+	}
+	items := append([]remoteRequestError(nil), first.Items...)
+	pageCount := groupMonitorPageCount(first.Total, first.Pages)
+	if pageCount <= 1 {
+		if len(first.Items) < groupMonitorPageSize {
+			return items, nil
+		}
+		pageCount = 1000
+	}
+	for page := 2; page <= pageCount; page++ {
+		var response remoteRequestErrorPage
+		if err := client.get(ctx, groupMonitorEndpointForPage(baseURL, groupID, monitorFetchErrors, since, until, page), apiKey, &response); err != nil {
+			return nil, err
+		}
+		items = append(items, response.Items...)
+		if len(response.Items) < groupMonitorPageSize {
+			break
+		}
+	}
+	return items, nil
 }
 
 // PublicGroupMonitor aggregates the latest successful calls and provider-side
@@ -141,9 +329,15 @@ func (s *Service) invalidatePublicMonitor(stationID uint) {
 // old. The short cache prevents a public page refresh from fanning out to the
 // remote admin API on every request.
 func (s *Service) PublicGroupMonitor(ctx context.Context, stationID uint) (PublicGroupMonitor, error) {
-	now := time.Now().UTC()
+	return s.PublicGroupMonitorForRange(ctx, stationID, "24h")
+}
+
+// 按时间范围读取最近调用，日历区间与渠道管理使用相同的本地时区。
+func (s *Service) PublicGroupMonitorForRange(ctx context.Context, stationID uint, rawRange string) (PublicGroupMonitor, error) {
+	rangeName, since, now := publicGroupMonitorWindowAt(time.Now(), rawRange)
+	cacheKey := publicMonitorCacheKey{stationID: stationID, rangeName: rangeName}
 	s.publicMonitorMu.Lock()
-	if cached, ok := s.publicMonitorCache[stationID]; ok && now.Before(cached.ExpiresAt) {
+	if cached, ok := s.publicMonitorCache[cacheKey]; ok && now.Before(cached.ExpiresAt) {
 		s.publicMonitorMu.Unlock()
 		return cached.View, nil
 	}
@@ -157,7 +351,7 @@ func (s *Service) PublicGroupMonitor(ctx context.Context, stationID uint) (Publi
 	if err != nil {
 		return PublicGroupMonitor{}, err
 	}
-	view := PublicGroupMonitor{StationID: stationID, StationName: station.Name, UpdatedAt: now, Groups: []PublicGroupMonitorGroup{}}
+	view := PublicGroupMonitor{StationID: stationID, StationName: station.Name, Range: rangeName, UpdatedAt: now, Groups: []PublicGroupMonitorGroup{}}
 	monitored := make([]int, 0, len(groups))
 	for index := range groups {
 		if groups[index].MonitorEnabled {
@@ -166,7 +360,7 @@ func (s *Service) PublicGroupMonitor(ctx context.Context, stationID uint) (Publi
 	}
 	if len(monitored) == 0 {
 		view.Summary.Total = 0
-		s.storePublicMonitor(stationID, view, now)
+		s.storePublicMonitor(cacheKey, view, now)
 		return view, nil
 	}
 
@@ -193,19 +387,9 @@ func (s *Service) PublicGroupMonitor(ctx context.Context, stationID uint) (Publi
 				group := groups[monitored[job.index]]
 				result := monitorFetchResult{index: job.index, kind: job.kind}
 				if job.kind == monitorFetchUsage {
-					var page remoteUsagePage
-					endpoint := fmt.Sprintf("%s/api/v1/admin/usage?page=1&page_size=%d&group_id=%d", station.BaseURL, groupMonitorLimit, group.ExternalID)
-					result.err = s.get(ctx, endpoint, apiKey, &page)
-					if result.err == nil {
-						result.usage = usageMonitorEvents(page.Items)
-					}
+					result.usage, result.err = fetchGroupMonitorUsageEvents(ctx, s, station.BaseURL, apiKey, group.ExternalID, since, now)
 				} else {
-					var page remoteRequestErrorPage
-					endpoint := fmt.Sprintf("%s/api/v1/admin/ops/request-errors?page=1&page_size=%d&group_id=%d", station.BaseURL, groupMonitorLimit, group.ExternalID)
-					result.err = s.get(ctx, endpoint, apiKey, &page)
-					if result.err == nil {
-						result.errors = errorMonitorEvents(page.Items, group.ExternalID)
-					}
+					result.errors, result.err = fetchGroupMonitorErrorEvents(ctx, s, station.BaseURL, apiKey, group.ExternalID, since, now)
 				}
 				results <- result
 			}
@@ -241,7 +425,7 @@ func (s *Service) PublicGroupMonitor(ctx context.Context, stationID uint) (Publi
 	}
 	for index, groupIndex := range monitored {
 		group := groups[groupIndex]
-		item := buildPublicGroupMonitorGroup(group, perGroup[index].usage, perGroup[index].errors, perGroup[index].usageOK && perGroup[index].errorsOK, now)
+		item := buildPublicGroupMonitorGroupForWindow(group, perGroup[index].usage, perGroup[index].errors, perGroup[index].usageOK && perGroup[index].errorsOK, now, since, now)
 		view.Groups = append(view.Groups, item)
 		switch item.Status {
 		case "available":
@@ -259,13 +443,13 @@ func (s *Service) PublicGroupMonitor(ctx context.Context, stationID uint) (Publi
 		}
 	}
 	view.Summary.Total = len(view.Groups)
-	s.storePublicMonitor(stationID, view, now)
+	s.storePublicMonitor(cacheKey, view, now)
 	return view, nil
 }
 
-func (s *Service) storePublicMonitor(stationID uint, view PublicGroupMonitor, now time.Time) {
+func (s *Service) storePublicMonitor(key publicMonitorCacheKey, view PublicGroupMonitor, now time.Time) {
 	s.publicMonitorMu.Lock()
-	s.publicMonitorCache[stationID] = publicMonitorCacheEntry{ExpiresAt: now.Add(groupMonitorCacheTTL), View: view}
+	s.publicMonitorCache[key] = publicMonitorCacheEntry{ExpiresAt: now.Add(groupMonitorCacheTTL), View: view}
 	s.publicMonitorMu.Unlock()
 }
 
@@ -444,11 +628,23 @@ func filterRecoveredMonitorFailures(usage, failures []monitorEvent) []monitorEve
 }
 
 func buildPublicGroupMonitorGroup(group storage.RelayGroup, usage, failures []monitorEvent, complete bool, now time.Time) PublicGroupMonitorGroup {
+	return buildPublicGroupMonitorGroupForWindow(group, usage, failures, complete, now, now.Add(-24*time.Hour), now.Add(time.Nanosecond))
+}
+
+func buildPublicGroupMonitorGroupForWindow(group storage.RelayGroup, usage, failures []monitorEvent, complete bool, now, since, until time.Time) PublicGroupMonitorGroup {
 	failures = filterRecoveredMonitorFailures(usage, failures)
 	events := append(append([]monitorEvent{}, usage...), failures...)
+	filtered := events[:0]
+	for _, event := range events {
+		if !event.createdAt.Before(since) && event.createdAt.Before(until) {
+			filtered = append(filtered, event)
+		}
+	}
+	events = filtered
 	sort.SliceStable(events, func(i, j int) bool { return events[i].createdAt.After(events[j].createdAt) })
-	if len(events) > groupMonitorLimit {
-		events = events[:groupMonitorLimit]
+	recentEvents := events
+	if len(recentEvents) > groupMonitorLimit {
+		recentEvents = recentEvents[:groupMonitorLimit]
 	}
 	successCount := 0
 	failureCount := 0
@@ -483,11 +679,74 @@ func buildPublicGroupMonitorGroup(group storage.RelayGroup, usage, failures []mo
 		value := events[0].createdAt
 		latest = &value
 	}
-	calls := make([]PublicGroupMonitorCall, 0, len(events))
-	for _, event := range events {
+	calls := make([]PublicGroupMonitorCall, 0, len(recentEvents))
+	for _, event := range recentEvents {
 		calls = append(calls, PublicGroupMonitorCall{Success: event.success, CreatedAt: event.createdAt, Model: event.model, FirstTokenMS: event.firstTokenMS, DurationMS: event.durationMS})
 	}
-	return PublicGroupMonitorGroup{ExternalID: group.ExternalID, Name: group.Name, Description: group.Description, Platform: group.Platform, RateMultiplier: group.RateMultiplier, Enabled: group.MonitorEnabled, GroupStatus: group.Status, Status: status, DataComplete: complete, UpdatedAt: now, LatestCallAt: latest, SuccessCount: successCount, FailureCount: failureCount, ConsecutiveFailures: consecutiveFailures, FailureSummary: failureSummary, Calls: calls}
+	latencyBuckets := buildPublicGroupMonitorLatencyBuckets(events, since, until, groupMonitorLimit)
+	return PublicGroupMonitorGroup{ExternalID: group.ExternalID, Name: group.Name, Description: group.Description, Platform: group.Platform, RateMultiplier: group.RateMultiplier, Enabled: group.MonitorEnabled, GroupStatus: group.Status, Status: status, DataComplete: complete, UpdatedAt: now, LatestCallAt: latest, SuccessCount: successCount, FailureCount: failureCount, ConsecutiveFailures: consecutiveFailures, FailureSummary: failureSummary, Calls: calls, LatencyBuckets: latencyBuckets}
+}
+
+func buildPublicGroupMonitorLatencyBuckets(events []monitorEvent, since, until time.Time, count int) []PublicGroupMonitorLatencyBucket {
+	if count <= 0 || !until.After(since) {
+		return []PublicGroupMonitorLatencyBucket{}
+	}
+	total := until.Sub(since)
+	type bucketValues struct {
+		first    []int64
+		duration []int64
+		success  int
+		requests int
+	}
+	values := make([]bucketValues, count)
+	for _, event := range events {
+		if event.createdAt.Before(since) || !event.createdAt.Before(until) {
+			continue
+		}
+		index := int(event.createdAt.Sub(since) * time.Duration(count) / total)
+		if index < 0 {
+			continue
+		}
+		if index >= count {
+			index = count - 1
+		}
+		values[index].requests++
+		if event.firstTokenMS != nil {
+			values[index].first = append(values[index].first, *event.firstTokenMS)
+		}
+		if event.durationMS != nil {
+			values[index].duration = append(values[index].duration, *event.durationMS)
+		}
+		values[index].success += boolToInt(event.success)
+	}
+	buckets := make([]PublicGroupMonitorLatencyBucket, count)
+	for index := range buckets {
+		start := since.Add(time.Duration(index) * total / time.Duration(count))
+		end := since.Add(time.Duration(index+1) * total / time.Duration(count))
+		requestCount := values[index].requests
+		bucket := PublicGroupMonitorLatencyBucket{Start: start, End: end, RequestCount: requestCount}
+		if requestCount > 0 {
+			successRate := float64(values[index].success) / float64(requestCount)
+			bucket.SuccessRate = &successRate
+		}
+		if len(values[index].first) > 0 {
+			p50, p95 := percentileInt64(values[index].first, 0.50), percentileInt64(values[index].first, 0.95)
+			bucket.FirstTokenP50MS, bucket.FirstTokenP95MS = &p50, &p95
+		}
+		if len(values[index].duration) > 0 {
+			p50, p95 := percentileInt64(values[index].duration, 0.50), percentileInt64(values[index].duration, 0.95)
+			bucket.DurationP50MS, bucket.DurationP95MS = &p50, &p95
+		}
+		buckets[index] = bucket
+	}
+	return buckets
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
 }
 
 // buildFailureSummary deliberately uses only the requested model and a small

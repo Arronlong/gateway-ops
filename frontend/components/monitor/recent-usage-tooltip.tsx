@@ -15,8 +15,7 @@ export function RecentUsageTooltip({ count, children }: { count: number; childre
       <div className="sticky bottom-0 flex flex-wrap gap-2 border-t border-slate-200 bg-white px-3 py-2 text-[10px] text-slate-500">
         <span><i className="mr-1 inline-block size-1.5 rounded-full bg-emerald-500" />正常</span>
         <span><i className="mr-1 inline-block size-1.5 rounded-full bg-amber-400" />需关注</span>
-        <span><i className="mr-1 inline-block size-1.5 rounded-full bg-orange-500" />较慢</span>
-        <span><i className="mr-1 inline-block size-1.5 rounded-full bg-red-500" />严重延迟</span>
+        <span><i className="mr-1 inline-block size-1.5 rounded-full bg-red-500" />异常</span>
       </div>
     </>
   )

@@ -272,6 +272,7 @@ export interface DashboardSummary {
 
 export type DashboardRange = "today" | "24h" | "7d" | "30d"
 export type RelayUsageRange = DashboardRange | "all"
+export type LatencyBucketGranularity = "auto" | "5" | "10" | "30" | "60" | "180" | "360" | "720"
 
 export interface RelayPricingChange {
   station_id: number
@@ -356,6 +357,7 @@ export interface RelayAccountView {
   pool_mode: boolean
   pool_mode_retry_count: number
   account_plan?: string
+  expires_at?: string | null
   model_type?: string
   last_used_at?: string | null
   cost_multiplier?: number | null
@@ -638,11 +640,44 @@ export interface LocalAccountListResponse {
   platforms: string[]
 }
 
+export interface OperationRelayStationSummary {
+  id: number
+  name: string
+  user_charge_amount: number
+  call_cost_amount: number
+  account_purchase_amount: number
+  upstream_recharge_amount: number
+  actual_cost_amount: number
+  realtime_multiplier?: number | null
+  complete: boolean
+  failed_accounts: number
+  unknown_cost_accounts: number
+}
+
+export interface OperationCostMetrics {
+  relay_revenue_amount: number
+  relay_call_cost_amount: number
+  relay_account_purchase_amount: number
+  relay_upstream_recharge_amount: number
+  relay_actual_cost_amount: number
+  realtime_multiplier?: number | null
+  relay_cost_complete: boolean
+  relay_call_cost_complete: boolean
+  relay_failed_accounts: number
+  relay_unknown_cost_accounts: number
+  channel_balance_amount: number
+  channel_recharge_amount: number
+  channel_balance_decrease_amount: number
+  channel_cost_variance: number
+  relay_stations: OperationRelayStationSummary[]
+}
+
 export interface OperationSummary {
   range: OperationRange
   ledger: OperationLedgerSummary
   breakdown: OperationLedgerBreakdown[]
   local_pool: LocalAccountSummary
+  cost: OperationCostMetrics
 }
 
 export interface OperationLinkAccount {
@@ -664,6 +699,7 @@ export interface OperationLinkStation {
 export interface RelayLatencySample {
   first_token_ms: number
   duration_ms: number
+  status_code?: number
   created_at: string
   model?: string
   platform?: string
@@ -681,9 +717,67 @@ export interface RelayLatencySample {
   channel_group_multiplier?: number | null
 }
 
+export interface ChannelUsageSample {
+  first_token_ms: number | null
+  duration_ms: number | null
+  success_known: boolean
+  success: boolean
+  created_at: string
+  model?: string
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_tokens?: number
+  cache_creation_tokens?: number
+}
+
 export interface ChannelLatencyTrend {
   channel_id: number
-  samples: RelayLatencySample[]
+  samples: ChannelUsageSample[]
+}
+
+export interface LatencyBucket {
+  start: string
+  end: string
+  first_token_p50_ms: number | null
+  first_token_p95_ms: number | null
+  duration_p50_ms: number | null
+  duration_p95_ms: number | null
+  success_rate: number | null
+  request_count: number
+}
+
+export interface ChannelLatencyBucketSeries {
+  channel_id: number
+  buckets: LatencyBucket[]
+}
+
+export interface ConsumptionBucket {
+  start: string
+  end: string
+  amount: number
+}
+
+export interface ChannelConsumptionBucketSeries {
+  channel_id: number
+  buckets: ConsumptionBucket[]
+}
+
+export interface RelayAccountLatencyBucketSeries {
+  account_id: number
+  buckets: LatencyBucket[]
+}
+
+export interface RelayAccountConsumptionBucket {
+  start: string
+  end: string
+  user_charge: number
+  account_cost: number
+  request_count: number
+}
+
+export interface RelayAccountConsumptionBucketSeries {
+  account_id: number
+  buckets: RelayAccountConsumptionBucket[]
 }
 
 export interface RelayRiskSummary {
@@ -787,6 +881,7 @@ export interface PublicGroupMonitorGroup {
 	consecutive_failures: number
 	failure_summary?: string
 	calls: PublicGroupMonitorCall[]
+	latency_buckets?: LatencyBucket[]
 }
 
 export interface PublicGroupMonitorSummary {
@@ -802,6 +897,7 @@ export interface PublicGroupMonitorSummary {
 export interface PublicGroupMonitorView {
 	station_id: number
 	station_name: string
+	range: "today" | "24h" | "7d" | "30d"
 	updated_at: string
 	groups: PublicGroupMonitorGroup[]
 	summary: PublicGroupMonitorSummary

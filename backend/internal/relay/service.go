@@ -29,9 +29,6 @@ import (
 
 const requestTimeout = 45 * time.Second
 
-// Latency samples are optional telemetry. A short snapshot interval must not
-// fan out one usage request per account on every tick and overload Sub2API.
-const latencyCacheTTL = 5 * time.Minute
 const latencySampleLimit = 60
 
 const accountModelCatalogTTL = 5 * time.Minute
@@ -58,11 +55,9 @@ type Service struct {
 	userUsageCache     map[string]userUsageCacheEntry
 	ipLocationMu       sync.Mutex
 	ipLocationCache    map[string]ipLocationCacheEntry
-	latencyMu          sync.Mutex
-	latencyCache       map[string]latencyCacheEntry
 	usageBackfillGroup singleflight.Group
 	publicMonitorMu    sync.Mutex
-	publicMonitorCache map[uint]publicMonitorCacheEntry
+	publicMonitorCache map[publicMonitorCacheKey]publicMonitorCacheEntry
 	publicPricingMu    sync.Mutex
 	publicPricingCache map[uint]publicModelPricingCacheEntry
 	accountModelsMu    sync.Mutex
@@ -88,8 +83,7 @@ func NewService(stations *storage.RelayStations, cipher *crypto.Cipher, deps ...
 		usageCache:         make(map[string]usageCacheEntry),
 		userUsageCache:     make(map[string]userUsageCacheEntry),
 		ipLocationCache:    make(map[string]ipLocationCacheEntry),
-		latencyCache:       make(map[string]latencyCacheEntry),
-		publicMonitorCache: make(map[uint]publicMonitorCacheEntry),
+		publicMonitorCache: make(map[publicMonitorCacheKey]publicMonitorCacheEntry),
 		publicPricingCache: make(map[uint]publicModelPricingCacheEntry),
 		accountModelsCache: make(map[uint]accountModelCatalogCacheEntry),
 	}
@@ -215,11 +209,6 @@ type userUsageCacheEntry struct {
 type ipLocationCacheEntry struct {
 	ExpiresAt time.Time
 	Location  string
-}
-
-type latencyCacheEntry struct {
-	ExpiresAt time.Time
-	Samples   map[int64]string
 }
 
 type UserUsageStats struct {
@@ -999,12 +988,70 @@ func (c *remoteAccountCredentials) UnmarshalJSON(data []byte) error {
 
 func remoteAccountPlan(account remoteAccount) string {
 	keys := []string{"plan_type", "account_type", "subscription_type", "chatgpt_plan_type"}
-	for _, key := range keys {
-		if value := strings.TrimSpace(fmt.Sprint(account.Extra[key])); value != "" && value != "<nil>" {
-			return strings.ToLower(value)
+	for _, source := range []map[string]any{account.Credentials.Raw, account.Extra} {
+		for _, key := range keys {
+			if value := strings.TrimSpace(fmt.Sprint(source[key])); value != "" && value != "<nil>" {
+				return strings.ToLower(value)
+			}
 		}
 	}
 	return "unknown"
+}
+
+func remoteAccountExpiresAt(account remoteAccount) *time.Time {
+	raw, ok := account.Credentials.Raw["expires_at"]
+	if !ok || raw == nil {
+		return nil
+	}
+	switch value := raw.(type) {
+	case string:
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			return nil
+		}
+		if parsed, err := time.Parse(time.RFC3339Nano, trimmed); err == nil {
+			parsed = parsed.UTC()
+			return &parsed
+		}
+		number, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return nil
+		}
+		return remoteAccountUnixTime(number)
+	case json.Number:
+		number, err := value.Float64()
+		if err != nil {
+			return nil
+		}
+		return remoteAccountUnixTime(number)
+	case float64:
+		return remoteAccountUnixTime(value)
+	case float32:
+		return remoteAccountUnixTime(float64(value))
+	case int:
+		return remoteAccountUnixTime(float64(value))
+	case int64:
+		return remoteAccountUnixTime(float64(value))
+	default:
+		return nil
+	}
+}
+
+func remoteAccountUnixTime(value float64) *time.Time {
+	if value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return nil
+	}
+	if math.Abs(value) >= 1e11 {
+		value /= 1000
+	}
+	seconds := math.Floor(value)
+	nanos := math.Round((value - seconds) * 1e9)
+	if nanos >= 1e9 {
+		seconds++
+		nanos -= 1e9
+	}
+	parsed := time.Unix(int64(seconds), int64(nanos)).UTC()
+	return &parsed
 }
 
 func remoteAccountIdentity(account remoteAccount) string {
@@ -3491,6 +3538,12 @@ func (s *Service) syncSnapshot(ctx context.Context, stationID uint, probeRates b
 			}
 		}
 	}
+	now := time.Now().UTC()
+	// Usage telemetry is synchronized on the same snapshot trigger as the
+	// recent-latency snapshot. A telemetry failure must not block the rest of
+	// the station snapshot; existing local facts remain queryable.
+	_ = s.syncUsageEvents(ctx, *station, apiKey, accounts, now)
+
 	previousAccounts, err := s.stations.ListAccounts(station.ID)
 	if err != nil {
 		_ = s.stations.SetSyncError(station.ID, err.Error())
@@ -3504,9 +3557,7 @@ func (s *Service) syncSnapshot(ctx context.Context, stationID uint, probeRates b
 			previousLatency[account.ExternalID] = account.LatencySamplesJSON
 		}
 	}
-	latencySnapshots := s.fetchAccountLatencies(ctx, station.BaseURL, apiKey, accounts, groups)
-
-	now := time.Now().UTC()
+	latencySnapshots := s.localAccountLatencySnapshots(station.ID, accounts, groups)
 	localGroups := make([]storage.RelayGroup, 0, len(groups))
 	for _, group := range groups {
 		localGroups = append(localGroups, storage.RelayGroup{
@@ -3562,7 +3613,7 @@ func (s *Service) syncSnapshot(ctx context.Context, stationID uint, probeRates b
 			Platform: account.Platform, Type: account.Type, Status: account.Status, Schedulable: account.Schedulable,
 			Concurrency: account.Concurrency, CurrentConcurrency: account.CurrentConcurrency, Priority: account.Priority,
 			PoolMode: account.Credentials.PoolMode, PoolModeRetryCount: accountPoolModeRetryCount(account),
-			AccountPlan: remoteAccountPlan(account), LastUsedAt: account.LastUsedAt,
+			AccountPlan: remoteAccountPlan(account), ExpiresAt: remoteAccountExpiresAt(account), LastUsedAt: account.LastUsedAt,
 			RateMultiplier: cost, RateSource: func() string {
 				if cost != nil {
 					return "upstream_probe"
@@ -3801,8 +3852,8 @@ func (s *Service) ProbeAccount(ctx context.Context, stationID uint, accountExter
 			source = "upstream_probe"
 		}
 		if err := s.stations.UpdateAccountProbe(stationID, accountExternalID, storage.RelayAccount{
-			Name: remote.Name, BaseURL: remote.Credentials.BaseURL,
-			Platform: remote.Platform, Type: remote.Type, Status: remote.Status,
+			Name: remote.Name, BaseURL: remote.Credentials.BaseURL, Identity: remoteAccountIdentity(remote),
+			Platform: remote.Platform, Type: remote.Type, Status: remote.Status, AccountPlan: remoteAccountPlan(remote), ExpiresAt: remoteAccountExpiresAt(remote),
 			Schedulable: remote.Schedulable, Concurrency: remote.Concurrency, Priority: remote.Priority,
 			RateMultiplier: cost, RateSource: source,
 			RateObservedAt: observedAt, SyncedAt: time.Now().UTC(),
@@ -3903,130 +3954,6 @@ func (s *Service) probeAPIKeyAccounts(ctx context.Context, baseURL, apiKey strin
 		}
 	}
 	return nil
-}
-
-// fetchAccountLatencies reads a bounded usage window for each API Key account.
-// Usage is optional telemetry: one account failing or an older Sub2API build
-// lacking the endpoint must not make an otherwise valid station sync fail.
-func (s *Service) fetchAccountLatencies(ctx context.Context, baseURL, apiKey string, accounts []remoteAccount, groups []remoteGroup) map[int64]string {
-	cacheKey := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	now := time.Now()
-	s.latencyMu.Lock()
-	if cached, ok := s.latencyCache[cacheKey]; ok && cached.ExpiresAt.After(now) {
-		result := make(map[int64]string, len(cached.Samples))
-		for accountID, samples := range cached.Samples {
-			result[accountID] = samples
-		}
-		s.latencyMu.Unlock()
-		return result
-	}
-	s.latencyMu.Unlock()
-
-	userEmails := make(map[int64]string)
-	if users, err := s.fetchUsers(ctx, baseURL, apiKey, ""); err == nil {
-		for _, user := range users {
-			userEmails[user.ID] = strings.TrimSpace(user.Email)
-		}
-	}
-	groupByID := make(map[int64]remoteGroup, len(groups))
-	for _, group := range groups {
-		groupByID[group.ID] = group
-	}
-	type job struct {
-		id       int64
-		platform string
-	}
-	jobs := make(chan job)
-	results := make(chan struct {
-		id   int64
-		json string
-	})
-	workers := 8
-	if len(accounts) < workers {
-		workers = len(accounts)
-	}
-	if workers == 0 {
-		return map[int64]string{}
-	}
-	var wg sync.WaitGroup
-	for i := 0; i < workers; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for item := range jobs {
-				var page remoteUsagePage
-				endpoint := fmt.Sprintf("%s/api/v1/admin/usage?page=1&page_size=%d&account_id=%d", baseURL, latencySampleLimit, item.id)
-				if err := s.get(ctx, endpoint, apiKey, &page); err != nil {
-					continue
-				}
-				samples := make([]storage.RelayLatencySample, 0, len(page.Items))
-				for _, usage := range page.Items {
-					created, err := time.Parse(time.RFC3339Nano, usage.CreatedAt)
-					if err != nil {
-						continue
-					}
-					userEmail := strings.TrimSpace(usage.UserEmail)
-					if userEmail == "" {
-						userEmail = userEmails[usage.UserID]
-					}
-					groupName := strings.TrimSpace(usage.GroupName)
-					var groupMultiplier *float64
-					if group, ok := groupByID[usage.GroupID]; ok {
-						if groupName == "" {
-							groupName = strings.TrimSpace(group.Name)
-						}
-						value := group.RateMultiplier
-						groupMultiplier = &value
-					}
-					samples = append(samples, storage.RelayLatencySample{
-						FirstTokenMS: usage.FirstTokenMS, DurationMS: usage.DurationMS,
-						CreatedAt: created.UTC(), Model: usage.Model, Platform: item.platform, RequestType: usage.RequestType,
-						UserEmail:   userEmail,
-						InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens,
-						CacheReadTokens: usage.CacheReadTokens, CacheCreationTokens: usage.CacheCreationTokens,
-						CacheCreation5mTokens: usage.CacheCreation5mTokens, CacheCreation1hTokens: usage.CacheCreation1hTokens,
-						GroupID: usage.GroupID, GroupName: groupName, GroupMultiplier: groupMultiplier,
-					})
-				}
-				if len(samples) == 0 {
-					continue
-				}
-				encoded, err := json.Marshal(samples)
-				if err == nil {
-					results <- struct {
-						id   int64
-						json string
-					}{id: item.id, json: string(encoded)}
-				}
-			}
-		}()
-	}
-	go func() {
-		for _, account := range accounts {
-			if strings.EqualFold(strings.TrimSpace(account.Type), "apikey") &&
-				strings.EqualFold(strings.TrimSpace(account.Status), "active") && account.Schedulable && account.ID > 0 {
-				select {
-				case jobs <- job{id: account.ID, platform: account.Platform}:
-				case <-ctx.Done():
-					close(jobs)
-					wg.Wait()
-					close(results)
-					return
-				}
-			}
-		}
-		close(jobs)
-		wg.Wait()
-		close(results)
-	}()
-	snapshots := make(map[int64]string)
-	for result := range results {
-		snapshots[result.id] = result.json
-	}
-	s.latencyMu.Lock()
-	s.latencyCache[cacheKey] = latencyCacheEntry{ExpiresAt: time.Now().Add(latencyCacheTTL), Samples: snapshots}
-	s.latencyMu.Unlock()
-	return snapshots
 }
 
 func (s *Service) get(ctx context.Context, endpoint, apiKey string, out any) error {
