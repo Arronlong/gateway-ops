@@ -9,11 +9,13 @@ import { RefreshProvider } from '@/lib/refresh-context'
 import { AddChannelProvider } from '@/lib/add-channel-context'
 import { AuthGate } from '@/components/auth/auth-gate'
 import { AppShell } from '@/components/app-shell'
+import { SettingsProvider } from '@/components/settings-provider'
 import { Toaster } from '@/components/ui/sonner'
 import DashboardPage from '@/app/page'
 import ChannelsPage from '@/app/channels-page'
 import CaptchaPage from '@/app/captcha-page'
 import NotificationsPage from '@/app/notifications-page'
+import SystemSettingsPage from '@/app/system-settings-page'
 import RelayStationsPage from '@/app/relay-stations-page'
 import OperationsCostsPage from '@/app/operations-costs-page'
 import LocalPoolPage from '@/app/local-pool-page'
@@ -27,9 +29,11 @@ function ProtectedApplication() {
     <AuthProvider>
       <AuthGate>
         <RefreshProvider>
-          <AddChannelProvider>
-            <AppShell />
-          </AddChannelProvider>
+          <SettingsProvider>
+            <AddChannelProvider>
+              <AppShell />
+            </AddChannelProvider>
+          </SettingsProvider>
         </RefreshProvider>
       </AuthGate>
     </AuthProvider>
@@ -49,6 +53,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="channels" element={<ChannelsPage />} />
             <Route path="captcha" element={<CaptchaPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
+            <Route path="settings" element={<SystemSettingsPage />} />
             <Route path="relay-stations" element={<RelayStationsPage />} />
             <Route path="operations/costs" element={<OperationsCostsPage />} />
             <Route path="operations/local-pool" element={<LocalPoolPage />} />

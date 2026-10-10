@@ -623,3 +623,24 @@ type SyncSettings struct {
 	RelaySnapshotIntervalMinutes int  `json:"relay_snapshot_interval_minutes"`
 	RelaySnapshotIntervalSeconds int  `json:"relay_snapshot_interval_seconds"`
 }
+
+const (
+	IframeEmbeddingModeAll       = "all"
+	IframeEmbeddingModeAllowlist = "allowlist"
+)
+
+// UISettings 控制管理界面的可选信息密度和系统级 UI 安全策略，不影响采集逻辑。
+type UISettings struct {
+	OperationsManagementEnabled bool     `json:"operations_management_enabled"`
+	ChannelsPageEnabled         bool     `json:"channels_page_enabled"`
+	ChannelsShowRateChanges     bool     `json:"channels_show_rate_changes"`
+	ChannelsShowChannelInfo     bool     `json:"channels_show_channel_info"`
+	ChannelsShowRecentLatency   bool     `json:"channels_show_recent_latency"`
+	ChannelsShowGroups          bool     `json:"channels_show_groups"`
+	ChannelsGroupsExpanded      bool     `json:"channels_groups_expanded"`
+	ChannelsShowStability       bool     `json:"channels_show_stability"`
+	ChannelsShowConsumption     bool     `json:"channels_show_consumption"`
+	IframeEmbeddingEnabled      bool     `json:"iframe_embedding_enabled"`
+	IframeEmbeddingMode         string   `json:"iframe_embedding_mode"`
+	IframeEmbeddingAllowlist    []string `json:"iframe_embedding_allowlist"`
+}

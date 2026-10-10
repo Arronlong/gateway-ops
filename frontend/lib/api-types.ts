@@ -894,6 +894,21 @@ export interface RelayOverview {
   usage_failed_accounts: number
 }
 
+export interface SystemSettings {
+  operations_management_enabled: boolean
+  channels_page_enabled: boolean
+  channels_show_rate_changes: boolean
+  channels_show_channel_info: boolean
+  channels_show_recent_latency: boolean
+  channels_show_groups: boolean
+  channels_groups_expanded: boolean
+  channels_show_stability: boolean
+  channels_show_consumption: boolean
+  iframe_embedding_enabled: boolean
+  iframe_embedding_mode: "all" | "allowlist"
+  iframe_embedding_allowlist: string[]
+}
+
 export interface SyncSettings {
   channel_configured: boolean
   channel_enabled: boolean

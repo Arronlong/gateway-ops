@@ -1,0 +1,62 @@
+package api
+
+import (
+	"errors"
+	"fmt"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"github.com/guliansheng/gateway-ops/internal/security"
+	"github.com/guliansheng/gateway-ops/internal/storage"
+)
+
+func registerSystemSettings(g *gin.RouterGroup, d *Deps) {
+	g.GET("/system-settings", func(c *gin.Context) {
+		if d.Settings == nil {
+			fail(c, http.StatusServiceUnavailable, errors.New("system settings unavailable"))
+			return
+		}
+		settings, err := d.Settings.UISettings()
+		if err != nil {
+			fail(c, http.StatusInternalServerError, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": settings})
+	})
+
+	g.PUT("/system-settings", func(c *gin.Context) {
+		if d.Settings == nil {
+			fail(c, http.StatusServiceUnavailable, errors.New("system settings unavailable"))
+			return
+		}
+		var settings storage.UISettings
+		if err := c.ShouldBindJSON(&settings); err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		if err := validateSystemSettings(settings); err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
+		if err := d.Settings.SaveUISettings(settings); err != nil {
+			fail(c, http.StatusInternalServerError, err)
+			return
+		}
+		c.JSON(http.StatusOK, gin.H{"data": settings})
+	})
+}
+
+func validateSystemSettings(settings storage.UISettings) error {
+	switch settings.IframeEmbeddingMode {
+	case storage.IframeEmbeddingModeAll, storage.IframeEmbeddingModeAllowlist:
+	default:
+		return fmt.Errorf("invalid iframe embedding mode %q", settings.IframeEmbeddingMode)
+	}
+
+	for _, pattern := range settings.IframeEmbeddingAllowlist {
+		if err := security.ValidateHostPattern(pattern); err != nil {
+			return fmt.Errorf("invalid iframe allowlist pattern %q: %w", pattern, err)
+		}
+	}
+	return nil
+}

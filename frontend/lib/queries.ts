@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useContext, useEffect, useRef, useState } from "react"
+import { SyncSettingsContext, SystemSettingsContext } from "@/lib/settings-context"
 import { apiFetch } from "@/lib/api"
 import { useRefreshTick } from "@/lib/refresh-context"
 import type {
@@ -25,6 +26,7 @@ import type {
   DashboardRange,
   RelayUsageRange,
   SyncSettings,
+  SystemSettings,
   LocalAccountListResponse,
   OperationRange,
   OperationLedgerEntry,
@@ -280,7 +282,23 @@ export function useRelayUserBalanceHistory(stationID: number | null, userID: num
 }
 
 export function useSyncSettings() {
+  const settings = useContext(SyncSettingsContext)
+  if (!settings) throw new Error("useSyncSettings requires SettingsProvider")
+  return settings
+}
+
+export function useSystemSettings() {
+  const settings = useContext(SystemSettingsContext)
+  if (!settings) throw new Error("useSystemSettings requires SettingsProvider")
+  return settings
+}
+
+export function useSyncSettingsQuery() {
   return useApi<SyncSettings>("/sync-settings")
+}
+
+export function useSystemSettingsQuery() {
+  return useApi<SystemSettings>("/system-settings")
 }
 
 export function useOperationSummary(range: OperationRange = "today") {
