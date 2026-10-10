@@ -90,6 +90,7 @@ interface AdditionalAccountForm {
   newapi_token_headers: RequestKV[]
   sub2api_access_token: string
   sub2api_refresh_token: string
+  sub2api_refresh_token_configured: boolean
   turnstile_enabled: boolean
   captcha_config_id: string
 }
@@ -126,6 +127,7 @@ function emptyAdditionalAccount(mode: CredentialMode = "password"): AdditionalAc
     newapi_token_headers: defaultNewAPITokenHeaders(),
     sub2api_access_token: "",
     sub2api_refresh_token: "",
+    sub2api_refresh_token_configured: false,
     turnstile_enabled: false,
     captcha_config_id: "",
   }
@@ -179,6 +181,7 @@ function initialState(c?: Channel | null): FormState {
         newapi_token_headers: account.newapi_token_headers?.map((item) => ({ ...item })) ?? defaultNewAPITokenHeaders(),
         sub2api_access_token: "",
         sub2api_refresh_token: "",
+        sub2api_refresh_token_configured: account.sub2api_refresh_token_configured ?? false,
         turnstile_enabled: account.turnstile_enabled,
         captcha_config_id: account.captcha_config_id != null ? String(account.captcha_config_id) : "",
       })),
@@ -234,7 +237,7 @@ function buildAdditionalAccountPayloads(accounts: AdditionalAccountForm[], type:
       turnstile_enabled: !isToken && account.turnstile_enabled,
       captcha_config_id: null,
     }
-    if (!account.username.trim()) throw new Error(`${label}必须填写账号或备注`)
+    if (!account.username.trim()) throw new Error(`${label}必须填写账号或展示名称`)
 
     if (isToken) {
       const hasCredential = type === "newapi"
@@ -768,7 +771,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
                       className="field-sizing-fixed min-w-0 max-w-full resize-y text-xs font-mono"
                       disabled={submitting}
                     />
-                    <p className="text-[11px] text-muted-foreground">系统会在 Access Token 过期前调用 /api/v1/auth/refresh，并自动保存返回的新 Token。</p>
+                    {isEdit && channel?.type === "sub2api" && channel.credential_mode === "token" && !channel.sub2api_refresh_token_configured && !form.sub2api_refresh_token.trim() ? <p className="text-[11px] font-medium text-danger">当前已保存凭据缺少 Refresh Token。Access Token 过期后无法自动续期，请重新填写一对 Access Token + Refresh Token。</p> : <p className="text-[11px] text-muted-foreground">系统会在 Access Token 过期前调用 /api/v1/auth/refresh，并同时保存返回的新 Access Token、Refresh Token 和过期时间。</p>}
                   </div>
                 </>
               ) : null}
@@ -1105,6 +1108,7 @@ function AdditionalAccountsEditor({
                 <div className="space-y-1.5">
                   <Label htmlFor={`additional-refresh-token-${index}`}>Refresh Token</Label>
                   <Textarea id={`additional-refresh-token-${index}`} rows={3} className="field-sizing-fixed min-w-0 max-w-full resize-y text-xs font-mono" placeholder={account.id != null && !modeChanged ? "留空不变；填写时与 Access Token 一起更新" : "粘贴 refresh_token"} value={account.sub2api_refresh_token} onChange={(event) => patch(index, { sub2api_refresh_token: event.target.value })} disabled={disabled} />
+                  {account.id != null && !modeChanged && !account.sub2api_refresh_token_configured && !account.sub2api_refresh_token.trim() ? <p className="text-[11px] font-medium text-danger">当前账号缺少 Refresh Token，Access Token 过期后无法自动续期。</p> : null}
                 </div>
               </>
             )}
@@ -1166,14 +1170,20 @@ function Sub2APITokenHelp() {
           <li>在浏览器登录 Sub2API 站点</li>
           <li>按 F12 打开 DevTools，切到 Application / 存储 标签</li>
           <li>左侧 Local Storage 选中站点域名</li>
-          <li>找到 <span className="font-mono text-foreground">access_token</span> 字段并复制</li>
+          <li>找到 <span className="font-mono text-foreground">auth_token</span>（部分旧版本为 <span className="font-mono">access_token</span>）字段并复制</li>
         </ol>
         <p className="mt-2 font-medium text-foreground">获取 Refresh Token</p>
         <p className="mt-1 text-muted-foreground">
-          在同一 Local Storage 中找到 <span className="font-mono text-foreground">refresh_token</span> 并复制。Access Token 与 Refresh Token 建议成对填写。
+          在同一 Local Storage 中找到 <span className="font-mono text-foreground">refresh_token</span> 并复制。Access Token 与 Refresh Token 必须成对填写。
         </p>
         <p className="mt-2 text-[11px] text-muted-foreground">
           Access Token 也可以从 Network 请求的 <span className="font-mono">Authorization</span> 头获取，填写时去掉 <span className="font-mono">Bearer </span> 前缀。
+        </p>
+        <p className="mt-2 text-[11px] font-medium text-warning">
+          建议重新登录或确认页面当前仍有效后立即复制这一对 Token。不要从长期打开、休眠或已经过期的旧标签页复制；Sub2API 会自动续期并可能更新 Refresh Token。
+        </p>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          更稳定的做法是给 GatewayOps 使用独立登录会话，避免和日常浏览器会话共用同一组可轮换 Token。
         </p>
       </PopoverContent>
     </Popover>

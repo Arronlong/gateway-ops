@@ -1,9 +1,14 @@
 package channel
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/guliansheng/gateway-ops/internal/connector"
 
 	appcrypto "github.com/guliansheng/gateway-ops/internal/crypto"
 	"github.com/guliansheng/gateway-ops/internal/storage"
@@ -114,5 +119,41 @@ func TestMergeNewAPIEditCredentialKeepsStoredTokenAndUpdatesHeaders(t *testing.T
 	wantHeaders := []RequestKV{{Key: "X-API-Key", Value: "secret-token"}, {Key: "X-Mode", Value: "custom"}}
 	if !reflect.DeepEqual(merged.Headers, wantHeaders) {
 		t.Fatalf("headers = %#v, want %#v", merged.Headers, wantHeaders)
+	}
+}
+
+func TestValidateSub2APITokenRequiresRefreshToken(t *testing.T) {
+	err := validateCredential(storage.ChannelTypeSub2API, storage.CredentialModeToken, `{"access_token":"access-only"}`)
+	if err == nil {
+		t.Fatal("expected access-only Sub2API credential to be rejected")
+	}
+}
+
+func TestValidateSub2APITokenAcceptsAccessAndRefreshToken(t *testing.T) {
+	err := validateCredential(storage.ChannelTypeSub2API, storage.CredentialModeToken, `{"access_token":"access","refresh_token":"refresh"}`)
+	if err != nil {
+		t.Fatalf("valid Sub2API token credential rejected: %v", err)
+	}
+}
+
+func TestSub2APICredentialFromSessionKeepsRotatedRefreshToken(t *testing.T) {
+	expires := time.Date(2026, 9, 20, 0, 0, 0, 0, time.UTC)
+	got := sub2APICredentialFromSession(&connector.AuthSession{
+		AccessToken:  "access-new",
+		RefreshToken: "refresh-new",
+		ExpiresAt:    expires,
+	})
+	if got.AccessToken != "access-new" || got.RefreshToken != "refresh-new" || !got.ExpiresAt.Equal(expires) {
+		t.Fatalf("credential = %#v", got)
+	}
+}
+
+func TestValidateSub2APITokenRejectsExpiredAccessToken(t *testing.T) {
+	payload := base64.RawURLEncoding.EncodeToString([]byte(`{"exp":1}`))
+	access := "header." + payload + ".signature"
+	raw := `{"access_token":"` + access + `","refresh_token":"refresh"}`
+	err := validateCredential(storage.ChannelTypeSub2API, storage.CredentialModeToken, raw)
+	if err == nil || !strings.Contains(err.Error(), "已过期") {
+		t.Fatalf("err = %v, want expired token error", err)
 	}
 }

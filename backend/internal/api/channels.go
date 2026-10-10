@@ -106,19 +106,21 @@ func listChannels(c *gin.Context, d *Deps) {
 
 type channelView struct {
 	storage.Channel
-	LoginHeaders       []channel.RequestKV  `json:"login_headers"`
-	LoginParams        []channel.RequestKV  `json:"login_params"`
-	NewAPIAuthType     string               `json:"newapi_auth_type,omitempty"`
-	NewAPIUserID       string               `json:"newapi_user_id,omitempty"`
-	NewAPITokenHeaders []channel.RequestKV  `json:"newapi_token_headers,omitempty"`
-	Accounts           []channelAccountView `json:"accounts"`
+	LoginHeaders                  []channel.RequestKV  `json:"login_headers"`
+	LoginParams                   []channel.RequestKV  `json:"login_params"`
+	NewAPIAuthType                string               `json:"newapi_auth_type,omitempty"`
+	NewAPIUserID                  string               `json:"newapi_user_id,omitempty"`
+	NewAPITokenHeaders            []channel.RequestKV  `json:"newapi_token_headers,omitempty"`
+	Sub2APIRefreshTokenConfigured bool                 `json:"sub2api_refresh_token_configured"`
+	Accounts                      []channelAccountView `json:"accounts"`
 }
 
 type channelAccountView struct {
 	storage.ChannelAccount
-	NewAPIAuthType     string              `json:"newapi_auth_type,omitempty"`
-	NewAPIUserID       string              `json:"newapi_user_id,omitempty"`
-	NewAPITokenHeaders []channel.RequestKV `json:"newapi_token_headers,omitempty"`
+	NewAPIAuthType                string              `json:"newapi_auth_type,omitempty"`
+	NewAPIUserID                  string              `json:"newapi_user_id,omitempty"`
+	NewAPITokenHeaders            []channel.RequestKV `json:"newapi_token_headers,omitempty"`
+	Sub2APIRefreshTokenConfigured bool                `json:"sub2api_refresh_token_configured"`
 }
 
 func channelViews(d *Deps, channels []storage.Channel) ([]channelView, error) {
@@ -138,7 +140,11 @@ func channelViews(d *Deps, channels []storage.Channel) ([]channelView, error) {
 			if err != nil {
 				return nil, err
 			}
-			accounts = append(accounts, channelAccountView{ChannelAccount: account, NewAPIAuthType: authType, NewAPIUserID: userID, NewAPITokenHeaders: tokenHeaders})
+			refreshConfigured, err := sub2APIRefreshTokenConfigured(d, item.Type, account.CredentialMode, account.PasswordCipher)
+			if err != nil {
+				return nil, err
+			}
+			accounts = append(accounts, channelAccountView{ChannelAccount: account, NewAPIAuthType: authType, NewAPIUserID: userID, NewAPITokenHeaders: tokenHeaders, Sub2APIRefreshTokenConfigured: refreshConfigured})
 		}
 		headers, params, err := channel.ParseLoginConfig(item.Type, item.LoginHeadersJSON, item.LoginParamsJSON)
 		if err != nil {
@@ -148,7 +154,11 @@ func channelViews(d *Deps, channels []storage.Channel) ([]channelView, error) {
 		if err != nil {
 			return nil, err
 		}
-		views = append(views, channelView{Channel: item, LoginHeaders: headers, LoginParams: params, NewAPIAuthType: authType, NewAPIUserID: userID, NewAPITokenHeaders: tokenHeaders, Accounts: accounts})
+		refreshConfigured, err := sub2APIRefreshTokenConfigured(d, item.Type, item.CredentialMode, item.PasswordCipher)
+		if err != nil {
+			return nil, err
+		}
+		views = append(views, channelView{Channel: item, LoginHeaders: headers, LoginParams: params, NewAPIAuthType: authType, NewAPIUserID: userID, NewAPITokenHeaders: tokenHeaders, Sub2APIRefreshTokenConfigured: refreshConfigured, Accounts: accounts})
 	}
 	return views, nil
 }
@@ -190,6 +200,21 @@ func newAPIEditMetadata(d *Deps, channelType storage.ChannelType, mode storage.C
 		}
 	}
 	return authType, cred.UserID, result, nil
+}
+
+func sub2APIRefreshTokenConfigured(d *Deps, channelType storage.ChannelType, mode storage.CredentialMode, cipherText string) (bool, error) {
+	if channelType != storage.ChannelTypeSub2API || mode != storage.CredentialModeToken || cipherText == "" {
+		return false, nil
+	}
+	raw, err := d.Cipher.Decrypt(cipherText)
+	if err != nil {
+		return false, fmt.Errorf("decrypt Sub2API credential metadata: %w", err)
+	}
+	var cred channel.Sub2APITokenCredential
+	if err := json.Unmarshal([]byte(raw), &cred); err != nil {
+		return false, fmt.Errorf("parse Sub2API credential metadata: %w", err)
+	}
+	return strings.TrimSpace(cred.RefreshToken) != "", nil
 }
 
 func hasRequestKVKey(items []channel.RequestKV, key string) bool {

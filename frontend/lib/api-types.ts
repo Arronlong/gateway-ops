@@ -49,6 +49,7 @@ export interface Channel {
   newapi_auth_type?: "cookie" | "access_token"
   newapi_user_id?: string
   newapi_token_headers?: RequestKV[]
+  sub2api_refresh_token_configured?: boolean
   balance_mode: BalanceMode
   manual_balance: number
   remark?: string
@@ -73,6 +74,7 @@ export interface ChannelAccount {
   newapi_auth_type?: "cookie" | "access_token"
   newapi_user_id?: string
   newapi_token_headers?: RequestKV[]
+  sub2api_refresh_token_configured?: boolean
   turnstile_enabled: boolean
   captcha_config_id?: number | null
   last_balance?: number | null
