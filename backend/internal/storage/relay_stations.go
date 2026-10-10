@@ -44,6 +44,15 @@ func (r *RelayStations) Delete(id uint) error {
 		if err := tx.Where("relay_station_id = ?", id).Delete(&RelayAccountAdjustmentLog{}).Error; err != nil {
 			return err
 		}
+		if err := tx.Where("relay_station_id = ?", id).Delete(&RelayUsageEvent{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("relay_station_id = ?", id).Delete(&RelayUsageSyncState{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("relay_station_id = ?", id).Delete(&ChannelRelayAccountLink{}).Error; err != nil {
+			return err
+		}
 		if err := tx.Where("relay_account_id IN (?)", tx.Model(&RelayAccount{}).Select("id").Where("relay_station_id = ?", id)).Delete(&RelayAccountGroup{}).Error; err != nil {
 			return err
 		}
@@ -100,6 +109,20 @@ func (r *RelayStations) ReplaceSnapshot(
 	syncedAt time.Time,
 ) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		incomingAccountIDs := make([]int64, 0, len(accounts))
+		for _, account := range accounts {
+			if account.ExternalID > 0 {
+				incomingAccountIDs = append(incomingAccountIDs, account.ExternalID)
+			}
+		}
+		staleLinks := tx.Where("relay_station_id = ? AND relay_account_external_id > 0", stationID)
+		if len(incomingAccountIDs) > 0 {
+			staleLinks = staleLinks.Where("relay_account_external_id NOT IN ?", incomingAccountIDs)
+		}
+		if err := staleLinks.Delete(&ChannelRelayAccountLink{}).Error; err != nil {
+			return err
+		}
+
 		var previous []RelayChannel
 		if err := tx.Where("relay_station_id = ?", stationID).Find(&previous).Error; err != nil {
 			return err
@@ -439,11 +462,14 @@ func automaticBindingKey(stationID uint, accountExternalID int64) string {
 	return fmt.Sprintf("%d:%d", stationID, accountExternalID)
 }
 
-// ReconcileAutomaticChannelAccountBindings atomically makes relay-account
-// matches visible as read-only channel groups and as explicit cost bindings.
-// It only owns rows marked auto_link / relay_account; a user-created
-// channel_group binding always remains untouched.
+// ReconcileAutomaticChannelAccountBindings is retained as an upgrade cleanup
+// hook. Automatic channel/relay inference is disabled; this method removes
+// legacy auto_link / relay_account rows and preserves explicit user mappings.
 func (r *RelayStations) ReconcileAutomaticChannelAccountBindings(bindings []AutomaticChannelAccountBinding) error {
+	// Automatic channel/relay linking is intentionally disabled. Keep this
+	// cleanup path for upgrades, but ignore any inferred candidates supplied by
+	// older callers so only explicit operator-created relationships survive.
+	bindings = nil
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		wanted := make(map[string]AutomaticChannelAccountBinding, len(bindings))
 		for _, binding := range bindings {
@@ -615,11 +641,11 @@ func (r *RelayStations) UpdateAccountProbe(stationID uint, externalID int64, acc
 	return r.db.Model(&RelayAccount{}).
 		Where("relay_station_id = ? AND external_id = ?", stationID, externalID).
 		Updates(map[string]any{
-			"name": account.Name, "base_url": account.BaseURL,
+			"name": account.Name, "base_url": account.BaseURL, "identity": account.Identity,
 			"platform": account.Platform, "type": account.Type, "status": account.Status,
 			"schedulable": account.Schedulable, "concurrency": account.Concurrency, "priority": account.Priority,
 			"pool_mode": account.PoolMode, "pool_mode_retry_count": account.PoolModeRetryCount,
-			"account_plan": account.AccountPlan, "last_used_at": account.LastUsedAt,
+			"account_plan": account.AccountPlan, "expires_at": account.ExpiresAt, "last_used_at": account.LastUsedAt,
 			"rate_multiplier": account.RateMultiplier,
 			"rate_source":     account.RateSource, "rate_observed_at": account.RateObservedAt,
 			"synced_at": account.SyncedAt,

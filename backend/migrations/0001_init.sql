@@ -318,6 +318,7 @@ CREATE TABLE IF NOT EXISTS relay_accounts (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS idx_relay_account_external ON relay_accounts (relay_station_id, external_id);
 ALTER TABLE relay_accounts ADD COLUMN IF NOT EXISTS account_plan VARCHAR(64);
+ALTER TABLE relay_accounts ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ;
 ALTER TABLE relay_accounts ADD COLUMN IF NOT EXISTS model_type VARCHAR(64);
 ALTER TABLE relay_accounts ADD COLUMN IF NOT EXISTS current_concurrency BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE relay_accounts ADD COLUMN IF NOT EXISTS pool_mode BOOLEAN NOT NULL DEFAULT false;
