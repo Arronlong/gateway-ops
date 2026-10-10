@@ -11,6 +11,7 @@ import type {
   ChannelModelCatalogItem,
   ChannelRelayAssociationSnapshot,
   ChannelMetric,
+  ChannelSummary,
   ChannelLatencyTrend,
   RelayAccountModelCatalogItem,
   DashboardSummary,
@@ -20,6 +21,7 @@ import type {
   RateSnapshot,
   RelayOverview,
   RelayUsageView,
+  RelayDailyConsumptionPoint,
   RelayRecentUsage,
   RelayUserManagementPage,
   RelayUserSortKey,
@@ -186,8 +188,8 @@ function useApi<T>(path: string | null): QueryState<T> {
   }
 }
 
-export function useDashboardSummary(range: RelayUsageRange = "today") {
-  return useApi<DashboardSummary>(`/dashboard/summary?range=${range}`)
+export function useDashboardSummary(range: RelayUsageRange = "today", enabled = true) {
+  return useApi<DashboardSummary>(enabled ? `/dashboard/summary?range=${range}` : null)
 }
 
 export type BalanceTrendRange = DashboardRange
@@ -206,6 +208,10 @@ export function useChannelRelayAssociations() {
 
 export function useChannelModelCatalog() {
   return useApi<ChannelModelCatalogItem[]>("/channels/model-catalog")
+}
+
+export function useChannelSummary(range: RelayUsageRange = "today", enabled = true) {
+  return useApi<ChannelSummary>(enabled ? `/channels/summary?range=${range}` : null)
 }
 
 export function useChannelMetrics(range: RelayUsageRange = "today") {
@@ -263,8 +269,12 @@ export function useRelayUsage(stationID: number | null, range: RelayUsageRange =
   return useApi<RelayUsageView>(stationID == null ? null : `/relay-stations/${stationID}/usage?range=${range}`)
 }
 
-export function useRelayRecentUsage(stationID: number | null) {
-  return useApi<RelayRecentUsage[]>(stationID == null ? null : `/relay-stations/${stationID}/usage/recent?limit=100`)
+export function useRelayDailyConsumption(stationID: number | null, range: RelayUsageRange = "today") {
+  return useApi<RelayDailyConsumptionPoint[]>(stationID == null ? null : `/relay-stations/${stationID}/usage/daily?range=${range}`)
+}
+
+export function useRelayRecentUsage(stationID: number | null, range: RelayUsageRange = "today") {
+  return useApi<RelayRecentUsage[]>(stationID == null ? null : `/relay-stations/${stationID}/usage/recent?range=${range}`)
 }
 
 export function useRelayUsers(stationID: number | null, options: {

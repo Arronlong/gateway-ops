@@ -44,6 +44,19 @@ export function money(value: number | null | undefined, opts?: { precise?: boole
   )
 }
 
+export function normalizeTokenCount(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return 0
+  return value
+}
+/** 以“亿”为单位显示 Token 总量。 */
+export function tokensInYi(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) return "—"
+  return `${(value / 100_000_000).toLocaleString("zh-CN", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} 亿`
+}
+
 /** 把倍率渲染成"1.200 → 1.500"。 */
 export function ratioArrow(from: number | null | undefined, to: number) {
   const f = from == null ? "—" : from.toFixed(3)

@@ -98,6 +98,11 @@ func (s *Scheduler) Start() error {
 		return err
 	}
 	s.cron.Start()
+	if settings, settingsErr := s.settings.SyncSettings(); settingsErr == nil && settings.ChannelConfigured && settings.ChannelEnabled {
+		// Populate channel-owned usage immediately after startup. This runs
+		// asynchronously so API startup is not blocked by remote channel I/O.
+		go s.runChannelSync()
+	}
 	s.log.Info("scheduler started",
 		"balanceCron", s.cfg.BalanceCron,
 		"rateCron", s.cfg.RateCron,

@@ -90,6 +90,47 @@ type RateResult struct {
 	CompletionRatio float64
 }
 
+// UsageQuery describes a page from the monitored channel's own user usage/log
+// API. It is deliberately connector-level and contains no relay-station IDs.
+type UsageQuery struct {
+	Since    time.Time
+	Until    time.Time
+	Page     int
+	PageSize int
+}
+
+type UsageRecord struct {
+	RemoteID            string
+	RequestID           string
+	CreatedAt           time.Time
+	Model               string
+	FirstTokenMS        *int64
+	DurationMS          *int64
+	SuccessKnown        bool
+	Success             bool
+	InputTokens         int64
+	OutputTokens        int64
+	CacheReadTokens     int64
+	CacheCreationTokens int64
+	ActualCost          float64
+	TotalCost           float64
+}
+
+type UsagePage struct {
+	Records  []UsageRecord
+	Total    int64
+	Page     int
+	PageSize int
+	Pages    int
+}
+
+// UsageReader is optional. A connector implements it only when the upstream
+// exposes a user-facing request history API. Channel monitoring must use this
+// capability rather than relay-station accounting data.
+type UsageReader interface {
+	ListUsage(ctx context.Context, channel *Channel, session *AuthSession, query UsageQuery) (*UsagePage, error)
+}
+
 // Connector 上游连接器统一接口。
 //
 //   - GetTurnstileSiteKey  从上游公开接口读取 Turnstile site key（无需鉴权）

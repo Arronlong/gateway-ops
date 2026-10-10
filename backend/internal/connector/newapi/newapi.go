@@ -177,6 +177,118 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 	return out, nil
 }
 
+func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *connector.AuthSession, query connector.UsageQuery) (*connector.UsagePage, error) {
+	if session == nil || (session.Cookie == "" && len(session.Headers) == 0) {
+		return nil, errors.New("missing newapi auth credential")
+	}
+	page := query.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := query.PageSize
+	if pageSize <= 0 || pageSize > 100 {
+		pageSize = 100
+	}
+	site := strings.TrimRight(ch.SiteURL, "/")
+	statusBody, err := c.getJSON(ctx, site+"/api/status", nil)
+	if err != nil {
+		return nil, fmt.Errorf("newapi usage status: %w", err)
+	}
+	var status struct {
+		QuotaPerUnit float64 `json:"quota_per_unit"`
+	}
+	if err := json.Unmarshal(statusBody, &status); err != nil {
+		return nil, fmt.Errorf("newapi usage status decode: %w", err)
+	}
+	if status.QuotaPerUnit <= 0 {
+		status.QuotaPerUnit = 500000
+	}
+
+	req := c.http.R().SetContext(ctx).
+		SetQueryParam("p", strconv.Itoa(page)).
+		SetQueryParam("page_size", strconv.Itoa(pageSize)).
+		SetQueryParam("type", "2")
+	if len(session.Headers) > 0 {
+		req.SetHeaders(session.Headers)
+	}
+	if session.Cookie != "" {
+		req.SetHeader("Cookie", session.Cookie)
+	}
+	if session.UserID != "" {
+		req.SetHeader("New-Api-User", session.UserID)
+	}
+	if !query.Since.IsZero() {
+		req.SetQueryParam("start_timestamp", strconv.FormatInt(query.Since.Unix(), 10))
+	}
+	if !query.Until.IsZero() {
+		req.SetQueryParam("end_timestamp", strconv.FormatInt(query.Until.Unix(), 10))
+	}
+	resp, err := req.Get(site + "/api/log/self")
+	if err != nil {
+		return nil, fmt.Errorf("newapi usage http: %w", err)
+	}
+	if resp.IsError() {
+		return nil, fmt.Errorf("newapi usage: %w", connector.HTTPStatusError(resp.StatusCode(), resp.Body()))
+	}
+	var wrapped newapiResp
+	if err := json.Unmarshal(resp.Body(), &wrapped); err != nil {
+		return nil, fmt.Errorf("newapi usage decode: %w", err)
+	}
+	if !wrapped.Success {
+		return nil, fmt.Errorf("newapi usage: %s", wrapped.Message)
+	}
+	var data struct {
+		Page     int `json:"page"`
+		PageSize int `json:"page_size"`
+		Total    int `json:"total"`
+		Items    []struct {
+			ID               int    `json:"id"`
+			CreatedAt        int64  `json:"created_at"`
+			ModelName        string `json:"model_name"`
+			Quota            int64  `json:"quota"`
+			PromptTokens     int64  `json:"prompt_tokens"`
+			CompletionTokens int64  `json:"completion_tokens"`
+			UseTime          int64  `json:"use_time"`
+			RequestID        string `json:"request_id"`
+			Other            string `json:"other"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(wrapped.Data, &data); err != nil {
+		return nil, fmt.Errorf("newapi usage data decode: %w", err)
+	}
+	pages := 1
+	if data.PageSize > 0 && data.Total > 0 {
+		pages = (data.Total + data.PageSize - 1) / data.PageSize
+	}
+	out := &connector.UsagePage{Total: int64(data.Total), Page: data.Page, PageSize: data.PageSize, Pages: pages}
+	out.Records = make([]connector.UsageRecord, 0, len(data.Items))
+	for _, item := range data.Items {
+		durationMS := item.UseTime * 1000
+		firstTokenMS := firstTokenMSFromOther(item.Other)
+		out.Records = append(out.Records, connector.UsageRecord{
+			RemoteID: strconv.Itoa(item.ID), RequestID: item.RequestID, CreatedAt: time.Unix(item.CreatedAt, 0),
+			Model: item.ModelName, FirstTokenMS: firstTokenMS, DurationMS: &durationMS, SuccessKnown: false, Success: true,
+			InputTokens: item.PromptTokens, OutputTokens: item.CompletionTokens,
+			ActualCost: float64(item.Quota) / status.QuotaPerUnit, TotalCost: float64(item.Quota) / status.QuotaPerUnit,
+		})
+	}
+	return out, nil
+}
+
+func firstTokenMSFromOther(other string) *int64 {
+	if strings.TrimSpace(other) == "" {
+		return nil
+	}
+	var metadata struct {
+		FRT *int64 `json:"frt"`
+	}
+	if err := json.Unmarshal([]byte(other), &metadata); err != nil || metadata.FRT == nil || *metadata.FRT < 0 {
+		return nil
+	}
+	value := *metadata.FRT
+	return &value
+}
+
 func (c *Client) getJSON(ctx context.Context, url string, session *connector.AuthSession) ([]byte, error) {
 	req := c.http.R().SetContext(ctx)
 	if session != nil {

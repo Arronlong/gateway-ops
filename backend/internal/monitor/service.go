@@ -15,20 +15,19 @@ import (
 	"github.com/guliansheng/gateway-ops/internal/connector"
 	"github.com/guliansheng/gateway-ops/internal/notify"
 	"github.com/guliansheng/gateway-ops/internal/progress"
-	"github.com/guliansheng/gateway-ops/internal/relay"
 	"github.com/guliansheng/gateway-ops/internal/storage"
 )
 
 // Service 监控扫描服务。
 type Service struct {
-	channels    *storage.Channels
-	rates       *storage.Rates
-	monitorLogs *storage.MonitorLogs
-	channelSvc  *channel.Service
-	dispatcher  *notify.Dispatcher
-	relay       *relay.Service
-	manualMu    sync.Mutex
-	log         *slog.Logger
+	channels     *storage.Channels
+	rates        *storage.Rates
+	monitorLogs  *storage.MonitorLogs
+	channelUsage *storage.ChannelUsage
+	channelSvc   *channel.Service
+	dispatcher   *notify.Dispatcher
+	manualMu     sync.Mutex
+	log          *slog.Logger
 }
 
 type SyncAllResult struct {
@@ -41,19 +40,19 @@ func NewService(
 	channels *storage.Channels,
 	rates *storage.Rates,
 	monitorLogs *storage.MonitorLogs,
+	channelUsage *storage.ChannelUsage,
 	channelSvc *channel.Service,
 	dispatcher *notify.Dispatcher,
-	relaySvc *relay.Service,
 	log *slog.Logger,
 ) *Service {
 	return &Service{
-		channels:    channels,
-		rates:       rates,
-		monitorLogs: monitorLogs,
-		channelSvc:  channelSvc,
-		dispatcher:  dispatcher,
-		relay:       relaySvc,
-		log:         log,
+		channels:     channels,
+		rates:        rates,
+		monitorLogs:  monitorLogs,
+		channelUsage: channelUsage,
+		channelSvc:   channelSvc,
+		dispatcher:   dispatcher,
+		log:          log,
 	}
 }
 
@@ -108,13 +107,106 @@ func (s *Service) SyncAll(ctx context.Context, includeDisabled bool) SyncAllResu
 		channel := &list[i]
 		balanceErr := s.RefreshBalance(ctx, channel)
 		rateErr := s.RefreshRates(ctx, channel)
-		if balanceErr == nil && rateErr == nil {
+		usageErr := s.RefreshUsage(ctx, channel)
+		if balanceErr == nil && rateErr == nil && usageErr == nil {
 			result.Succeeded++
 		} else {
 			result.Failed++
 		}
 	}
 	return result
+}
+
+// RefreshUsage synchronizes request history from the monitored channel's own
+// user usage/log API. Relay station data is intentionally not involved.
+func (s *Service) RefreshUsage(ctx context.Context, c *storage.Channel) error {
+	if c.BalanceMode == storage.BalanceModeManual || s.channelUsage == nil {
+		return nil
+	}
+	accounts, err := s.channels.ListAccounts(c.ID)
+	if err != nil {
+		return err
+	}
+	if len(accounts) == 0 {
+		return nil
+	}
+	now := time.Now().UTC()
+	var failures []error
+	for _, account := range accounts {
+		target := s.channelSvc.AccountChannel(c, account)
+		resolved, conn, session, err := s.prepare(ctx, target)
+		if err != nil {
+			failures = append(failures, fmt.Errorf("%s: %w", account.Username, err))
+			continue
+		}
+		reader, ok := conn.(connector.UsageReader)
+		if !ok {
+			continue
+		}
+		state, stateErr := s.channelUsage.SyncState(c.ID, account.ID)
+		if stateErr != nil {
+			failures = append(failures, fmt.Errorf("%s usage state: %w", account.Username, stateErr))
+			continue
+		}
+		since := now.Add(-30 * 24 * time.Hour)
+		if state.BackfilledAt != nil {
+			if state.ForwardSyncedAt != nil {
+				since = state.ForwardSyncedAt.Add(-10 * time.Minute)
+			} else if latest, latestErr := s.channelUsage.LatestOccurredAt(c.ID, account.ID); latestErr == nil && latest != nil {
+				since = latest.Add(-10 * time.Minute)
+			}
+		}
+
+		const requestedPageSize = 1000
+		completed := false
+		for page := 1; page <= 1000; page++ {
+			result, readErr := reader.ListUsage(ctx, resolved, session, connector.UsageQuery{Since: since, Until: now, Page: page, PageSize: requestedPageSize})
+			if readErr != nil {
+				failures = append(failures, fmt.Errorf("%s usage: %w", account.Username, readErr))
+				break
+			}
+			events := make([]storage.ChannelUsageEvent, 0, len(result.Records))
+			for _, record := range result.Records {
+				if record.RemoteID == "" || record.CreatedAt.IsZero() {
+					continue
+				}
+				events = append(events, storage.ChannelUsageEvent{
+					ChannelID: c.ID, ChannelAccountID: account.ID, Source: string(c.Type), RemoteUsageID: record.RemoteID,
+					RequestID: record.RequestID, Model: record.Model, FirstTokenMS: record.FirstTokenMS, DurationMS: record.DurationMS,
+					SuccessKnown: record.SuccessKnown, Success: record.Success, InputTokens: record.InputTokens, OutputTokens: record.OutputTokens,
+					CacheReadTokens: record.CacheReadTokens, CacheCreationTokens: record.CacheCreationTokens,
+					ActualCost: record.ActualCost, TotalCost: record.TotalCost, OccurredAt: record.CreatedAt.UTC(), SyncedAt: now,
+				})
+			}
+			if err := s.channelUsage.Upsert(events); err != nil {
+				failures = append(failures, fmt.Errorf("%s usage save: %w", account.Username, err))
+				break
+			}
+			effectivePageSize := result.PageSize
+			if effectivePageSize <= 0 {
+				effectivePageSize = requestedPageSize
+			}
+			if len(result.Records) == 0 || result.Pages <= page || len(result.Records) < effectivePageSize {
+				completed = true
+				break
+			}
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		if completed {
+			syncedAt := now
+			state.ForwardSyncedAt = &syncedAt
+			if state.BackfilledAt == nil {
+				backfilledAt := now
+				state.BackfilledAt = &backfilledAt
+			}
+			if err := s.channelUsage.SaveSyncState(state); err != nil {
+				failures = append(failures, fmt.Errorf("%s usage state save: %w", account.Username, err))
+			}
+		}
+	}
+	return errors.Join(failures...)
 }
 
 // RefreshBalance 单个渠道余额刷新，可被 API 手动触发。
@@ -155,7 +247,10 @@ func (s *Service) refreshAutomaticBalances(ctx context.Context, c *storage.Chann
 	var totalBalance float64
 	knownBalances := 0
 	failedAccounts := make([]string, 0)
-	latest := time.Now()
+	// last_balance_at must represent the latest successful balance sample.
+	// A failed refresh may reuse a previously known balance, but must not make
+	// that stale value look freshly sampled.
+	latest := time.Time{}
 	for _, account := range accounts {
 		target := s.channelSvc.AccountChannel(c, account)
 		balance, sampledAt, err := s.fetchAutomaticBalance(ctx, target)
@@ -164,8 +259,11 @@ func (s *Service) refreshAutomaticBalances(ctx context.Context, c *storage.Chann
 			if account.LastBalance != nil {
 				totalBalance += *account.LastBalance
 				knownBalances++
+				if account.LastBalanceAt != nil && account.LastBalanceAt.After(latest) {
+					latest = *account.LastBalanceAt
+				}
 			}
-			failedAccounts = append(failedAccounts, account.Username)
+			failedAccounts = append(failedAccounts, fmt.Sprintf("%s：%v", account.Username, err))
 			continue
 		}
 		if err := s.channels.UpdateAccountBalance(account.ID, balance, &sampledAt, ""); err != nil {
@@ -185,6 +283,9 @@ func (s *Service) refreshAutomaticBalances(ctx context.Context, c *storage.Chann
 		return err
 	}
 
+	if latest.IsZero() && c.LastBalanceAt != nil {
+		latest = *c.LastBalanceAt
+	}
 	lastErr := ""
 	if len(failedAccounts) > 0 {
 		lastErr = fmt.Sprintf("%d 个账号余额采集失败：%s", len(failedAccounts), strings.Join(failedAccounts, "、"))
@@ -255,62 +356,19 @@ func (s *Service) refreshManualBalance(ctx context.Context, c *storage.Channel) 
 	defer s.manualMu.Unlock()
 
 	progress.Start(ctx, progress.StageBalance, "读取手动余额…")
-	// The caller may have loaded the channel before another refresh completed.
-	// Reload inside the settlement lock so the latest baseline is always used.
 	current, err := s.channels.FindByID(c.ID)
 	if err != nil {
 		return err
 	}
-	c = current
-	balance := c.ManualBalance
-	if c.LastBalance != nil {
-		balance = *c.LastBalance
+	balance := current.ManualBalance
+	if current.LastBalance != nil {
+		balance = *current.LastBalance
 	}
-	observedBalance := balance
-	if s.relay == nil {
-		progress.OK(ctx, progress.StageBalance, fmt.Sprintf("当前余额 %.4f（手动管理）", balance), map[string]any{"balance": balance, "manual": true})
-		s.notifyManualBalanceLow(ctx, c, balance)
-		return nil
-	}
-
-	// The upstream endpoint returns a lifetime cumulative value even when a
-	// later start timestamp is supplied. Read the true cumulative total and
-	// settle only the change from our persisted baseline.
-	usage, err := s.relay.ChannelUsageTotals(ctx, []storage.Channel{*c}, "all", time.Time{})
-	if err != nil {
-		progress.Fail(ctx, progress.StageBalance, "手动余额消费统计失败")
-		return fmt.Errorf("读取手动余额消费失败: %w", err)
-	}
-	total, ok := usage[c.ID]
-	// Without a complete, bound account set we cannot safely advance the
-	// settlement cursor: doing so would permanently lose later consumption.
-	if !ok || total.MatchedAccountCount == 0 {
-		progress.OK(ctx, progress.StageBalance, fmt.Sprintf("当前余额 %.4f（等待账号归属）", balance), map[string]any{"balance": balance, "manual": true, "account_bound": false})
-		s.notifyManualBalanceLow(ctx, c, balance)
-		return nil
-	}
-	if !total.Complete {
-		progress.Fail(ctx, progress.StageBalance, "手动余额消费统计不完整")
-		return fmt.Errorf("手动余额消费统计不完整，暂不扣减余额")
-	}
-	balance, baseline, basis, deducted, initialized := applyManualUsage(balance, c.ManualUsageBaseline, c.ManualUsageBasis, total.Cost, total.CostBasis)
-	now := time.Now()
-	settledBalance, err := s.channels.SettleManualBalance(c.ID, observedBalance, balance, now, "", baseline, basis)
-	if err != nil {
-		return err
-	}
-	balance = settledBalance
-	if s.rates != nil {
-		if err := s.rates.AppendBalance(&storage.BalanceSnapshot{ChannelID: c.ID, Balance: balance, SampledAt: now}); err != nil {
-			return err
-		}
-	}
-	message := fmt.Sprintf("当前余额 %.4f（已扣除消费 %.4f）", balance, deducted)
-	if initialized {
-		message = fmt.Sprintf("当前余额 %.4f（已建立消费起点）", balance)
-	}
-	progress.OK(ctx, progress.StageBalance, message, map[string]any{"balance": balance, "manual": true, "consumption": deducted, "account_bound": true})
-	s.notifyManualBalanceLow(ctx, c, balance)
+	progress.OK(ctx, progress.StageBalance, fmt.Sprintf("当前余额 %.4f（手动管理，不读取中转站数据）", balance), map[string]any{
+		"balance": balance,
+		"manual":  true,
+	})
+	s.notifyManualBalanceLow(ctx, current, balance)
 	return nil
 }
 

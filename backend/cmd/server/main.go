@@ -84,6 +84,7 @@ func main() {
 	}
 
 	channels := storage.NewChannels(db)
+	channelUsage := storage.NewChannelUsage(db)
 	authSessions := storage.NewAuthSessions(db)
 	captchas := storage.NewCaptchas(db)
 	notifies := storage.NewNotifications(db)
@@ -101,7 +102,7 @@ func main() {
 		SendMaxAttempts:    cfg.Notifications.SendMaxAttempts,
 	})
 	relaySvc := relay.NewService(relayStations, cipher, channels, rates)
-	monitorSvc := monitor.NewService(channels, rates, monLogs, channelSvc, dispatcher, relaySvc, log)
+	monitorSvc := monitor.NewService(channels, rates, monLogs, channelUsage, channelSvc, dispatcher, log)
 
 	sch := scheduler.New(cfg.Scheduler, monitorSvc, monLogs, rates, notifies, settings, relaySvc, log)
 	if err := sch.Start(); err != nil {
@@ -132,6 +133,7 @@ func main() {
 		Cipher:        cipher,
 		Auth:          authSvc,
 		Channels:      channels,
+		ChannelUsage:  channelUsage,
 		Sessions:      authSessions,
 		Captchas:      captchas,
 		Notifies:      notifies,
@@ -142,6 +144,7 @@ func main() {
 		Relay:         relaySvc,
 		RelayStations: relayStations,
 		Operations:    operations,
+		Settings:      settings,
 		Scheduler:     sch,
 		Dispatcher:    dispatcher,
 		Log:           log,

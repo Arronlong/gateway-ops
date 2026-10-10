@@ -124,9 +124,8 @@ export interface ChannelMetric {
   channel_id: number
   consumption_amount: number
   cumulative_recharge_amount: number
-  user_charge_amount: number
-  matched_account_count: number
-  user_charge_complete: boolean
+  usage_cost_amount: number
+  usage_request_count: number
   current_balance: number
 }
 
@@ -234,6 +233,21 @@ export interface DashboardChannelStat {
   monitor_enabled: boolean
   last_balance?: number | null
   last_error?: string
+}
+
+export interface ChannelSummary {
+  range: RelayUsageRange
+  total_channels: number
+  active_channels: number
+  failed_channels: number
+  total_balance: number
+  cumulative_recharge_amount: number
+  consumption_amount: number
+  usage_cost_amount: number
+  usage_request_count: number
+  lowest_balance: DashboardLowest | null
+  rate_change_count: number
+  recent_rate_changes: RateChangeLog[]
 }
 
 export interface DashboardSummary {
@@ -422,6 +436,14 @@ export interface RelayUsageView {
   accounts: RelayUsageAccountView[]
   complete: boolean
   failed_accounts: number
+}
+
+export interface RelayDailyConsumptionPoint {
+  date: string
+  user_charge: number
+  account_cost: number
+  request_count: number
+  total_tokens?: number
 }
 
 export interface RelayRecentUsage {

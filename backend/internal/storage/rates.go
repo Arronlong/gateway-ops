@@ -30,6 +30,18 @@ func (r *Rates) ListByChannel(channelID uint) ([]RateSnapshot, error) {
 	return list, nil
 }
 
+// ListOwnedByChannel returns only rate facts owned by channel management.
+// Relay-account projections are a separate domain and must never appear in the
+// channel management page, even when an explicit relay association exists.
+func (r *Rates) ListOwnedByChannel(channelID uint) ([]RateSnapshot, error) {
+	var list []RateSnapshot
+	if err := r.db.Where("channel_id = ? AND source <> ?", channelID, RateSnapshotSourceRelayAccount).
+		Order("model_name ASC").Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return list, nil
+}
+
 func (r *Rates) FindByID(id uint, channelID uint) (*RateSnapshot, error) {
 	var snapshot RateSnapshot
 	if err := r.db.Where("id = ? AND channel_id = ?", id, channelID).First(&snapshot).Error; err != nil {
@@ -223,10 +235,47 @@ func (r *Rates) CountChangesSince(since time.Time) (int64, error) {
 	return count, err
 }
 
+// ListOwnedChangesSince returns channel-owned rate changes only. A current
+// relay_account snapshot marks that group as relay-domain data and excludes
+// all of its changes from channel management.
+func (r *Rates) ListOwnedChangesSince(since time.Time, limit int) ([]RateChangeLog, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	var list []RateChangeLog
+	err := r.db.Table("rate_change_logs AS changes").
+		Select("changes.*").
+		Joins("JOIN rate_snapshots AS snapshots ON snapshots.channel_id = changes.channel_id AND snapshots.model_name = changes.model_name").
+		Where("snapshots.source <> ?", RateSnapshotSourceRelayAccount).
+		Where("changes.changed_at >= ? AND changes.old_ratio IS NOT NULL AND changes.old_ratio <> changes.new_ratio", since).
+		Order("changes.changed_at DESC, changes.id DESC").
+		Limit(limit).
+		Scan(&list).Error
+	return list, err
+}
+
+func (r *Rates) CountOwnedChangesSince(since time.Time) (int64, error) {
+	var count int64
+	err := r.db.Table("rate_change_logs AS changes").
+		Joins("JOIN rate_snapshots AS snapshots ON snapshots.channel_id = changes.channel_id AND snapshots.model_name = changes.model_name").
+		Where("snapshots.source <> ?", RateSnapshotSourceRelayAccount).
+		Where("changes.changed_at >= ? AND changes.old_ratio IS NOT NULL AND changes.old_ratio <> changes.new_ratio", since).
+		Count(&count).Error
+	return count, err
+}
+
 // ListLatestRatioChanges returns the latest transition into each current
 // group ratio. Historical transitions whose target no longer matches the
 // current snapshot must not be presented as the group's latest state.
 func (r *Rates) ListLatestRatioChanges(channelID uint) ([]RateChangeLog, error) {
+	return r.listLatestRatioChanges(channelID, false)
+}
+
+func (r *Rates) ListLatestOwnedRatioChanges(channelID uint) ([]RateChangeLog, error) {
+	return r.listLatestRatioChanges(channelID, true)
+}
+
+func (r *Rates) listLatestRatioChanges(channelID uint, ownedOnly bool) ([]RateChangeLog, error) {
 	query := `
 		SELECT DISTINCT ON (snapshots.channel_id, snapshots.model_name) changes.*
 		FROM rate_snapshots AS snapshots
@@ -237,7 +286,11 @@ func (r *Rates) ListLatestRatioChanges(channelID uint) ([]RateChangeLog, error) 
 			AND changes.old_ratio <> changes.new_ratio
 			AND ABS(changes.new_ratio - snapshots.ratio) <= 0.000000001
 	`
-	args := make([]any, 0, 1)
+	args := make([]any, 0, 2)
+	if ownedOnly {
+		query += " AND snapshots.source <> ?"
+		args = append(args, RateSnapshotSourceRelayAccount)
+	}
 	if channelID != 0 {
 		query += " AND snapshots.channel_id = ?"
 		args = append(args, channelID)
