@@ -7,7 +7,7 @@ export type RelayAdjustmentFilter =
   | "priority"
 
 export const relayAdjustmentTabs: { value: RelayAdjustmentFilter; label: string }[] = [
-  { value: "all", label: "全部" },
+  { value: "all", label: "All" },
   { value: "group", label: "调组" },
   { value: "scheduling", label: "调度" },
   { value: "priority", label: "优先级" },

@@ -20,10 +20,12 @@ import {
   Trash2,
 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { TableActionButton } from "@/components/ui/table-action-button"
+import { ListPanelHeader } from "@/components/ui/list-panel"
+import { ListFilterMenu } from "@/components/ui/list-filter-menu"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import { useCaptchaConfigs, useDashboardSummary, useNotificationChannels, useNotificationLogs } from "@/lib/queries"
@@ -195,19 +197,13 @@ export function CaptchaStatus({ fullPage = false }: { fullPage?: boolean }) {
 
   return (
     <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
-      <CardHeader className="gap-3 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck className="size-4 text-brand" />{"验证码服务配置"}</CardTitle>
-            {fullPage ? <p className="mt-1 text-xs text-muted-foreground">配置 Turnstile 打码 provider，供渠道登录时自动获取验证令牌。</p> : null}
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {fullPage && data ? <span className="text-xs text-muted-foreground">{data.length} 个配置</span> : null}
-            {fullPage ? <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => refresh()} aria-label="刷新验证码配置" title="刷新验证码配置"><RefreshCw className="size-3.5" />刷新</Button> : null}
-            <Button
+      <ListPanelHeader
+          title={<CardTitle className="flex items-center gap-2 text-sm font-semibold"><ShieldCheck className="size-4 text-brand" />{"验证码服务配置"}</CardTitle>}
+          description={fullPage ? <p className="mt-1 truncate text-xs text-muted-foreground">配置 Turnstile 打码 provider，供渠道登录时自动获取验证令牌。</p> : null}
+          actions={<>{fullPage && data ? <span className="text-xs text-muted-foreground">{data.length} 个配置</span> : null}{fullPage ? <Button type="button" variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" onClick={() => refresh()} aria-label="刷新验证码配置" title="刷新验证码配置"><RefreshCw className="size-3.5" />刷新</Button> : null}<Button
               size="sm"
               variant="outline"
-              className="h-9 shrink-0 gap-1.5 text-xs"
+              className="h-11 sm:h-9 shrink-0 gap-1.5 text-xs"
               onClick={() => {
                 setEditing(null)
                 setOpen(true)
@@ -215,21 +211,19 @@ export function CaptchaStatus({ fullPage = false }: { fullPage?: boolean }) {
             >
               <Plus className="size-3.5" />
               {"新增"}
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
+            </Button></>}
+        ></ListPanelHeader>
       <CardContent className="border-t border-border p-0">
         {fullPage ? (
           <div className="relative isolate h-[min(52vh,520px)]">
             <div className="h-full overflow-auto">
               {loading && !data ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">正在读取验证码配置...</div> : !data?.length ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">暂未配置打码 provider</div> : <div className="isolate min-w-[860px]">
                 <div className="sticky top-0 z-30 grid grid-cols-[minmax(220px,1fr)_150px_minmax(240px,1.2fr)_110px_170px_112px] items-center border-b border-border bg-muted text-[11px] font-medium text-foreground/90 [&>*]:px-4 [&>*]:py-2"><span>配置名称</span><span>服务类型</span><span>接口地址</span><span>状态</span><span>更新时间</span><span className="fixed-column-shadow-right sticky right-0 z-40 flex items-center bg-muted">操作</span></div>
-                {data.map((p) => <div key={p.id} className="grid min-h-14 grid-cols-[minmax(220px,1fr)_150px_minmax(240px,1.2fr)_110px_170px_112px] items-center border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-3"><div className="flex min-w-0 flex-col justify-center"><p className="truncate font-medium text-foreground" title={p.name}>{p.name}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">ID #{p.id}</p></div><div className="flex items-center"><PillTag label={captchaTypeLabel[p.type] ?? p.type} icon={ShieldCheck} tone="brand" /></div><span className="truncate text-muted-foreground" title={p.endpoint || "未配置"}>{p.endpoint || "未配置"}</span><div className="flex items-center"><PillTag label={p.enabled ? "已启用" : "已禁用"} tone={p.enabled ? "brand" : "muted"} /></div><span className="font-mono tabular-nums text-muted-foreground">{relativeTime(p.updated_at)}</span><div className="fixed-column-shadow-right sticky right-0 z-20 flex items-center gap-1 bg-card"><Button size="icon" variant="ghost" className="size-8" aria-label={`编辑${p.name}`} title="编辑" onClick={() => { setEditing(p); setOpen(true) }}><Pencil className="size-3.5" /></Button><Button size="icon" variant="ghost" className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`删除${p.name}`} title="删除" disabled={busy === p.id} onClick={() => handleDelete(p)}><Trash2 className="size-3.5" /></Button></div></div>)}
+                {data.map((p) => <div key={p.id} className="grid min-h-14 grid-cols-[minmax(220px,1fr)_150px_minmax(240px,1.2fr)_110px_170px_112px] items-center border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-3"><div className="flex min-w-0 flex-col justify-center"><p className="truncate font-medium text-foreground" title={p.name}>{p.name}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">ID #{p.id}</p></div><div className="flex items-center"><PillTag label={captchaTypeLabel[p.type] ?? p.type} icon={ShieldCheck} tone="brand" /></div><span className="truncate text-muted-foreground" title={p.endpoint || "未配置"}>{p.endpoint || "未配置"}</span><div className="flex items-center"><PillTag label={p.enabled ? "已启用" : "已禁用"} tone={p.enabled ? "brand" : "muted"} /></div><span className="font-mono tabular-nums text-muted-foreground">{relativeTime(p.updated_at)}</span><div className="fixed-column-shadow-right sticky right-0 z-20 flex items-center gap-1 bg-card"><TableActionButton aria-label={`编辑${p.name}`} title="编辑" onClick={() => { setEditing(p); setOpen(true) }}><Pencil className="size-3.5" /></TableActionButton><TableActionButton destructive aria-label={`删除${p.name}`} title="删除" disabled={busy === p.id} onClick={() => handleDelete(p)}><Trash2 className="size-3.5" /></TableActionButton></div></div>)}
               </div>}
             </div>
           </div>
-        ) : loading ? <p className="px-6 py-4 text-xs text-muted-foreground">{"加载中…"}</p> : !data || data.length === 0 ? <p className="px-6 py-4 text-xs text-muted-foreground">{"暂未配置打码 provider"}</p> : <ul className="divide-y divide-border">{data.map((p) => <li key={p.id} className="flex items-center justify-between gap-3 px-6 py-2.5"><div className="flex min-w-0 items-center gap-2.5"><span className={cn("size-2 shrink-0 rounded-full", p.enabled ? "bg-success" : "bg-muted-foreground/30")} /><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{p.name}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{captchaTypeLabel[p.type] ?? p.type}</p></div></div><div className="flex shrink-0 items-center gap-1"><span className={cn("mr-1 text-xs", p.enabled ? "text-success" : "text-muted-foreground")}>{p.enabled ? "已启用" : "已禁用"}</span><Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => { setEditing(p); setOpen(true) }}><Pencil className="size-3.5" /></Button><Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={busy === p.id} onClick={() => handleDelete(p)}><Trash2 className="size-3.5" /></Button></div></li>)}</ul>}
+        ) : loading ? <p className="px-6 py-4 text-xs text-muted-foreground">{"加载中…"}</p> : !data || data.length === 0 ? <p className="px-6 py-4 text-xs text-muted-foreground">{"暂未配置打码 provider"}</p> : <ul className="divide-y divide-border">{data.map((p) => <li key={p.id} className="flex items-center justify-between gap-3 px-6 py-2.5"><div className="flex min-w-0 items-center gap-2.5"><span className={cn("size-2 shrink-0 rounded-full", p.enabled ? "bg-success" : "bg-muted-foreground/30")} /><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{p.name}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{captchaTypeLabel[p.type] ?? p.type}</p></div></div><div className="flex shrink-0 items-center gap-1"><span className={cn("mr-1 text-xs", p.enabled ? "text-success" : "text-muted-foreground")}>{p.enabled ? "已启用" : "已禁用"}</span><TableActionButton onClick={() => { setEditing(p); setOpen(true) }}><Pencil className="size-3.5" /></TableActionButton><TableActionButton destructive disabled={busy === p.id} onClick={() => handleDelete(p)}><Trash2 className="size-3.5" /></TableActionButton></div></li>)}</ul>}
       </CardContent>
 
       <CaptchaFormDialog
@@ -329,19 +323,13 @@ export function NotificationStatus({ fullPage = false }: { fullPage?: boolean })
 
   return (
     <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
-      <CardHeader className="gap-3 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold"><BellRing className="size-4 text-brand" />{"通知渠道管理"}</CardTitle>
-            {fullPage ? <p className="mt-1 text-xs text-muted-foreground">管理推送目标、订阅规则和测试发送。</p> : null}
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {fullPage && data ? <span className="text-xs text-muted-foreground">{data.length} 个渠道</span> : null}
-            {fullPage ? <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => refresh()} aria-label="刷新通知渠道" title="刷新通知渠道"><RefreshCw className="size-3.5" />刷新</Button> : null}
-            <Button
+      <ListPanelHeader
+          title={<CardTitle className="flex items-center gap-2 text-sm font-semibold"><BellRing className="size-4 text-brand" />{"通知渠道管理"}</CardTitle>}
+          description={fullPage ? <p className="mt-1 truncate text-xs text-muted-foreground">管理推送目标、订阅规则和测试发送。</p> : null}
+          actions={<>{fullPage && data ? <span className="text-xs text-muted-foreground">{data.length} 个渠道</span> : null}{fullPage ? <Button type="button" variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" onClick={() => refresh()} aria-label="刷新通知渠道" title="刷新通知渠道"><RefreshCw className="size-3.5" />刷新</Button> : null}<Button
               size="sm"
               variant="outline"
-              className="h-9 shrink-0 gap-1.5 text-xs"
+              className="h-11 sm:h-9 shrink-0 gap-1.5 text-xs"
               onClick={() => {
                 setEditing(null)
                 setOpen(true)
@@ -349,21 +337,19 @@ export function NotificationStatus({ fullPage = false }: { fullPage?: boolean })
             >
               <Plus className="size-3.5" />
               {"新增"}
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
+            </Button></>}
+        ></ListPanelHeader>
       <CardContent className="border-t border-border p-0">
         {fullPage ? (
           <div className="relative isolate h-[min(44vh,460px)]">
             <div className="h-full overflow-auto">
               {loading && !data ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">正在读取通知渠道...</div> : !data?.length ? <div className="flex h-full items-center justify-center text-sm text-muted-foreground">暂未配置通知渠道</div> : <div className="isolate min-w-[1000px]">
                 <div className="sticky top-0 z-30 grid grid-cols-[minmax(230px,1fr)_130px_minmax(170px,0.8fr)_144px_160px_140px] items-center border-b border-border bg-muted text-[11px] font-medium text-foreground/90 [&>*]:px-4 [&>*]:py-2"><span>渠道名称</span><span>类型</span><span>订阅范围</span><span>状态</span><span>更新时间</span><span className="fixed-column-shadow-right sticky right-0 z-40 flex items-center bg-muted">操作</span></div>
-                {data.map((c) => { const Icon = notifyTypeIcon[c.type] ?? Send; const subCount = parseSubCount(c.subscriptions); return <div key={c.id} className="grid min-h-14 grid-cols-[minmax(230px,1fr)_130px_minmax(170px,0.8fr)_144px_160px_140px] items-center border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-3"><div className="flex min-w-0 items-center gap-2.5"><Icon className={cn("size-4 shrink-0", c.enabled ? "text-brand" : "text-muted-foreground")} /><div className="min-w-0"><p className="truncate font-medium text-foreground" title={c.name}>{c.name}</p><p className="mt-0.5 text-[11px] text-muted-foreground">ID #{c.id}</p></div></div><div className="flex items-center"><PillTag label={notificationTypeLabel[c.type] ?? c.type} icon={Icon} tone={notificationTypeTone[c.type] ?? "muted"} /></div><span className="truncate text-muted-foreground" title={subCount === 0 ? "订阅全部事件" : `${subCount} 条订阅`}>{subCount === 0 ? "订阅全部事件" : `${subCount} 条订阅`}</span><div className="flex items-center gap-2"><Switch checked={c.enabled} onCheckedChange={(checked) => void handleToggle(c, checked)} disabled={busy === c.id} aria-label={`${c.name}${c.enabled ? "停用" : "启用"}`} /><span className={cn("text-[11px] font-medium", c.enabled ? "text-success" : "text-muted-foreground")}>{c.enabled ? "已启用" : "已停用"}</span></div><span className="font-mono tabular-nums text-muted-foreground">{relativeTime(c.updated_at)}</span><div className="fixed-column-shadow-right sticky right-0 z-20 flex items-center gap-1 bg-card"><Button size="icon" variant="ghost" className="size-8" title="测试发送" aria-label={`测试发送到${c.name}`} disabled={busy === c.id} onClick={() => handleTest(c)}><TestTube2 className="size-3.5" /></Button><Button size="icon" variant="ghost" className="size-8" title="编辑" aria-label={`编辑${c.name}`} onClick={() => { setEditing(c); setOpen(true) }}><Pencil className="size-3.5" /></Button><Button size="icon" variant="ghost" className="size-8 text-destructive hover:bg-destructive/10 hover:text-destructive" title="删除" disabled={busy === c.id} onClick={() => handleDelete(c)}><Trash2 className="size-3.5" /></Button></div></div> })}
+                {data.map((c) => { const Icon = notifyTypeIcon[c.type] ?? Send; const subCount = parseSubCount(c.subscriptions); return <div key={c.id} className="grid min-h-14 grid-cols-[minmax(230px,1fr)_130px_minmax(170px,0.8fr)_144px_160px_140px] items-center border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-3"><div className="flex min-w-0 items-center gap-2.5"><Icon className={cn("size-4 shrink-0", c.enabled ? "text-brand" : "text-muted-foreground")} /><div className="min-w-0"><p className="truncate font-medium text-foreground" title={c.name}>{c.name}</p><p className="mt-0.5 text-[11px] text-muted-foreground">ID #{c.id}</p></div></div><div className="flex items-center"><PillTag label={notificationTypeLabel[c.type] ?? c.type} icon={Icon} tone={notificationTypeTone[c.type] ?? "muted"} /></div><span className="truncate text-muted-foreground" title={subCount === 0 ? "订阅全部事件" : `${subCount} 条订阅`}>{subCount === 0 ? "订阅全部事件" : `${subCount} 条订阅`}</span><div className="flex items-center gap-2"><Switch checked={c.enabled} onCheckedChange={(checked) => void handleToggle(c, checked)} disabled={busy === c.id} aria-label={`${c.name}${c.enabled ? "停用" : "启用"}`} /><span className={cn("text-[11px] font-medium", c.enabled ? "text-success" : "text-muted-foreground")}>{c.enabled ? "已启用" : "已停用"}</span></div><span className="font-mono tabular-nums text-muted-foreground">{relativeTime(c.updated_at)}</span><div className="fixed-column-shadow-right sticky right-0 z-20 flex items-center gap-1 bg-card"><TableActionButton title="测试发送" aria-label={`测试发送到${c.name}`} disabled={busy === c.id} onClick={() => handleTest(c)}><TestTube2 className="size-3.5" /></TableActionButton><TableActionButton title="编辑" aria-label={`编辑${c.name}`} onClick={() => { setEditing(c); setOpen(true) }}><Pencil className="size-3.5" /></TableActionButton><TableActionButton destructive title="删除" disabled={busy === c.id} onClick={() => handleDelete(c)}><Trash2 className="size-3.5" /></TableActionButton></div></div> })}
               </div>}
             </div>
           </div>
-        ) : loading ? <p className="px-6 py-4 text-xs text-muted-foreground">{"加载中…"}</p> : !data || data.length === 0 ? <p className="px-6 py-4 text-xs text-muted-foreground">{"暂未配置通知渠道"}</p> : <ul className="divide-y divide-border">{data.map((c) => { const Icon = notifyTypeIcon[c.type] ?? Send; const subCount = parseSubCount(c.subscriptions); return <li key={c.id} className="flex min-h-14 items-center justify-between gap-3 px-3 py-2.5"><div className="flex min-w-0 items-center gap-2.5"><Icon className={cn("size-4 shrink-0", c.enabled ? "text-brand" : "text-muted-foreground")} /><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{c.name}</p><p className="text-[11px] text-muted-foreground">{notificationTypeLabel[c.type] ?? c.type}{" · "}{subCount === 0 ? "订阅全部" : `${subCount} 条订阅`}{!c.enabled ? " · 已禁用" : ""}</p></div></div><div className="flex shrink-0 items-center gap-0.5"><Button size="icon" variant="ghost" className="h-7 w-7" title="测试发送" disabled={busy === c.id} onClick={() => handleTest(c)}><TestTube2 className="size-3.5" /></Button><Button size="icon" variant="ghost" className="h-7 w-7" title="编辑" onClick={() => { setEditing(c); setOpen(true) }}><Pencil className="size-3.5" /></Button><Button size="icon" variant="ghost" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" title="删除" disabled={busy === c.id} onClick={() => handleDelete(c)}><Trash2 className="size-3.5" /></Button></div></li> })}</ul>}
+        ) : loading ? <p className="px-6 py-4 text-xs text-muted-foreground">{"加载中…"}</p> : !data || data.length === 0 ? <p className="px-6 py-4 text-xs text-muted-foreground">{"暂未配置通知渠道"}</p> : <ul className="divide-y divide-border">{data.map((c) => { const Icon = notifyTypeIcon[c.type] ?? Send; const subCount = parseSubCount(c.subscriptions); return <li key={c.id} className="flex min-h-14 items-center justify-between gap-3 px-3 py-2.5"><div className="flex min-w-0 items-center gap-2.5"><Icon className={cn("size-4 shrink-0", c.enabled ? "text-brand" : "text-muted-foreground")} /><div className="min-w-0"><p className="truncate text-sm font-medium text-foreground">{c.name}</p><p className="text-[11px] text-muted-foreground">{notificationTypeLabel[c.type] ?? c.type}{" · "}{subCount === 0 ? "订阅全部" : `${subCount} 条订阅`}{!c.enabled ? " · 已禁用" : ""}</p></div></div><div className="flex shrink-0 items-center gap-0.5"><TableActionButton title="测试发送" disabled={busy === c.id} onClick={() => handleTest(c)}><TestTube2 className="size-3.5" /></TableActionButton><TableActionButton title="编辑" onClick={() => { setEditing(c); setOpen(true) }}><Pencil className="size-3.5" /></TableActionButton><TableActionButton destructive title="删除" disabled={busy === c.id} onClick={() => handleDelete(c)}><Trash2 className="size-3.5" /></TableActionButton></div></li> })}</ul>}
       </CardContent>
 
       <NotificationFormDialog
@@ -406,26 +392,32 @@ export function NotificationLogs() {
 
   return (
     <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
-      <CardHeader className="gap-3 px-4 py-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-sm font-semibold"><Send className="size-4 text-brand" />通知发送记录</CardTitle>
-            <p className="mt-1 text-xs text-muted-foreground">最近 100 条通知的发送结果和完整内容。</p>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
+      <ListPanelHeader
+          secondaryPlacement="inline"
+          actionsPlacement="secondary"
+          title={<CardTitle className="flex items-center gap-2 text-sm font-semibold"><Send className="size-4 text-brand" />通知发送记录</CardTitle>}
+          description={<p className="mt-1 truncate text-xs text-muted-foreground">最近 100 条通知的发送结果和完整内容。</p>}
+actions={<>
+<Button type="button" variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" onClick={() => void logs.refetch().then(() => refresh())} disabled={logs.refreshing}><RefreshCw className={cn("size-3.5", logs.refreshing && "animate-spin")} />刷新</Button>
+</>}
+          secondary={<>
+<Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-11 sm:h-9 min-w-0 flex-1 basis-64 text-xs" placeholder="搜索渠道、标题或内容" aria-label="搜索通知记录" />
+<ListFilterMenu
+  activeCount={Number(statusFilter !== "all") + Number(channelFilter !== "all") + Number(eventFilter !== "all")}
+  onReset={resetFilters}
+  groups={[
+    { label: "发送状态", value: statusFilter, onValueChange: (value) => setStatusFilter(value as typeof statusFilter), options: [{ value: "all", label: "All" }, { value: "success", label: "成功" }, { value: "failed", label: "失败" }] },
+    { label: "通知渠道", value: channelFilter, onValueChange: setChannelFilter, options: [{ value: "all", label: "All" }, ...(channels.data ?? []).map((channel) => ({ value: String(channel.id), label: channel.name }))] },
+    { label: "通知事件", value: eventFilter, onValueChange: setEventFilter, options: [{ value: "all", label: "All" }, { value: "balance_low", label: "余额告警" }, { value: "rate_changed", label: "倍率变化" }, { value: "login_failed", label: "登录失败" }, { value: "captcha_failed", label: "验证码失败" }, { value: "monitor_failed", label: "采集失败" }, { value: "test", label: "测试通知" }] },
+  ]}
+/>
+<Button type="button" variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" onClick={resetFilters}><RotateCcw className="size-3.5" />重置</Button>
+</>}
+          meta={<><div className="flex shrink-0 items-center gap-2">
             <span className="text-xs text-muted-foreground">{filteredLogs.length} / {allLogs.length}</span>
             <span className={cn("text-xs font-medium", failedCount ? "text-danger" : "text-success")}>{failedCount ? `${failedCount} 条失败` : "当前筛选全部成功"}</span>
-          </div>
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-9 w-full text-xs sm:w-52" placeholder="搜索渠道、标题或内容" aria-label="搜索通知记录" />
-          <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}><SelectTrigger className="h-9 w-[calc(var(--spacing)*26)] text-xs" aria-label="筛选发送状态"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部状态</SelectItem><SelectItem value="success">成功</SelectItem><SelectItem value="failed">失败</SelectItem></SelectContent></Select>
-          <Select value={channelFilter} onValueChange={setChannelFilter}><SelectTrigger className="h-9 w-36 text-xs" aria-label="筛选通知渠道"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部渠道</SelectItem>{(channels.data ?? []).map((channel) => <SelectItem key={channel.id} value={String(channel.id)}>{channel.name}</SelectItem>)}</SelectContent></Select>
-          <Select value={eventFilter} onValueChange={setEventFilter}><SelectTrigger className="h-9 w-32 text-xs" aria-label="筛选通知事件"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部事件</SelectItem><SelectItem value="balance_low">余额告警</SelectItem><SelectItem value="rate_changed">倍率变化</SelectItem><SelectItem value="login_failed">登录失败</SelectItem><SelectItem value="captcha_failed">验证码失败</SelectItem><SelectItem value="monitor_failed">采集失败</SelectItem><SelectItem value="test">测试通知</SelectItem></SelectContent></Select>
-          <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={resetFilters}><RotateCcw className="size-3.5" />重置</Button>
-          <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => void logs.refetch().then(() => refresh())} disabled={logs.refreshing}><RefreshCw className={cn("size-3.5", logs.refreshing && "animate-spin")} />刷新</Button>
-        </div>
-      </CardHeader>
+          </div></>}
+        ></ListPanelHeader>
       <CardContent className="border-t border-border p-0">
         <div className="relative isolate h-[min(58vh,600px)]">
           <div className="h-full overflow-auto">

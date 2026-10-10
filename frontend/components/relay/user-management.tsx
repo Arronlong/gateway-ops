@@ -7,9 +7,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardTitle } from "@/components/ui/card"
+import { ListPanelHeader } from "@/components/ui/list-panel"
+import { ListFilterMenu } from "@/components/ui/list-filter-menu"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -17,14 +20,6 @@ import { apiFetch } from "@/lib/api"
 import type { RelayUsageRange, RelayUserManagementItem, RelayUserRiskLevel, RelayUserSortKey } from "@/lib/api-types"
 import { useRelayUsers } from "@/lib/queries"
 import { cn } from "@/lib/utils"
-
-const ranges: Array<{ value: RelayUsageRange; label: string }> = [
-  { value: "today", label: "今天" },
-  { value: "24h", label: "24 小时" },
-  { value: "7d", label: "7 天" },
-  { value: "30d", label: "30 天" },
-  { value: "all", label: "全部" },
-]
 
 const compactNumber = new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 2 })
 
@@ -126,13 +121,12 @@ function UserRow({ user, selected, busy, onSelect, onStatusChange, onRegistratio
   </div>
 }
 
-export function UserManagement({ stationID }: { stationID: number }) {
+export function UserManagement({ stationID, range }: { stationID: number; range: RelayUsageRange }) {
   const [open, setOpen] = usePersistedOpen("uh_relay_user_management_open")
   const [searchDraft, setSearchDraft] = useState("")
   const [search, setSearch] = useState("")
   const [registrationIPDraft, setRegistrationIPDraft] = useState("")
   const [registrationIP, setRegistrationIP] = useState("")
-  const [range, setRange] = useState<RelayUsageRange>("today")
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
   const [sortBy, setSortBy] = useState<RelayUserSortKey>("balance")
@@ -169,6 +163,11 @@ export function UserManagement({ stationID }: { stationID: number }) {
     setSelected((current) => current.filter((id) => rows.some((user) => user.id === id)))
   }, [rows])
 
+  useEffect(() => {
+    setPage(1)
+    setSelected([])
+  }, [range])
+
   function changeSort(field: RelayUserSortKey) {
     setPage(1)
     if (sortBy !== field) {
@@ -184,7 +183,6 @@ export function UserManagement({ stationID }: { stationID: number }) {
     setSearch("")
     setRegistrationIPDraft("")
     setRegistrationIP("")
-    setRange("today")
     setSortBy("balance")
     setSortOrder("desc")
     setRiskLevel("all")
@@ -264,11 +262,31 @@ export function UserManagement({ stationID }: { stationID: number }) {
     return Array.from({ length: Math.min(5, total) }, (_, index) => start + index)
   }, [page, users.data?.pages])
 
-  return <Card className="gap-0 border border-border py-0 shadow-none">
-    <CardHeader className="gap-3 px-4 py-3">
-      <div className="flex items-center justify-between gap-3"><div className="min-w-0"><CardTitle className="flex items-center gap-2 text-sm font-semibold"><Users className="size-4 text-brand" />用户管理</CardTitle>{open ? <p className="mt-1 text-xs text-muted-foreground">中转站用户、余额、并发与 RPM 限额；区间消费按当前时间范围统计，排序基于全部匹配数据。</p> : null}</div><div className="flex items-center gap-2">{open && users.data ? <span className="text-xs text-muted-foreground">共 {users.data.total} 个</span> : null}<Button type="button" variant="ghost" size="icon" className="size-9" aria-label={open ? "收起用户管理" : "展开用户管理"} aria-expanded={open} onClick={() => setOpen((value) => !value)}><ChevronDown className={cn("size-4 transition-transform duration-200", open && "rotate-180")} /></Button></div></div>
-      {open ? <div className="flex flex-wrap items-center justify-end gap-2"><div className="mr-auto flex min-w-40 items-center gap-2" aria-live="polite"><span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-success/10 text-success"><CircleDollarSign className="size-4" /></span><div><p className="text-[10px] text-muted-foreground">当前所有用户总余额（不包含管理员余额）</p><p className="font-mono text-sm font-semibold tabular-nums text-foreground">{users.data ? currency(users.data.total_balance) : users.loading ? "读取中…" : "-"}</p></div></div><div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="用户名或邮箱" aria-label="按用户名或邮箱筛选用户" className="h-9 w-56 pl-8 text-xs" /></div><Input value={registrationIPDraft} onChange={(event) => setRegistrationIPDraft(event.target.value)} placeholder="注册 IP；点击列表 IP 可快速筛选" aria-label="按注册 IP 筛选用户" className="h-9 w-56 font-mono text-xs" />{registrationIP ? <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={() => { setRegistrationIPDraft(""); setRegistrationIP(""); setPage(1); setSelected([]) }}>清除 IP 筛选</Button> : null}<Select value={range} onValueChange={(value) => { setRange(value as RelayUsageRange); setPage(1) }}><SelectTrigger className="h-9 w-28 text-xs" aria-label="用户消费时间范围"><SelectValue /></SelectTrigger><SelectContent>{ranges.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select><Select value={riskLevel} onValueChange={(value) => { setRiskLevel(value as RelayUserRiskLevel); setPage(1); setSelected([]) }}><SelectTrigger className="h-9 w-[132px] text-xs" aria-label="风险等级筛选"><ShieldAlert className="size-3.5 text-brand" /><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部风险</SelectItem><SelectItem value="high">高风险</SelectItem><SelectItem value="medium">中风险</SelectItem><SelectItem value="low">低风险</SelectItem><SelectItem value="normal">正常</SelectItem></SelectContent></Select><Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={reset}><RotateCcw className="size-3.5" />重置</Button><Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" disabled={users.refreshing} onClick={() => void users.refetch().catch(() => undefined)}><RefreshCw className={cn("size-3.5", users.refreshing && "animate-spin")} />刷新</Button></div> : null}
-    </CardHeader>
+  return <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
+    <ListPanelHeader
+          secondaryPlacement="inline"
+          actionsPlacement="secondary"
+          title={<CardTitle className="flex items-center gap-2 text-sm font-semibold"><Users className="size-4 text-brand" />用户管理</CardTitle>}
+          description={open ? <p className="mt-1 truncate text-xs text-muted-foreground">中转站用户、余额、并发与 RPM 限额；区间消费按当前时间范围统计，排序基于全部匹配数据。</p> : null}
+          summary={open ? <div className="flex min-w-0 items-center gap-2" aria-live="polite"><span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-success/10 text-success"><CircleDollarSign className="size-4" /></span><div><p className="text-[10px] text-muted-foreground">当前所有用户总余额（不包含管理员余额）</p><p className="font-mono text-sm font-semibold tabular-nums text-foreground">{users.data ? currency(users.data.total_balance) : users.loading ? "读取中…" : "-"}</p></div></div> : null}
+actions={open ? <>
+<Button type="button" variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" disabled={users.refreshing} onClick={() => void users.refetch().catch(() => undefined)}><RefreshCw className={cn("size-3.5", users.refreshing && "animate-spin")} />刷新</Button>
+</> : null}
+          secondary={open ? <>
+<div className="relative min-w-0 flex-1 basis-64"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} placeholder="用户名或邮箱" aria-label="按用户名或邮箱筛选用户" className="h-11 sm:h-9 w-full pl-8 text-xs" /></div>
+<ListFilterMenu
+  activeCount={Number(Boolean(registrationIP)) + Number(riskLevel !== "all")}
+  onReset={reset}
+  groups={[{ label: "风险等级", value: riskLevel, onValueChange: (value) => { setRiskLevel(value as RelayUserRiskLevel); setPage(1); setSelected([]) }, options: [{ value: "all", label: "All" }, { value: "high", label: "高风险" }, { value: "medium", label: "中风险" }, { value: "low", label: "低风险" }, { value: "normal", label: "正常" }] }]}
+>
+  <Label htmlFor="registration-ip-filter">注册 IP</Label>
+  <Input id="registration-ip-filter" value={registrationIPDraft} onChange={(event) => setRegistrationIPDraft(event.target.value)} placeholder="注册 IP；点击列表 IP 可快速筛选" aria-label="按注册 IP 筛选用户" className="h-11 w-full font-mono text-xs sm:h-9" />
+  {registrationIP ? <Button type="button" variant="ghost" size="sm" className="h-11 text-xs sm:h-9" onClick={() => { setRegistrationIPDraft(""); setRegistrationIP(""); setPage(1); setSelected([]) }}>清除 IP 筛选</Button> : null}
+</ListFilterMenu>
+<Button type="button" variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" onClick={reset}><RotateCcw className="size-3.5" />重置</Button>
+</> : null}
+          meta={<><div className="flex items-center gap-2">{open && users.data ? <span className="text-xs text-muted-foreground">共 {users.data.total} 个</span> : null}<Button type="button" variant="ghost" size="icon" className="size-11 sm:size-9" aria-label={open ? "收起用户管理" : "展开用户管理"} aria-expanded={open} onClick={() => setOpen((value) => !value)}><ChevronDown className={cn("size-4 transition-transform duration-200", open && "rotate-180")} /></Button></div></>}
+        ></ListPanelHeader>
     {open ? <CardContent className="border-t border-border p-0">
       {selected.length ? <div className="flex flex-wrap items-center gap-2 border-b border-brand/20 bg-brand/5 px-4 py-2.5"><span className="mr-1 text-xs font-medium text-brand">已选 {selected.length} 个用户</span><Input className="h-9 w-36 font-mono text-xs" inputMode="numeric" value={batchConcurrency} onChange={(event) => setBatchConcurrency(event.target.value)} placeholder="并发上限" aria-label="批量设置并发上限" /><Input className="h-9 w-40 font-mono text-xs" inputMode="numeric" value={batchRPM} onChange={(event) => setBatchRPM(event.target.value)} placeholder="每分钟请求数" aria-label="批量设置每分钟请求数" /><Button type="button" size="sm" className="h-9 gap-1.5" disabled={busy} onClick={() => void saveLimits()}><Save className="size-3.5" />保存限额</Button><Button type="button" variant="destructive" size="sm" className="h-9 gap-1.5" disabled={busy} onClick={() => setDeleteDialogOpen(true)}><Trash2 className="size-3.5" />删除用户</Button><span className="text-[11px] text-muted-foreground">留空字段保持不变，填 0 表示不限</span></div> : null}
       {users.data && !users.data.risk_data_complete ? <Alert className="m-4 border-warning/30 bg-warning/10 text-warning"><ShieldAlert /><AlertDescription>注册审计日志读取失败，当前风险分数可能不完整，请刷新或检查中转站管理 API。</AlertDescription></Alert> : null}

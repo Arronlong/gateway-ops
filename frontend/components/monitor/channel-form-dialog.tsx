@@ -445,7 +445,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto sm:max-w-md">
+      <DialogContent className="max-h-[90vh] min-w-0 overflow-x-hidden overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isEdit ? "编辑渠道" : "新增渠道"}</DialogTitle>
           <DialogDescription>

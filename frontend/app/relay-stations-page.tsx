@@ -1,13 +1,18 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { Activity, Archive, ArrowDown, ArrowUp, ArrowUpDown, Box, Check, ChevronDown, CircleAlert, CircleDollarSign, CircleHelp, Clock3, Cog, Copy, ExternalLink, Gauge, GripVertical, History, KeyRound, Layers3, ListChecks, PencilLine, Play, Plus, Power, PowerOff, RefreshCw, RotateCcw, Save, Search, Server, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, TrendingDown, Users, X } from "lucide-react"
+import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react"
+import type { CSSProperties, ReactNode } from "react"
+import { Activity, Archive, ArrowDown, ArrowUp, ArrowUpDown, Box, Check, ChevronDown, CircleAlert, CircleDollarSign, CircleHelp, Cog, Columns3, Copy, ExternalLink, Gauge, GripVertical, History, KeyRound, Layers3, LayoutGrid, List, ListChecks, PencilLine, Play, Plus, Power, PowerOff, RefreshCw, RotateCcw, Save, Search, Server, Settings2, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, TrendingDown, Users, X } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { TableActionButton } from "@/components/ui/table-action-button"
+import { ListPanelHeader } from "@/components/ui/list-panel"
+import { ListFilterMenu } from "@/components/ui/list-filter-menu"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -15,12 +20,17 @@ import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api"
-import type { RelayAccountBatchActionResult, RelayAccountBatchCloneGroup, RelayAccountBatchCloneResult, RelayUsageRange, RelayAccountTestResult, RelayAccountView, RelayGroupOption, RelayGroupTestResult, RelayGroupView, RelayOverview, RelayRecentUsage, RelayStation } from "@/lib/api-types"
-import { useRelayOverview, useRelayRecentUsage, useRelayStations, useRelayUsage, useRelayUserBalanceHistory, useSyncSettings } from "@/lib/queries"
+import type { LatencyBucket, LatencyBucketGranularity, RelayAccountBatchActionResult, RelayAccountBatchCloneGroup, RelayAccountBatchCloneResult, RelayAccountConsumptionBucket, RelayLatencySample, RelayUsageRange, RelayAccountTestResult, RelayAccountView, RelayGroupOption, RelayGroupTestResult, RelayGroupView, RelayOverview, RelayRecentUsage, RelayStation } from "@/lib/api-types"
+import { useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelRelayAssociations, useChannels, usePrefetchRelayOverviews, useRelayAccountConsumptionBuckets, useRelayAccountModelCatalog, useRelayDailyConsumption, useRelayLatencyBuckets, useRelayOverview, useRelayRecentUsage, useRelayStations, useRelayUsage, useRelayUserBalanceHistory } from "@/lib/queries"
 import { RelayAdjustmentLog } from "@/components/monitor/relay-adjustment-log"
 import { UserManagement } from "@/components/relay/user-management"
 import { PlatformBadge } from "@/components/relay/platform-badge"
-import { RecentUsageCard, RecentUsageTooltip, recentUsageTooltipClassName } from "@/components/monitor/recent-usage-tooltip"
+import { LatencyStabilityLane } from "@/components/monitor/latency-stability-lane"
+import { RelayDailyConsumptionTrend } from "@/components/monitor/relay-daily-consumption-trend"
+import { RelayAccountConsumptionTrend } from "@/components/monitor/relay-account-consumption-trend"
+import { formatLatency, latencyGranularityOptionsForRange, latencyHealthScore, latencyTextClass, latencyTone, normalizeLatencyGranularity, type LatencyHealthScore, type LatencyTone } from "@/lib/latency"
+import { channelComparisonsByRelayAccount, relayAccountComparisonKey, type ChannelCompareLink } from "@/lib/channel-relay-association"
+import { latestRelayLatencySamples, relayAccountDisplayBucketCount, relayAccountSearchText, type RelayAccountViewMode } from "@/lib/relay-account-view"
 import { cn } from "@/lib/utils"
 
 type StationForm = { name: string; base_url: string; api_key: string }
@@ -28,7 +38,7 @@ type RiskFilter = "all" | "adjustable" | "downgradable" | RelayAccountView["risk
 type BatchMode = "channel_group" | "manual" | "groups" | "concurrency" | "priority" | "retry_count" | "model_type"
 type SortDirection = "asc" | "desc"
 type GroupSortKey = "name" | "rate"
-type AccountSortKey = "latency" | "priority" | "cost" | "usage"
+type AccountSortKey = "score" | "recent_call" | "last_used" | "priority" | "cost" | "usage" | "name"
 type SortState<K extends string> = { key: K; direction: SortDirection } | null
 type RelayDetailModule = "usage" | "users" | "groups" | "accounts"
 type AccountAdjustmentMode = "suggestion" | "downgrade"
@@ -46,15 +56,92 @@ type BatchCloneFormGroup = { source_account_external_id: number; rows: BatchClon
 const batchCloneableAccountTypes = new Set(["apikey", "upstream", "bedrock", "service_account"])
 
 const emptyForm: StationForm = { name: "", base_url: "", api_key: "" }
-const rateIntervals = [5, 10, 20, 30, 60, 300, 600, 1800, 3600, 18000, 43200, 86400]
-const snapshotIntervals = [5, 10, 30, 60, 120, 180, 300, 600, 900, 1800, 3600, 10800]
 const usageRanges: { value: RelayUsageRange; label: string }[] = [
-  { value: "all", label: "全部" },
   { value: "today", label: "今天" },
   { value: "24h", label: "24 小时" },
   { value: "7d", label: "7 天" },
   { value: "30d", label: "30 天" },
+  { value: "all", label: "All" },
 ]
+
+const accountSortOptions: Array<{ value: AccountSortKey; label: string }> = [
+  { value: "score", label: "综合评分" },
+  { value: "recent_call", label: "最近调用" },
+  { value: "last_used", label: "最近使用时间" },
+  { value: "usage", label: "区间消费" },
+  { value: "cost", label: "成本倍率" },
+  { value: "priority", label: "优先级" },
+  { value: "name", label: "账号名称" },
+]
+
+function defaultAccountSortDirection(key: AccountSortKey): SortDirection {
+  return key === "name" || key === "priority" ? "asc" : "desc"
+}
+type AccountColumnKey = "score" | "platform" | "concurrency" | "capacity" | "priority" | "retry" | "schedulable" | "model" | "recent" | "stability" | "usage" | "consumption_trend" | "cost" | "groups" | "risk" | "profit" | "downgrade"
+
+type AccountColumnDefinition = { key: AccountColumnKey; label: string; template: string; minWidth: number }
+
+const accountColumnDefinitions: AccountColumnDefinition[] = [
+  { key: "score", label: "综合评分", template: "106px", minWidth: 106 },
+  { key: "platform", label: "平台", template: "132px", minWidth: 132 },
+  { key: "concurrency", label: "并发数", template: "96px", minWidth: 96 },
+  { key: "capacity", label: "容量", template: "120px", minWidth: 120 },
+  { key: "priority", label: "优先级", template: "96px", minWidth: 96 },
+  { key: "retry", label: "重试次数", template: "96px", minWidth: 96 },
+  { key: "schedulable", label: "调度", template: "120px", minWidth: 120 },
+  { key: "model", label: "模型类型", template: "152px", minWidth: 152 },
+  { key: "recent", label: "最近调用", template: "212px", minWidth: 212 },
+  { key: "stability", label: "时间稳定性", template: "260px", minWidth: 260 },
+  { key: "usage", label: "区间消费", template: "minmax(172px, 0.9fr)", minWidth: 172 },
+  { key: "consumption_trend", label: "消费趋势", template: "220px", minWidth: 220 },
+  { key: "cost", label: "成本", template: "132px", minWidth: 132 },
+  { key: "groups", label: "当前销售分组", template: "minmax(280px, 1.1fr)", minWidth: 280 },
+  { key: "risk", label: "风险", template: "120px", minWidth: 120 },
+  { key: "profit", label: "利润", template: "96px", minWidth: 96 },
+  { key: "downgrade", label: "可降级", template: "130px", minWidth: 130 },
+]
+
+const defaultAccountColumns = accountColumnDefinitions.map((column) => column.key)
+
+function usePersistedAccountColumns(storageKey: string) {
+  const [visibleColumns, setVisibleColumns] = useState<Set<AccountColumnKey>>(() => {
+    try {
+      const raw = window.localStorage.getItem(storageKey)
+      if (raw) {
+        const parsed = JSON.parse(raw) as unknown
+        if (Array.isArray(parsed)) {
+          const valid = parsed.filter((value): value is AccountColumnKey => defaultAccountColumns.includes(value as AccountColumnKey))
+          const scoreMigrationKey = `${storageKey}:score-column-v1`
+          if (!window.localStorage.getItem(scoreMigrationKey) && !valid.includes("score")) valid.unshift("score")
+          if (valid.length) return new Set(valid)
+        }
+      }
+    } catch {
+      // Fall back to all columns when persisted settings are unavailable or invalid.
+    }
+    return new Set(defaultAccountColumns)
+  })
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, JSON.stringify(defaultAccountColumns.filter((key) => visibleColumns.has(key))))
+      window.localStorage.setItem(`${storageKey}:score-column-v1`, "1")
+    } catch {
+      // Column visibility still works for the current session without persistence.
+    }
+  }, [storageKey, visibleColumns])
+  return [visibleColumns, setVisibleColumns] as const
+}
+
+function accountGridStyle(visibleColumns: Set<AccountColumnKey>): CSSProperties {
+  const visible = accountColumnDefinitions.filter((column) => visibleColumns.has(column.key))
+  const template = ["64px", "minmax(202px, 1.1fr)", ...visible.map((column) => column.template), "minmax(256px, 0.9fr)"].join(" ")
+  const minWidth = 64 + 202 + 256 + visible.reduce((sum, column) => sum + column.minWidth, 0)
+  return {
+    "--relay-account-grid-template": template,
+    "--relay-account-grid-min-width": `${minWidth}px`,
+  } as CSSProperties
+}
+
 const compactNumber = new Intl.NumberFormat("zh-CN", { notation: "compact", maximumFractionDigits: 2 })
 const modelTypeHelp = "模型类型用于标记分组适用的模型范围。账号绑定模型类型后，在平台、账号类型等条件满足时，只会在设置了相同模型类型的分组之间自动调组；未绑定模型类型的账号不参与自动调组。不同分组可以设置相同模型类型，设置相同后会进入同一自动调组范围。"
 
@@ -108,11 +195,32 @@ function usePersistedDetailModule(storageKey: string, defaultModule: RelayDetail
   return [module, setModule] as const
 }
 
-const rateSyncHelp = "定期读取 API Key 的上游成本倍率，更新账号成本，并用于成本统计、利润判断和自动调组。"
-const snapshotSyncHelp = "定期刷新中转站的账号、分组和关联关系快照，仅同步配置与状态，不执行倍率探测。"
+function usePersistedRelayAccountViewMode() {
+  const [mode, setMode] = useState<RelayAccountViewMode>(() => {
+    try {
+      const stored = window.localStorage.getItem("gatewayops_relay_account_view_mode")
+      return stored === "gallery" || stored === "list" ? stored : "gallery"
+    } catch {
+      return "gallery"
+    }
+  })
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("gatewayops_relay_account_view_mode", mode)
+    } catch {
+      // The current session can still switch modes without persistence.
+    }
+  }, [mode])
+  return [mode, setMode] as const
+}
 
 function SyncPlanHelp({ label, help }: { label: string; help: string }) {
   return <Tooltip delayDuration={200}><TooltipTrigger asChild><button type="button" className="shrink-0 rounded text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`查看${label}说明`}><CircleHelp className="size-3.5" /></button></TooltipTrigger><TooltipContent side="top" className="max-w-80 text-xs leading-5">{help}</TooltipContent></Tooltip>
+}
+
+function CompactPolicySelect({ label, help, value, options, formatOption, onValueChange, disabled }: { label: string; help: string; value: number; options: readonly number[]; formatOption: (value: number) => string; onValueChange: (value: number) => void; disabled?: boolean }) {
+  const selectedLabel = formatOption(value)
+  return <div className="flex min-w-0 flex-1 items-center gap-1.5 overflow-hidden"><span className="min-w-0 shrink truncate whitespace-nowrap text-xs font-medium">{label}：</span><Select value={String(value)} onValueChange={(nextValue) => onValueChange(Number(nextValue))} disabled={disabled}><SelectTrigger className="h-7 w-0 min-w-0 flex-1 shrink gap-0.5 overflow-hidden border-0 bg-transparent px-1 py-0 text-xs font-semibold text-brand shadow-none hover:bg-brand/10 focus-visible:ring-2 focus-visible:ring-ring [&_[data-slot=select-value]]:min-w-0 [&_[data-slot=select-value]]:truncate [&_svg]:size-3 [&_svg]:opacity-70" aria-label={`${label}：${selectedLabel}`}><SelectValue /></SelectTrigger><SelectContent>{options.map((optionValue) => <SelectItem key={optionValue} value={String(optionValue)}>{formatOption(optionValue)}</SelectItem>)}</SelectContent></Select><SyncPlanHelp label={label} help={help} /></div>
 }
 
 function SortButton({ label, active, direction, onClick, className, title }: { label: string; active: boolean; direction?: SortDirection; onClick: () => void; className?: string; title?: string }) {
@@ -120,10 +228,14 @@ function SortButton({ label, active, direction, onClick, className, title }: { l
   return <button type="button" onClick={onClick} title={title} className={cn("inline-flex cursor-pointer items-center gap-1 rounded-sm font-medium transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", className)} aria-label={`${label}排序${active ? `，当前${direction === "asc" ? "升序" : "降序"}` : ""}`}><span>{label}</span><Icon className="size-3" /></button>
 }
 
-function latencySmoothnessScore(account: RelayAccountView) {
-  const samples = account.latency_samples ?? []
-  if (samples.length === 0) return null
-  return samples.reduce((sum, sample) => sum + sample.first_token_ms / 10_000 + sample.duration_ms / 60_000, 0) / samples.length
+function accountURLHost(value: string | null | undefined) {
+  const raw = value?.trim()
+  if (!raw) return ""
+  try {
+    return new URL(raw).host
+  } catch {
+    return raw
+  }
 }
 
 function publicFirst(groups: RelayGroupOption[]) {
@@ -145,6 +257,12 @@ const stateMeta: Record<RelayAccountView["risk_state"], { label: string; tone: s
   protected: { label: "分组安全", tone: "bg-success/10 text-success" },
   unassigned: { label: "未分配销售组", tone: "bg-muted text-muted-foreground" },
   inactive: { label: "账号未启用", tone: "bg-muted text-muted-foreground" },
+}
+
+function healthScoreClass(score: number) {
+  if (score >= 85) return "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-400"
+  if (score >= 70) return "bg-amber-400/15 text-amber-700 ring-amber-500/30 dark:text-amber-400"
+  return "bg-red-500/10 text-red-700 ring-red-500/20 dark:text-red-400"
 }
 
 function multiplier(value: number | null | undefined) {
@@ -170,19 +288,6 @@ function capacityTone(account: RelayAccountView) {
   if (account.concurrency <= 0 || account.current_concurrency <= 0) return "border-border bg-muted text-muted-foreground"
   if (account.current_concurrency >= account.concurrency) return "border-danger/30 bg-danger/10 text-danger"
   return "border-warning/30 bg-warning/10 text-warning"
-}
-
-function intervalLabel(value: number) {
-  if (value < 60) return `${value} 秒`
-  if (value === 86400) return "每天"
-  if (value % 3600 === 0) return `${value / 3600} 小时`
-  return `${value / 60} 分钟`
-}
-
-function snapshotIntervalLabel(value: number) {
-  if (value < 60) return `${value} 秒`
-  if (value < 3600) return `${value / 60} 分钟`
-  return `${value / 3600} 小时`
 }
 
 function GroupNames({ groups }: { groups: RelayGroupOption[] }) {
@@ -304,58 +409,10 @@ function sourceLabel(account: RelayAccountView, overview: RelayOverview) {
   return "实时探测"
 }
 
-type LatencyTone = "good" | "warn" | "slow" | "critical"
-
-function latencyTone(value: number, metric: "first" | "duration"): LatencyTone {
-  const thresholds = metric === "first"
-    ? { warn: 10_000, slow: 30_000, critical: 60_000 }
-    : { warn: 60_000, slow: 180_000, critical: 300_000 }
-  if (value >= thresholds.critical) return "critical"
-  if (value >= thresholds.slow) return "slow"
-  if (value >= thresholds.warn) return "warn"
-  return "good"
-}
-
-const latencyColor: Record<LatencyTone, string> = {
-  good: "#10b981",
-  warn: "#f59e0b",
-  slow: "#f97316",
-  critical: "#ef4444",
-}
-
-const latencyText: Record<LatencyTone, string> = {
-  good: "正常",
-  warn: "需关注",
-  slow: "较慢",
-  critical: "严重延迟",
-}
-
-const latencyTextClass: Record<LatencyTone, string> = {
-  good: "text-emerald-600 dark:text-emerald-400",
-  warn: "text-amber-600 dark:text-amber-400",
-  slow: "text-orange-600 dark:text-orange-400",
-  critical: "text-red-600 dark:text-red-400",
-}
-
 const latencyBarClass: Record<LatencyTone, string> = {
   good: "bg-emerald-500",
   warn: "bg-amber-400",
-  slow: "bg-orange-500",
-  critical: "bg-red-500",
-}
-
-function formatLatency(value: number) {
-  if (!Number.isFinite(value) || value < 0) return "-"
-  const milliseconds = Math.round(value)
-  if (milliseconds < 1000) return `${milliseconds}ms`
-  const totalSeconds = milliseconds / 1000
-  if (totalSeconds < 60) return `${totalSeconds.toFixed(totalSeconds < 10 ? 1 : 0)}秒`
-  const hours = Math.floor(totalSeconds / 3600)
-  const minutes = Math.floor((totalSeconds % 3600) / 60)
-  const seconds = totalSeconds % 60
-  const secondsText = seconds.toFixed(seconds < 10 && seconds % 1 !== 0 ? 1 : 0).padStart(2, "0")
-  if (hours > 0) return `${hours}时 ${String(minutes).padStart(2, "0")}分 ${secondsText}秒`
-  return `${minutes}分 ${secondsText}秒`
+  bad: "bg-red-500",
 }
 
 function requestTypeLabel(value: string) {
@@ -428,49 +485,29 @@ function parseAccountTestOutput(output: string): AccountTestOutputView {
   return { model, content, completed, fallback }
 }
 
-function LatencyBars({ samples }: { samples: RelayAccountView["latency_samples"] }) {
-  const ordered = [...samples].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()).slice(-30)
-  if (ordered.length === 0) return <span className="font-mono text-xs text-muted-foreground">-</span>
-  return <Tooltip delayDuration={150}><TooltipTrigger asChild><div className="flex h-8 items-end gap-px" tabIndex={0} aria-label={"最近 " + ordered.length + " 次调用延迟"}>
-    {ordered.map((sample, index) => { const first = latencyTone(sample.first_token_ms, "first"); const duration = latencyTone(sample.duration_ms, "duration"); return <span key={sample.created_at + "-" + index} className="h-full w-1 rounded-sm opacity-90 transition-opacity hover:opacity-100" style={{ background: "linear-gradient(to top, " + latencyColor[duration] + " 0 50%, " + latencyColor[first] + " 50% 100%)" }} /> })}
-  </div></TooltipTrigger><TooltipContent side="top" align="end" className={recentUsageTooltipClassName}>
-    <RecentUsageTooltip count={ordered.length}>
-      {[...ordered].reverse().map((sample, index) => {
-        const first = latencyTone(sample.first_token_ms, "first")
-        const duration = latencyTone(sample.duration_ms, "duration")
-        const cacheCreationTokens = sample.cache_creation_tokens ?? 0
-        const cacheCreation5mTokens = sample.cache_creation_5m_tokens ?? 0
-        const cacheCreation1hTokens = sample.cache_creation_1h_tokens ?? 0
-        const cacheCreationTotal = cacheCreationTokens || cacheCreation5mTokens + cacheCreation1hTokens
-        const totalTokens = (sample.input_tokens ?? 0) + (sample.output_tokens ?? 0) + (sample.cache_read_tokens ?? 0) + cacheCreationTotal
-        return <RecentUsageCard key={sample.created_at + "-detail-" + index}>
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <time dateTime={sample.created_at} className="whitespace-nowrap font-mono text-xs font-semibold tabular-nums text-slate-700">{new Date(sample.created_at).toLocaleString()}</time>
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-500">#{ordered.length - index}</span>
-          </div>
-          <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,1fr)_7.5rem]">
-            <div className="min-w-0 rounded-md bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200/70">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <PlatformBadge platform={sample.platform} />
-                <span className="min-w-0 flex-1 truncate font-mono text-sm font-semibold leading-5 text-slate-950" title={sample.model || "-"}>{sample.model || "-"}</span>
-                {sample.request_type ? <span className="shrink-0 text-[11px] font-medium text-slate-600">{sample.request_type}</span> : null}
-              </div>
-              <p className="mt-1 truncate text-[11px] text-slate-600" title={sample.user_email || "用户邮箱未知"}>{sample.user_email || "用户邮箱未知"}</p>
-            </div>
-            <div className="rounded-md bg-slate-50 px-2.5 py-2 ring-1 ring-slate-200/70">
-              <p className="text-[9px] font-semibold uppercase text-slate-500">Token</p>
-            <p className="mt-0.5 font-mono text-sm font-semibold tabular-nums text-slate-950">{tokenAmount(totalTokens)}</p>
-            </div>
-          </div>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-slate-50 px-2.5 py-2 font-mono text-xs font-semibold tabular-nums ring-1 ring-slate-200/70">
-            <span className={latencyTextClass[first]}>首字 {formatLatency(sample.first_token_ms)}</span>
-            <span className={latencyTextClass[duration]}>总耗时 {formatLatency(sample.duration_ms)}</span>
-          </div>
-        </RecentUsageCard>
-      })}
-    </RecentUsageTooltip>
-  </TooltipContent></Tooltip>
-}
+const DebouncedAccountSearchInput = memo(function DebouncedAccountSearchInput({ initialValue, resetVersion, onValueChange }: { initialValue: string; resetVersion: number; onValueChange: (value: string) => void }) {
+  const [draft, setDraft] = useState(initialValue)
+  const lastSubmittedValue = useRef(initialValue)
+  const lastResetVersion = useRef(resetVersion)
+
+  useEffect(() => {
+    if (lastResetVersion.current === resetVersion) return
+    lastResetVersion.current = resetVersion
+    lastSubmittedValue.current = ""
+    setDraft("")
+  }, [resetVersion])
+
+  useEffect(() => {
+    if (draft === lastSubmittedValue.current) return
+    const timer = window.setTimeout(() => {
+      lastSubmittedValue.current = draft
+      startTransition(() => onValueChange(draft))
+    }, 80)
+    return () => window.clearTimeout(timer)
+  }, [draft, onValueChange])
+
+  return <div className="relative min-w-0 flex-1 basis-64 2xl:w-64 2xl:flex-none 2xl:basis-auto"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="搜索账号 / 地址 / 平台 / 模型" aria-label="按账号名称、地址、平台、类型、模型或 ID 搜索" className="h-11 w-full pl-8 text-xs sm:h-9" /></div>
+})
 
 function AccountName({ account }: { account: RelayAccountView }) {
   const href = account.base_url?.trim() || ""
@@ -478,6 +515,10 @@ function AccountName({ account }: { account: RelayAccountView }) {
     ? <a href={href} target="_blank" rel="noopener noreferrer" className="min-w-0 truncate text-sm font-medium text-foreground underline-offset-2 hover:text-brand hover:underline" title={account.name}>{account.name}</a>
     : <span className="min-w-0 truncate text-sm font-medium text-foreground" title={account.name}>{account.name}</span>
   return <Tooltip delayDuration={250}><TooltipTrigger asChild>{name}</TooltipTrigger><TooltipContent side="top" className="max-w-sm break-all text-xs">{account.name}<span className="mt-1 block text-muted-foreground">{href ? `点击打开 ${href}` : "该账号未配置 Base URL"}</span></TooltipContent></Tooltip>
+}
+
+function RelayAccountStatRow({ label, children, className }: { label: string; children: ReactNode; className?: string }) {
+  return <div className={cn("flex min-w-0 items-center justify-between gap-3 bg-card px-3 py-2.5", className)}><span className="shrink-0 text-[11px] font-medium text-muted-foreground">{label}</span><div className="min-w-0 truncate text-right text-xs font-semibold text-foreground">{children}</div></div>
 }
 
 function RiskSummary({ overview }: { overview: RelayOverview }) {
@@ -516,6 +557,7 @@ function RecentUsageTable({
   refreshing,
   error,
   onRefresh,
+  range,
   groupNames,
   accountNames,
   accountURLs,
@@ -527,6 +569,7 @@ function RecentUsageTable({
   refreshing: boolean;
   error: string | null;
   onRefresh: () => void;
+  range: RelayUsageRange;
   groupNames: Map<number, string>;
   accountNames: Map<number, string>;
   accountURLs: Map<number, string>;
@@ -536,6 +579,8 @@ function RecentUsageTable({
   const [open, setOpen] = usePersistedOpen("uh_relay_recent_usage_open");
   const [user, setUser] = useState("");
   const [group, setGroup] = useState("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 100;
   const groups = useMemo(
     () => [
       ...new Map(
@@ -564,49 +609,25 @@ function RecentUsageTable({
       (group === "all" || group === String(row.group_id))
     );
   });
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pagedRows = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
+  useEffect(() => { setPage(1) }, [user, group, range]);
+  useEffect(() => { if (page > pageCount) setPage(pageCount) }, [page, pageCount]);
   return (
     <Card className="recent-usage-table gap-0 overflow-hidden border border-border py-0 shadow-none">
-      <CardHeader className="gap-3 px-4 py-3">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <CardTitle className="flex items-center gap-2 text-sm">
+      <ListPanelHeader
+          secondaryPlacement="inline"
+          actionsPlacement="secondary"
+          title={<CardTitle className="flex items-center gap-2 text-sm">
               <History className="size-4 text-brand" />
-              最近使用记录
-            </CardTitle>
-            {open ? (
-              <p className="mt-1 text-xs text-muted-foreground">
-                中转站最近 100 条使用记录。
-              </p>
+              最近使用记录            </CardTitle>}
+          description={open ? (
+              <p className="mt-1 truncate text-xs text-muted-foreground">
+                按当前时间范围展示中转站使用记录，不再固定截取最近 100 条。              </p>
             ) : null}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {open ? (
-              <span className="text-xs text-muted-foreground">
-                {filtered.length} / {rows.length} 条
-              </span>
-            ) : null}
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="size-9"
-              aria-label={open ? "收起最近使用记录" : "展开最近使用记录"}
-              aria-expanded={open}
-              onClick={() => setOpen((value) => !value)}
-            >
-              <ChevronDown
-                className={cn(
-                  "size-4 transition-transform duration-200",
-                  open && "rotate-180",
-                )}
-              />
-            </Button>
-          </div>
-        </div>
-        {open ? (
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <div className="mr-auto flex min-w-36 items-center gap-2">
-              <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
+          summary={open ? <div className="flex min-w-0 items-center gap-2">
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand">
                 <Gauge className="size-4" />
               </span>
               <div>
@@ -615,49 +636,12 @@ function RecentUsageTable({
                   {systemCapacity.current} / {systemCapacity.total}
                 </p>
               </div>
-            </div>
-            {error ? (
-              <span className="text-xs text-danger">读取失败：{error}</span>
-            ) : null}
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={user}
-                onChange={(event) => setUser(event.target.value)}
-                placeholder="输入用户名或 ID"
-                aria-label="输入用户名筛选"
-                className="h-9 w-48 pl-8 text-xs"
-              />
-            </div>
-            <Select value={group} onValueChange={setGroup}>
-              <SelectTrigger className="h-9 w-40 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">全部分组</SelectItem>
-                {groups.map((item) => (
-                  <SelectItem key={String(item.id)} value={String(item.id)}>
-                    {item.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
+            </div> : null}
+actions={open ? <>
+<Button
               variant="outline"
               size="sm"
-              className="h-9 gap-1.5"
-              onClick={() => {
-                setUser("");
-                setGroup("all");
-              }}
-            >
-              <RotateCcw className="size-3.5" />
-              重置
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-9 gap-1.5"
+              className="h-11 sm:h-9 gap-1.5"
               disabled={loading || refreshing}
               onClick={onRefresh}
             >
@@ -669,9 +653,62 @@ function RecentUsageTable({
               />
               刷新
             </Button>
-          </div>
-        ) : null}
-      </CardHeader>
+</> : null}
+          secondary={open ? <>
+{error ? (
+              <span className="text-xs text-danger">读取失败：{error}</span>
+            ) : null}
+<div className="relative min-w-0 flex-1 basis-64">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={user}
+                onChange={(event) => setUser(event.target.value)}
+                placeholder="输入用户名或 ID"
+                aria-label="输入用户名筛选"
+                className="h-11 sm:h-9 w-full pl-8 text-xs"
+              />
+            </div>
+<ListFilterMenu
+              activeCount={Number(group !== "all")}
+              onReset={() => { setUser(""); setGroup("all") }}
+              groups={[{ label: "使用分组", value: group, onValueChange: setGroup, options: [{ value: "all", label: "All" }, ...groups.map((item) => ({ value: String(item.id), label: item.name }))] }]}
+            />
+<Button
+              variant="outline"
+              size="sm"
+              className="h-11 sm:h-9 gap-1.5"
+              onClick={() => {
+                setUser("");
+                setGroup("all");
+              }}
+            >
+              <RotateCcw className="size-3.5" />
+              重置
+            </Button>
+</> : null}
+          meta={<><div className="flex shrink-0 items-center gap-2">
+            {open ? (
+              <span className="text-xs text-muted-foreground">
+                {filtered.length} / {rows.length} 条              </span>
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="size-11 sm:size-9"
+              aria-label={open ? "收起最近使用记录" : "展开最近使用记录"}
+              aria-expanded={open}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <ChevronDown
+                className={cn(
+                  "size-4 transition-transform duration-200",
+                  open && "rotate-180",
+                )}
+              />
+            </Button>
+          </div></>}
+        ></ListPanelHeader>
       {open ? (
         <CardContent className="border-t border-border p-0">
           <div className="relative isolate h-[520px] max-h-[520px]">
@@ -690,7 +727,7 @@ function RecentUsageTable({
                   <span>时间</span>
                 </div>
                 {filtered.length ? (
-                  filtered.map((row, index) => {
+                  pagedRows.map((row, index) => {
                     const groupLabel =
                       row.group_name ||
                       groupNames.get(row.group_id) ||
@@ -788,18 +825,14 @@ function RecentUsageTable({
                                   ? "from-emerald-500"
                                   : firstTone === "warn"
                                     ? "from-amber-400"
-                                    : firstTone === "slow"
-                                      ? "from-orange-500"
-                                      : "from-red-500",
+                                    : "from-red-500",
                               firstTone === durationTone
                                 ? ""
                                 : durationTone === "good"
                                   ? "to-emerald-500"
                                   : durationTone === "warn"
                                     ? "to-amber-400"
-                                    : durationTone === "slow"
-                                      ? "to-orange-500"
-                                      : "to-red-500",
+                                    : "to-red-500",
                             )}
                           />
                           <span className="grid grid-cols-[42px_1fr] items-center gap-1 whitespace-nowrap">
@@ -843,8 +876,7 @@ function RecentUsageTable({
                   })
                 ) : (
                   <p className="py-12 text-center text-sm text-muted-foreground">
-                    当前筛选没有使用记录
-                  </p>
+                    当前筛选没有使用记录                  </p>
                 )}
               </div>
             </div>
@@ -857,6 +889,7 @@ function RecentUsageTable({
               </div>
             ) : null}
           </div>
+          {filtered.length > pageSize ? <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-2.5 text-xs text-muted-foreground"><span>范围内共 {filtered.length} 条；当前显示第 {(currentPage - 1) * pageSize + 1}-{Math.min(currentPage * pageSize, filtered.length)} 条，仅分页展示，不截断数据。</span><div className="flex items-center gap-2"><Button type="button" variant="outline" size="sm" className="h-8" disabled={currentPage <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</Button><span className="font-mono tabular-nums">{currentPage} / {pageCount}</span><Button type="button" variant="outline" size="sm" className="h-8" disabled={currentPage >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}>下一页</Button></div></div> : null}
         </CardContent>
       ) : null}
     </Card>
@@ -872,6 +905,18 @@ function RiskRow({
   probing,
   testing,
   deleting,
+  stationID,
+  latencyGranularity,
+  stabilityBuckets,
+  stabilityLoading,
+  consumptionBuckets,
+  consumptionLoading,
+  channelLinks,
+  channelLatencyBucketsByChannel,
+  channelConsumptionBucketsByChannel,
+  healthScore,
+  visibleColumns,
+  gridStyle,
   onToggle,
   onApply,
   onAddDowngrade,
@@ -889,6 +934,18 @@ function RiskRow({
   probing: boolean;
   testing: boolean;
   deleting: boolean;
+  stationID: number;
+  latencyGranularity: LatencyBucketGranularity;
+  stabilityBuckets: LatencyBucket[];
+  stabilityLoading: boolean;
+  consumptionBuckets: RelayAccountConsumptionBucket[];
+  consumptionLoading: boolean;
+  channelLinks: ChannelCompareLink[];
+  channelLatencyBucketsByChannel: Map<number, LatencyBucket[]>;
+  channelConsumptionBucketsByChannel: Map<number, { start: string; end: string; amount: number }[]>;
+  healthScore: LatencyHealthScore | null;
+  visibleColumns: Set<AccountColumnKey>;
+  gridStyle: CSSProperties;
   onToggle: (checked: boolean) => void;
   onApply: () => void;
   onAddDowngrade: () => void;
@@ -911,8 +968,11 @@ function RiskRow({
   const downgradeSummary = downgradeGroups
     .map((group) => `${group.name} · ${multiplier(group.rate_multiplier)}`)
     .join("、");
+  const scoreTitle = healthScore
+    ? `综合评分 ${healthScore.score} · 最近成功率 ${healthScore.recentSuccess ?? "-"}% · 最近延迟分 ${healthScore.recentLatency ?? "-"} · 时间稳定性分 ${healthScore.stability ?? "-"}`
+    : "暂无足够调用数据计算综合评分";
   return (
-    <div className="relay-account-grid grid gap-3 border-b border-border px-4 py-2.5 last:border-0 lg:items-center lg:gap-0 lg:p-0 lg:[&>*]:px-4 lg:[&>*]:py-2.5">
+    <div style={gridStyle} className="relay-account-grid grid gap-3 border-b border-border px-4 py-2.5 last:border-0 lg:items-center lg:gap-0 lg:p-0 lg:[&>*]:px-4 lg:[&>*]:py-2.5">
       <div className="fixed-column-shadow-desktop fixed-column-shadow-left lg:sticky lg:left-0 lg:z-20 lg:flex lg:self-stretch lg:items-center lg:bg-card">
         <Checkbox
           checked={selected}
@@ -931,212 +991,44 @@ function RiskRow({
           #{account.external_id}
         </p>
       </div>
-      <div className="flex items-center justify-between gap-2 lg:block">
-        <span className="text-[11px] text-muted-foreground lg:hidden">
-          平台
-        </span>
-        <PlatformBadge platform={account.platform} />
-      </div>
-      <div className="flex items-center justify-between gap-2 lg:block">
-        <span className="text-[11px] text-muted-foreground lg:hidden">
-          并发数
-        </span>
-        <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
-          {account.concurrency}
-        </span>
-      </div>
-      <div className="flex items-center justify-between gap-2 lg:block">
-        <span className="text-[11px] text-muted-foreground lg:hidden">
-          容量
-        </span>
-        <span
-          className={cn(
-            "inline-flex items-center gap-1 rounded-md border px-1.5 py-1 font-mono text-[11px] font-semibold tabular-nums",
-            capacityTone(account),
-          )}
-          title="实时并发占用 / 并发上限"
-        >
-          <Gauge className="size-3" />
-          {account.current_concurrency} / {account.concurrency}
-        </span>
-      </div>
-      <div className="flex items-center justify-between gap-2 lg:block">
-        <span className="text-[11px] text-muted-foreground lg:hidden">
-          优先级
-        </span>
-        <span className="font-mono text-sm font-semibold tabular-nums text-foreground">
-          {account.priority}
-        </span>
-      </div>
-      <div className="flex items-center justify-between gap-2 lg:block">
-        <span className="text-[11px] text-muted-foreground lg:hidden">
-          重试次数
-        </span>
-        <span
-          className={cn(
-            "font-mono text-sm font-semibold tabular-nums",
-            account.pool_mode ? "text-foreground" : "text-muted-foreground",
-          )}
-          title={
-            account.pool_mode
-              ? "同账号重试次数"
-              : "池模式未开启，当前重试次数不生效"
-          }
-        >
-          {account.pool_mode_retry_count}
-        </span>
-      </div>
-      <div className="flex min-h-11 items-center gap-2 lg:min-h-0 lg:flex-col lg:items-start lg:gap-1">
-        <Switch
-          checked={account.schedulable}
-          onCheckedChange={onSchedulableChange}
-          disabled={busy || scheduling}
-          aria-label={`${account.name}${account.schedulable ? "关闭" : "开启"}调度`}
-        />
-        <span
-          className={cn(
-            "text-[11px]",
-            account.schedulable ? "text-success" : "text-muted-foreground",
-          )}
-        >
-          {account.schedulable ? "已开启" : "已关闭"}
-        </span>
-      </div>
-      <div className="min-w-0">
-        <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">
-          模型类型
-        </p>
-        <span
-          className={cn(
-            "inline-flex max-w-full truncate rounded-md border px-2 py-1 text-[11px] font-medium",
-            account.model_type
-              ? "border-brand/20 bg-brand/10 text-brand"
-              : "border-border bg-muted text-muted-foreground",
-          )}
-          title={account.model_type || "未绑定，不参与自动调组"}
-        >
-          {account.model_type || "未绑定"}
-        </span>
-      </div>
-      <div className="min-w-0">
-        <p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground">
-          最近调用
-        </p>
-        <LatencyBars samples={account.latency_samples ?? []} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          区间消费
-        </p>
-        <p className="mt-1 font-mono text-sm font-semibold tabular-nums text-foreground">
-          {tokenAmount(account.usage_total_tokens)} Token
-        </p>
-        <p className="mt-0.5 text-[11px] font-medium tabular-nums text-brand">
-          用户扣费 {chargeAmount(account.user_charge_amount)}
-        </p>
-        <p className="mt-0.5 text-[11px] font-medium tabular-nums text-warning">
-          成本 {chargeAmount(account.account_cost_amount)}
-        </p>
-      </div>
-      <div>
-        <p className="font-mono text-base font-semibold tabular-nums text-foreground">
-          {multiplier(account.cost_multiplier)}
-        </p>
-        <p
-          className="mt-1 max-w-[150px] truncate text-[10px] text-muted-foreground"
-          title={sourceLabel(account, overview)}
-        >
-          {sourceLabel(account, overview)}
-        </p>
-      </div>
-      <div className="min-w-0">
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
-          当前销售分组
-        </p>
-        <p className="mt-1 line-clamp-2 text-xs text-foreground">
-          <GroupNames groups={account.current_groups} />
-        </p>
-      </div>
-      <div>
-        <span
-          className={cn(
-            "inline-flex rounded px-2 py-1 text-[11px] font-medium",
-            state.tone,
-          )}
-        >
-          {state.label}
-        </span>
-        <p
-          className={cn(
-            "mt-1 font-mono text-sm font-semibold tabular-nums",
-            marginTone,
-          )}
-        >
-          空间 {account.margin == null ? "-" : multiplier(account.margin)}
-        </p>
-      </div>
-      <div>
-        <p className="text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">
-          利润
-        </p>
-        <p
-          className={cn(
-            "font-mono text-sm font-semibold tabular-nums",
-            marginTone,
-          )}
-          title="利润率 = (销售倍率 - 成本倍率) / 成本倍率"
-        >
-          {profitPercent(account.margin, account.cost_multiplier)}
-        </p>
-      </div>
-      <div className="min-w-0">
-        <span className="mr-2 text-[11px] text-muted-foreground lg:hidden">
-          可降级
-        </span>
-        <span
-          className={cn(
-            "inline-flex rounded px-2 py-1 text-[11px] font-medium",
-            downgradeGroups.length
-              ? "bg-success/10 text-success"
-              : "bg-muted text-muted-foreground",
-          )}
-        >
-          {downgradeGroups.length ? `${downgradeGroups.length} 个` : "否"}
-        </span>
-        {downgradeGroups.length ? (
-          <p
-            className="mt-1 line-clamp-2 text-[11px] text-muted-foreground"
-            title={downgradeSummary}
-          >
-            {downgradeSummary}
-          </p>
-        ) : null}
-      </div>
+      {visibleColumns.has("score") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">综合评分</span><span className={cn("inline-flex items-center rounded px-2 py-1 font-mono text-xs font-semibold tabular-nums ring-1 ring-inset", healthScore ? healthScoreClass(healthScore.score) : "bg-muted/50 text-muted-foreground ring-border")} title={scoreTitle}>{healthScore?.score ?? "--"}</span></div> : null}
+      {visibleColumns.has("platform") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">平台</span><PlatformBadge platform={account.platform} /></div> : null}
+      {visibleColumns.has("concurrency") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">并发数</span><span className="font-mono text-sm font-semibold tabular-nums text-foreground">{account.concurrency}</span></div> : null}
+      {visibleColumns.has("capacity") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">容量</span><span className={cn("inline-flex items-center gap-1 rounded-md border px-1.5 py-1 font-mono text-[11px] font-semibold tabular-nums", capacityTone(account))} title="实时并发占用 / 并发上限"><Gauge className="size-3" />{account.current_concurrency} / {account.concurrency}</span></div> : null}
+      {visibleColumns.has("priority") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">优先级</span><span className="font-mono text-sm font-semibold tabular-nums text-foreground">{account.priority}</span></div> : null}
+      {visibleColumns.has("retry") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">重试次数</span><span className={cn("font-mono text-sm font-semibold tabular-nums", account.pool_mode ? "text-foreground" : "text-muted-foreground")} title={account.pool_mode ? "同账号重试次数" : "池模式未开启，当前重试次数不生效"}>{account.pool_mode_retry_count}</span></div> : null}
+      {visibleColumns.has("schedulable") ? <div className="flex min-h-11 items-center gap-2 lg:min-h-0 lg:flex-col lg:items-start lg:gap-1"><Switch checked={account.schedulable} onCheckedChange={onSchedulableChange} disabled={busy || scheduling} aria-label={`${account.name}${account.schedulable ? "关闭" : "开启"}调度`} /><span className={cn("text-[11px]", account.schedulable ? "text-success" : "text-muted-foreground")}>{account.schedulable ? "已开启" : "已关闭"}</span></div> : null}
+      {visibleColumns.has("model") ? <div className="min-w-0"><p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">模型类型</p><span className={cn("inline-flex max-w-full truncate rounded-md border px-2 py-1 text-[11px] font-medium", account.model_type ? "border-brand/20 bg-brand/10 text-brand" : "border-border bg-muted text-muted-foreground")} title={account.model_type || "未绑定，不参与自动调组"}>{account.model_type || "未绑定"}</span></div> : null}
+      {visibleColumns.has("recent") ? <div className="min-w-0"><p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">最近调用</p><LatencyStabilityLane buckets={stabilityBuckets} recentSamples={latestRelayLatencySamples(account.latency_samples ?? [], 30)} loading={stabilityLoading} layout="fill" compact channelLinks={channelLinks} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} relayAccountName={account.name} loadSamples={(bucket) => apiFetch<RelayLatencySample[]>("/relay-stations/" + stationID + "/accounts/" + account.external_id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /></div> : null}
+      {visibleColumns.has("stability") ? <div className="min-w-0"><LatencyStabilityLane buckets={stabilityBuckets} loading={stabilityLoading} layout="fill" compact granularity={latencyGranularity} channelLinks={channelLinks} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} relayAccountName={account.name} loadSamples={(bucket) => apiFetch<RelayLatencySample[]>("/relay-stations/" + stationID + "/accounts/" + account.external_id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /></div> : null}
+      {visibleColumns.has("usage") ? <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">区间消费</p><p className="mt-1 font-mono text-sm font-semibold leading-5 tabular-nums text-foreground lg:mt-0 lg:leading-4">{tokenAmount(account.usage_total_tokens)} Token</p><p className="mt-0.5 text-[11px] font-medium leading-4 tabular-nums text-brand lg:mt-0">用户扣费 {chargeAmount(account.user_charge_amount)}</p><p className="mt-0.5 text-[11px] font-medium leading-4 tabular-nums text-warning lg:mt-0">成本 {chargeAmount(account.account_cost_amount)}</p></div> : null}
+      {visibleColumns.has("consumption_trend") ? <div className="min-w-0"><p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">消费趋势</p><RelayAccountConsumptionTrend buckets={consumptionBuckets} loading={consumptionLoading} compact channelLinks={channelLinks} channelConsumptionBucketsByChannel={channelConsumptionBucketsByChannel} relayAccountName={account.name} /></div> : null}
+      {visibleColumns.has("cost") ? <div><p className="font-mono text-base font-semibold tabular-nums text-foreground">{multiplier(account.cost_multiplier)}</p><p className="mt-1 max-w-[150px] truncate text-[10px] text-muted-foreground" title={sourceLabel(account, overview)}>{sourceLabel(account, overview)}</p></div> : null}
+      {visibleColumns.has("groups") ? <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">当前销售分组</p><p className="mt-1 line-clamp-2 text-xs text-foreground"><GroupNames groups={account.current_groups} /></p></div> : null}
+      {visibleColumns.has("risk") ? <div><span className={cn("inline-flex rounded px-2 py-1 text-[11px] font-medium", state.tone)}>{state.label}</span><p className={cn("mt-1 font-mono text-sm font-semibold tabular-nums", marginTone)}>空间 {account.margin == null ? "-" : multiplier(account.margin)}</p></div> : null}
+      {visibleColumns.has("profit") ? <div><p className="text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">利润</p><p className={cn("font-mono text-sm font-semibold tabular-nums", marginTone)} title="利润率 = (销售倍率 - 成本倍率) / 成本倍率">{profitPercent(account.margin, account.cost_multiplier)}</p></div> : null}
+      {visibleColumns.has("downgrade") ? <div className="min-w-0"><span className="mr-2 text-[11px] text-muted-foreground lg:hidden">可降级</span><span className={cn("inline-flex rounded px-2 py-1 text-[11px] font-medium", downgradeGroups.length ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{downgradeGroups.length ? `${downgradeGroups.length} 个` : "否"}</span>{downgradeGroups.length ? <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground" title={downgradeSummary}>{downgradeSummary}</p> : null}</div> : null}
       <div className="fixed-column-shadow-desktop fixed-column-shadow-right flex min-w-0 flex-nowrap justify-start gap-1.5 lg:sticky lg:right-0 lg:z-30 lg:self-stretch lg:items-center lg:justify-end lg:bg-card">
         <Tooltip delayDuration={250}>
           <TooltipTrigger asChild>
-            <Button
+            <TableActionButton
               type="button"
-              variant="outline"
-              size="icon"
-              className="size-8 shrink-0 text-brand"
+              className="shrink-0 text-brand"
               aria-label="测试连接"
               disabled={busy || testing || deleting}
               onClick={onTest}
             >
               <Play className={cn("size-3.5", testing && "animate-pulse")} />
-            </Button>
+            </TableActionButton>
           </TooltipTrigger>
           <TooltipContent side="top">测试连接</TooltipContent>
         </Tooltip>
         {account.type?.toLowerCase() === "apikey" ? (
           <Tooltip delayDuration={250}>
             <TooltipTrigger asChild>
-              <Button
+              <TableActionButton
                 type="button"
-                variant="outline"
-                size="icon"
-                className="size-8 shrink-0"
+                className="shrink-0"
                 aria-label="探测倍率"
                 disabled={busy || probing || deleting}
                 onClick={onProbe}
@@ -1144,82 +1036,194 @@ function RiskRow({
                 <RefreshCw
                   className={cn("size-3.5", probing && "animate-spin")}
                 />
-              </Button>
+              </TableActionButton>
             </TooltipTrigger>
             <TooltipContent side="top">探测倍率</TooltipContent>
           </Tooltip>
         ) : null}
         <Tooltip delayDuration={250}>
           <TooltipTrigger asChild>
-            <Button
+            <TableActionButton
               type="button"
-              variant="outline"
-              size="icon"
-              className="size-8 shrink-0"
+              className="shrink-0"
               aria-label="调整分组"
               disabled={busy || probing || deleting}
               onClick={onEditGroups}
             >
               <SlidersHorizontal className="size-3.5" />
-            </Button>
+            </TableActionButton>
           </TooltipTrigger>
           <TooltipContent side="top">调整分组</TooltipContent>
         </Tooltip>
         {downgradeGroups.length ? (
           <Tooltip delayDuration={250}>
             <TooltipTrigger asChild>
-              <Button
+              <TableActionButton
                 type="button"
-                variant="outline"
-                size="icon"
-                className="size-8 shrink-0 border-success/30 bg-success/10 text-success hover:bg-success/20 hover:text-success"
+                className="shrink-0 border-success/30 bg-success/10 text-success hover:bg-success/20 hover:text-success"
                 aria-label={`加入全部 ${downgradeGroups.length} 个可降级分组`}
                 disabled={busy || probing || deleting}
                 onClick={onAddDowngrade}
               >
                 <Plus className="size-3.5" />
-              </Button>
+              </TableActionButton>
             </TooltipTrigger>
-            <TooltipContent side="top">加入全部可降级分组</TooltipContent>
+            <TooltipContent side="top">探测倍率</TooltipContent>
           </Tooltip>
         ) : null}
         {account.can_apply ? (
           <Tooltip delayDuration={250}>
             <TooltipTrigger asChild>
-              <Button
+              <TableActionButton
                 type="button"
-                variant="outline"
-                size="icon"
-                className="size-8 shrink-0 border-brand/30 bg-brand/10 text-brand hover:bg-brand/20 hover:text-brand"
+                className="shrink-0 border-brand/30 bg-brand/10 text-brand hover:bg-brand/20 hover:text-brand"
                 aria-label="应用建议"
                 disabled={busy || probing || deleting}
                 onClick={onApply}
               >
                 <Check className="size-3.5" />
-              </Button>
+              </TableActionButton>
             </TooltipTrigger>
             <TooltipContent side="top">应用建议</TooltipContent>
           </Tooltip>
         ) : null}
         <Tooltip delayDuration={250}>
           <TooltipTrigger asChild>
-            <Button
+            <TableActionButton destructive
               type="button"
-              variant="outline"
-              size="icon"
-              className="size-8 shrink-0 border-danger/30 text-danger hover:bg-danger/10 hover:text-danger"
+              className="shrink-0"
               aria-label={`删除账号${account.name}`}
               disabled={busy || deleting}
               onClick={onDelete}
             >
               <Trash2 className={cn("size-3.5", deleting && "animate-pulse")} />
-            </Button>
+            </TableActionButton>
           </TooltipTrigger>
           <TooltipContent side="top">删除账号</TooltipContent>
         </Tooltip>
       </div>
     </div>
   );
+}
+
+function RelayAccountGalleryCard({
+  account,
+  overview,
+  selected,
+  busy,
+  scheduling,
+  probing,
+  testing,
+  deleting,
+  stationID,
+  latencyGranularity,
+  stabilityBuckets,
+  stabilityLoading,
+  consumptionBuckets,
+  consumptionLoading,
+  channelLinks,
+  channelLatencyBucketsByChannel,
+  channelConsumptionBucketsByChannel,
+  healthScore,
+  onToggle,
+  onApply,
+  onAddDowngrade,
+  onEditGroups,
+  onSchedulableChange,
+  onProbe,
+  onTest,
+  onDelete,
+}: {
+  account: RelayAccountView;
+  overview: RelayOverview;
+  selected: boolean;
+  busy: boolean;
+  scheduling: boolean;
+  probing: boolean;
+  testing: boolean;
+  deleting: boolean;
+  stationID: number;
+  latencyGranularity: LatencyBucketGranularity;
+  stabilityBuckets: LatencyBucket[];
+  stabilityLoading: boolean;
+  consumptionBuckets: RelayAccountConsumptionBucket[];
+  consumptionLoading: boolean;
+  channelLinks: ChannelCompareLink[];
+  channelLatencyBucketsByChannel: Map<number, LatencyBucket[]>;
+  channelConsumptionBucketsByChannel: Map<number, { start: string; end: string; amount: number }[]>;
+  healthScore: LatencyHealthScore | null;
+  onToggle: (checked: boolean) => void;
+  onApply: () => void;
+  onAddDowngrade: () => void;
+  onEditGroups: () => void;
+  onSchedulableChange: (checked: boolean) => void;
+  onProbe: () => void;
+  onTest: () => void;
+  onDelete: () => void;
+}) {
+  const state = stateMeta[account.risk_state]
+  const downgradeGroups = accountDowngradeGroups(account)
+  const recentCount = latestRelayLatencySamples(account.latency_samples ?? [], 60).length
+  const marginTone = account.margin == null ? "text-muted-foreground" : account.margin < 0 ? "text-danger" : account.risk_state === "no_profit" ? "text-warning" : "text-success"
+  const scoreTitle = healthScore
+    ? `综合评分 ${healthScore.score} · 最近成功率 ${healthScore.recentSuccess ?? "-"}% · 最近延迟分 ${healthScore.recentLatency ?? "-"} · 时间稳定性分 ${healthScore.stability ?? "-"}`
+    : "暂无足够调用数据计算综合评分"
+
+  return <Card className="@container flex h-full flex-col gap-0 border border-border p-4 shadow-none">
+    <div className="flex min-w-0 items-center gap-2">
+      <Checkbox checked={selected} onCheckedChange={(value) => onToggle(value === true)} aria-label={`选择账号 ${account.name}`} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-center gap-2"><AccountName account={account} /><span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{account.type || "-"}</span></div>
+      </div>
+      <span className={cn("inline-flex shrink-0 items-center rounded px-2 py-1 font-mono text-xs font-semibold tabular-nums ring-1 ring-inset", healthScore ? healthScoreClass(healthScore.score) : "bg-muted/50 text-muted-foreground ring-border")} title={scoreTitle}>评分 {healthScore?.score ?? "--"}</span>
+    </div>
+
+    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border pb-2.5">
+      <p className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">#{account.external_id} · {account.base_url ? accountURLHost(account.base_url) : "未配置地址"}</p>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+        <PlatformBadge platform={account.platform} compact />
+        <span className={cn("inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium", state.tone)}>{state.label}</span>
+        <span className={cn("inline-flex rounded px-1.5 py-0.5 text-[10px] font-medium", account.schedulable ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{account.schedulable ? "调度开启" : "调度关闭"}</span>
+        {account.model_type ? <span className="inline-flex max-w-full truncate rounded border border-brand/20 bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand" title={account.model_type}>{account.model_type}</span> : null}
+      </div>
+    </div>
+
+    <div className="mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-md border border-border bg-border text-xs">
+      <RelayAccountStatRow label="容量"><span className={cn("inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono tabular-nums", capacityTone(account))}><Gauge className="size-3" />{account.current_concurrency} / {account.concurrency}</span></RelayAccountStatRow>
+      <RelayAccountStatRow label="优先级 / 重试"><span className="font-mono tabular-nums">{account.priority} / {account.pool_mode_retry_count}</span></RelayAccountStatRow>
+      <RelayAccountStatRow label="成本倍率"><span className="flex min-w-0 items-center justify-end gap-1.5"><span className="shrink-0 font-mono tabular-nums">{multiplier(account.cost_multiplier)}</span><span className="truncate text-[9px] font-normal text-muted-foreground" title={sourceLabel(account, overview)}>{sourceLabel(account, overview)}</span></span></RelayAccountStatRow>
+      <RelayAccountStatRow label="区间 Token"><span className="font-mono tabular-nums">{tokenAmount(account.usage_total_tokens)}</span></RelayAccountStatRow>
+      <RelayAccountStatRow label="用户消费"><span className="font-mono tabular-nums text-success">{chargeAmount(account.user_charge_amount)}</span></RelayAccountStatRow>
+      <RelayAccountStatRow label="利润率"><span className={cn("font-mono tabular-nums", marginTone)}>{profitPercent(account.margin, account.cost_multiplier)}</span></RelayAccountStatRow>
+      <RelayAccountStatRow label="当前销售分组" className="col-span-full"><span className="block truncate text-xs" title={account.current_groups.map((group) => `${group.name} · ${multiplier(group.rate_multiplier)}`).join(" · ")}><GroupNames groups={account.current_groups} /></span></RelayAccountStatRow>
+    </div>
+
+    <div className="mt-3 border-t border-border pt-3">
+      <div className="mb-1.5 flex items-center justify-between gap-2"><span className="text-[11px] font-medium text-muted-foreground">最近调用延迟</span><span className="font-mono text-[10px] tabular-nums text-muted-foreground">最近 {recentCount} / 60 条</span></div>
+      <LatencyStabilityLane buckets={stabilityBuckets} recentSamples={latestRelayLatencySamples(account.latency_samples ?? [], 60)} loading={stabilityLoading} layout="fill" compact granularity={latencyGranularity} channelLinks={channelLinks} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} relayAccountName={account.name} emptyLabel="当前范围暂无调用数据" loadSamples={(bucket) => apiFetch<RelayLatencySample[]>("/relay-stations/" + stationID + "/accounts/" + account.external_id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} />
+    </div>
+
+    <LatencyStabilityLane buckets={stabilityBuckets} loading={stabilityLoading} layout="fill" granularity={latencyGranularity} channelLinks={channelLinks} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} relayAccountName={account.name} emptyLabel="当前范围暂无调用数据" loadSamples={(bucket) => apiFetch<RelayLatencySample[]>("/relay-stations/" + stationID + "/accounts/" + account.external_id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} />
+
+    <div className="mt-3 border-t border-border pt-3">
+      <div className="mb-1.5 flex items-center justify-between gap-2"><span className="text-[11px] font-medium text-muted-foreground">消费趋势</span><span className="text-[10px] text-muted-foreground">60 段</span></div>
+      <RelayAccountConsumptionTrend buckets={consumptionBuckets} loading={consumptionLoading} channelLinks={channelLinks} channelConsumptionBucketsByChannel={channelConsumptionBucketsByChannel} relayAccountName={account.name} />
+    </div>
+
+    <div className="mt-auto pt-3">
+      <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
+        <div className="flex items-center gap-2"><Switch checked={account.schedulable} onCheckedChange={onSchedulableChange} disabled={busy || scheduling} aria-label={`${account.name}${account.schedulable ? "关闭" : "开启"}调度`} /><span className="text-[10px] text-muted-foreground">调度</span></div>
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 text-brand" aria-label="测试连接" disabled={busy || testing || deleting} onClick={onTest}><Play className={cn("size-3.5", testing && "animate-pulse")} /></Button></TooltipTrigger><TooltipContent side="top">测试连接</TooltipContent></Tooltip>
+          {account.type?.toLowerCase() === "apikey" ? <Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8" aria-label="探测倍率" disabled={busy || probing || deleting} onClick={onProbe}><RefreshCw className={cn("size-3.5", probing && "animate-spin")} /></Button></TooltipTrigger><TooltipContent side="top">探测倍率</TooltipContent></Tooltip> : null}
+          <Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8" aria-label="调整分组" disabled={busy || probing || deleting} onClick={onEditGroups}><SlidersHorizontal className="size-3.5" /></Button></TooltipTrigger><TooltipContent side="top">调整分组</TooltipContent></Tooltip>
+          {downgradeGroups.length ? <Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 border-success/30 bg-success/10 text-success hover:bg-success/20 hover:text-success" aria-label={`加入全部 ${downgradeGroups.length} 个可降级分组`} disabled={busy || probing || deleting} onClick={onAddDowngrade}><Plus className="size-3.5" /></Button></TooltipTrigger><TooltipContent side="top">加入可降级分组</TooltipContent></Tooltip> : null}
+          {account.can_apply ? <Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 border-brand/30 bg-brand/10 text-brand hover:bg-brand/20 hover:text-brand" aria-label="应用建议" disabled={busy || probing || deleting} onClick={onApply}><Check className="size-3.5" /></Button></TooltipTrigger><TooltipContent side="top">应用建议</TooltipContent></Tooltip> : null}
+          <Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 border-danger/30 text-danger hover:bg-danger/10 hover:text-danger" aria-label={`删除账号${account.name}`} disabled={busy || deleting} onClick={onDelete}><Trash2 className={cn("size-3.5", deleting && "animate-pulse")} /></Button></TooltipTrigger><TooltipContent side="top">删除账号</TooltipContent></Tooltip>
+        </div>
+      </div>
+    </div>
+  </Card>
 }
 
 type RelayGroupPatch = Partial<Pick<RelayGroupView, "name" | "description" | "rate_multiplier" | "is_exclusive" | "status" | "model_types" | "monitor_enabled">>
@@ -1276,7 +1280,7 @@ function GroupManagementRow({ group, accounts, onUpdate, onTest, onDelete, testi
       <div className="flex min-h-11 items-center justify-between gap-3 lg:justify-start"><span className="text-xs text-muted-foreground lg:hidden">监控</span><div className="flex items-center gap-2"><Switch checked={group.monitor_enabled} onCheckedChange={(checked) => void update({ monitor_enabled: checked })} disabled={busy} aria-label={`${group.name}${group.monitor_enabled ? "关闭" : "开启"}公开监控`} /><span className={cn("text-xs font-medium", group.monitor_enabled ? "text-brand" : "text-muted-foreground")}>{group.monitor_enabled ? "已监控" : "未监控"}</span></div></div>
       <div className="flex min-h-11 items-center justify-between gap-3 lg:justify-start"><span className="text-xs text-muted-foreground lg:hidden">状态</span><div className="flex items-center gap-2"><Switch checked={active} onCheckedChange={(checked) => void update({ status: checked ? "active" : "inactive" })} disabled={busy} aria-label={`${group.name}${active ? "停用" : "启用"}`} /><span className={cn("text-xs font-medium", active ? "text-success" : "text-muted-foreground")}>{active ? "已启用" : "已停用"}</span></div></div>
       <div className="flex items-center justify-between gap-2 text-xs lg:block"><span className="text-muted-foreground lg:hidden">账号</span><p className="font-mono text-sm font-semibold tabular-nums text-foreground">{accounts.length}</p></div>
-      <div className="fixed-column-shadow-desktop fixed-column-shadow-right flex flex-nowrap justify-start gap-1.5 lg:sticky lg:right-0 lg:z-10 lg:self-stretch lg:items-center lg:justify-end lg:bg-card"><Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 shrink-0 text-brand" aria-label={`快速测试${group.name}`} disabled={busy || testing || deleting} onClick={() => onTest(group)}><Play className={cn("size-3.5", testing && "animate-pulse")} /></Button></TooltipTrigger><TooltipContent side="top">快速测试</TooltipContent></Tooltip><Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 shrink-0" aria-label={`保存${group.name}`} disabled={busy || testing || deleting || !changed} onClick={() => void save()}><Save className={cn("size-3.5", busy && "animate-pulse")} /></Button></TooltipTrigger><TooltipContent side="top">保存修改</TooltipContent></Tooltip><Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 shrink-0 border-danger/30 text-danger hover:bg-danger/10 hover:text-danger" aria-label={`删除分组${group.name}`} disabled={busy || testing || deleting} onClick={() => onDelete(group)}><Trash2 className={cn("size-3.5", deleting && "animate-pulse")} /></Button></TooltipTrigger><TooltipContent side="top">删除分组</TooltipContent></Tooltip></div>
+      <div className="fixed-column-shadow-desktop fixed-column-shadow-right flex flex-nowrap justify-start gap-1.5 lg:sticky lg:right-0 lg:z-10 lg:self-stretch lg:items-center lg:justify-end lg:bg-card"><Tooltip delayDuration={250}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0 text-brand" aria-label={`快速测试${group.name}`} disabled={busy || testing || deleting} onClick={() => onTest(group)}><Play className={cn("size-3.5", testing && "animate-pulse")} /></TableActionButton></TooltipTrigger><TooltipContent side="top">快速测试</TooltipContent></Tooltip><Tooltip delayDuration={250}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0" aria-label={`保存${group.name}`} disabled={busy || testing || deleting || !changed} onClick={() => void save()}><Save className={cn("size-3.5", busy && "animate-pulse")} /></TableActionButton></TooltipTrigger><TooltipContent side="top">保存修改</TooltipContent></Tooltip><Tooltip delayDuration={250}><TooltipTrigger asChild><TableActionButton destructive type="button" className="shrink-0" aria-label={`删除分组${group.name}`} disabled={busy || testing || deleting} onClick={() => onDelete(group)}><Trash2 className={cn("size-3.5", deleting && "animate-pulse")} /></TableActionButton></TooltipTrigger><TooltipContent side="top">删除分组</TooltipContent></Tooltip></div>
     </div>
     {expanded ? <div className="border-t border-border bg-muted/20 px-4 py-3"><div className="mb-2 flex items-center justify-between gap-3"><p className="text-xs font-medium text-foreground">分组账号</p><span className="text-[11px] text-muted-foreground">{accounts.length} 个</span></div>{accounts.length === 0 ? <p className="rounded-md border border-dashed border-border px-4 py-5 text-center text-xs text-muted-foreground">该分组暂未关联账号</p> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(260px,320px))] sm:justify-start">{accounts.map((account) => { const state = stateMeta[account.risk_state]; return <article key={account.external_id} className="rounded-md border border-border bg-card px-3 py-2.5 shadow-xs"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><AccountName account={account} /><div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground"><span>{account.platform || "-"} · {account.type || "-"}</span><span>#{account.external_id}</span>{account.model_type ? <span className="rounded bg-brand/10 px-1.5 py-0.5 font-medium text-brand">{account.model_type}</span> : null}</div></div><span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium", state.tone)}>{state.label}</span></div><div className="mt-2 flex items-center justify-between gap-3 border-t border-border pt-2 text-[11px]"><span className="text-muted-foreground">成本倍率 <strong className="ml-1 font-mono text-sm font-semibold tabular-nums text-foreground">{multiplier(account.cost_multiplier)}</strong></span><span className={cn("shrink-0 font-medium", account.schedulable ? "text-success" : "text-muted-foreground")}>{account.schedulable ? "调度已开启" : "调度已关闭"}</span></div></article> })}</div>}</div> : null}
   </div>
@@ -1347,10 +1351,30 @@ function GroupManagement({ overview, busy, refreshing, testingGroupID, deletingG
   }
   function resetFilters() { setTypeFilter("all"); setStatusFilter("all"); setSort(null) }
   return <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
-    <CardHeader className="gap-3 px-4 py-3">
-      <div className="flex items-center justify-between gap-3"><div className="min-w-0"><CardTitle className="flex items-center gap-2 text-sm font-semibold"><Layers3 className="size-4 text-brand" />分组管理</CardTitle>{open ? <p className="mt-1 text-xs text-muted-foreground">编辑名称、描述、倍率和模型类型；分组类型、监控与状态可直接切换。</p> : null}</div><div className="flex shrink-0 items-center gap-2">{open ? <span className="text-xs text-muted-foreground">{groups.length} / {tableOverview.groups.length} 个</span> : null}<Button type="button" variant="ghost" size="icon" className="size-9" aria-label={open ? "收起分组管理" : "展开分组管理"} aria-expanded={open} onClick={() => setOpen((value) => !value)}><ChevronDown className={cn("size-4 transition-transform duration-200", open && "rotate-180")} /></Button></div></div>
-      {open ? <div className="flex flex-wrap justify-end gap-2"><Select value={typeFilter} onValueChange={(value) => setTypeFilter(value as typeof typeFilter)}><SelectTrigger className="h-9 w-[calc(var(--spacing)*26)] text-xs" aria-label="筛选分组类型"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="public">公开</SelectItem><SelectItem value="exclusive">专属</SelectItem><SelectItem value="all">全部类型</SelectItem></SelectContent></Select><Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as typeof statusFilter)}><SelectTrigger className="h-9 w-[calc(var(--spacing)*26)] text-xs" aria-label="筛选分组状态"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="active">已启用</SelectItem><SelectItem value="inactive">已停用</SelectItem><SelectItem value="all">全部状态</SelectItem></SelectContent></Select><Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={resetFilters}><RotateCcw className="size-3.5" />重置</Button><Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" disabled={busy || refreshing || inputFocused} title={inputFocused ? "编辑中，刷新已暂停" : undefined} onClick={onRefresh}><RefreshCw className={cn("size-3.5", refreshing && !inputFocused && "animate-spin")} />刷新</Button>{inputFocused ? <span className="self-center text-[11px] font-medium text-warning" aria-live="polite">编辑中，刷新已暂停</span> : null}{sort ? <span className="self-center text-[11px] text-muted-foreground">清除名称/倍率排序后可拖拽</span> : null}{savingOrder ? <span className="self-center text-[11px] text-muted-foreground">正在保存排序…</span> : null}</div> : null}
-    </CardHeader>
+    <ListPanelHeader
+          secondaryPlacement="inline"
+          actionsPlacement="secondary"
+          title={<CardTitle className="flex items-center gap-2 text-sm font-semibold"><Layers3 className="size-4 text-brand" />分组管理</CardTitle>}
+          description={open ? <p className="mt-1 truncate text-xs text-muted-foreground">编辑名称、描述、倍率和模型类型；分组类型、监控与状态可直接切换。</p> : null}
+actions={open ? <>
+<Button type="button" variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" disabled={busy || refreshing || inputFocused} title={inputFocused ? "编辑中，刷新已暂停" : undefined} onClick={onRefresh}><RefreshCw className={cn("size-3.5", refreshing && !inputFocused && "animate-spin")} />刷新</Button>
+</> : null}
+          secondary={open ? <>
+<ListFilterMenu
+  activeCount={Number(typeFilter !== "all") + Number(statusFilter !== "all")}
+  onReset={resetFilters}
+  groups={[
+    { label: "分组类型", value: typeFilter, onValueChange: (value) => setTypeFilter(value as typeof typeFilter), options: [{ value: "all", label: "All" }, { value: "public", label: "公开" }, { value: "exclusive", label: "专属" }] },
+    { label: "分组状态", value: statusFilter, onValueChange: (value) => setStatusFilter(value as typeof statusFilter), options: [{ value: "all", label: "All" }, { value: "active", label: "已启用" }, { value: "inactive", label: "已停用" }] },
+  ]}
+/>
+<Button type="button" variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" onClick={resetFilters}><RotateCcw className="size-3.5" />重置</Button>
+{inputFocused ? <span className="self-center text-[11px] font-medium text-warning" aria-live="polite">编辑中，刷新已暂停</span> : null}
+{sort ? <span className="self-center text-[11px] text-muted-foreground">清除名称/倍率排序后可拖拽</span> : null}
+{savingOrder ? <span className="self-center text-[11px] text-muted-foreground">正在保存排序…</span> : null}
+</> : null}
+          meta={<><div className="flex shrink-0 items-center gap-2">{open ? <span className="text-xs text-muted-foreground">{groups.length} / {tableOverview.groups.length} 个</span> : null}<Button type="button" variant="ghost" size="icon" className="size-11 sm:size-9" aria-label={open ? "收起分组管理" : "展开分组管理"} aria-expanded={open} onClick={() => setOpen((value) => !value)}><ChevronDown className={cn("size-4 transition-transform duration-200", open && "rotate-180")} /></Button></div></>}
+        ></ListPanelHeader>
     {open ? <CardContent className="border-t border-border p-0"><div className="relative h-[min(56vh,560px)]"><div className="h-full overflow-auto" onFocusCapture={(event) => { if (event.target instanceof HTMLInputElement) setInputFocused(true) }} onBlurCapture={(event) => { if (!(event.target instanceof HTMLInputElement)) return; if (event.relatedTarget instanceof HTMLInputElement && event.currentTarget.contains(event.relatedTarget)) return; setInputFocused(false) }}><div className="isolate"><div className="sticky top-0 z-30 hidden min-w-[1422px] grid-cols-[88px_minmax(152px,.8fr)_132px_minmax(172px,1fr)_114px_minmax(152px,.9fr)_128px_120px_144px_96px_144px] border-b border-border bg-muted text-[11px] text-foreground/90 font-medium lg:grid lg:[&>*]:px-4 lg:[&>*]:py-2"><span /><SortButton label="名称" active={sort?.key === "name"} direction={sort?.key === "name" ? sort.direction : undefined} onClick={() => toggleSort("name", "asc")} /><span>平台</span><span>描述</span><SortButton label="倍率" active={sort?.key === "rate"} direction={sort?.key === "rate" ? sort.direction : undefined} onClick={() => toggleSort("rate", "desc")} /><span className="inline-flex items-center gap-1">模型类型<ModelTypeHelp /></span><span>类型</span><span>监控</span><span>状态</span><span>账号</span><span className="fixed-column-shadow-desktop fixed-column-shadow-right sticky right-0 z-40 flex self-stretch items-center justify-center bg-muted">操作</span></div>{groups.length === 0 ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">当前筛选没有分组</p> : groups.map((group) => <GroupManagementRow key={group.external_id} group={group} accounts={accountsByGroup.get(group.external_id) ?? []} onUpdate={onUpdate} onTest={onTest} onDelete={onDelete} testing={testingGroupID === group.external_id} deleting={deletingGroupID === group.external_id} dragDisabled={Boolean(sort) || savingOrder} dragging={draggingID === group.external_id} onDragStart={setDraggingID} onDragOver={() => undefined} onDrop={moveGroup} />)}</div></div>{busy || (refreshing && !inputFocused) ? <div className="pointer-events-none absolute inset-x-0 top-10 z-40 flex justify-center"><span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><RefreshCw className="size-3.5 animate-spin text-brand" />正在刷新分组列表</span></div> : null}</div></CardContent> : null}
   </Card>
 }
@@ -1506,7 +1530,7 @@ function BatchCloneDialog({ accounts, availableModelTypes, open, busy, result, o
     const group = formGroups.find((item) => item.source_account_external_id === sourceID)
     if (!group) return
     if (group.rows.length * 2 > 100) {
-      setError("复制本组后会超过该源账号最多 100 个新增账号的限制")
+      setError("复制本组后会超过该源账号最多新增 100 个新增账号的限制")
       return
     }
     if (total + group.rows.length > 300) {
@@ -1519,7 +1543,7 @@ function BatchCloneDialog({ accounts, availableModelTypes, open, busy, result, o
 
   function copyAll() {
     if (formGroups.some((group) => group.rows.length * 2 > 100)) {
-      setError("复制全部后会超过某个源账号最多 100 个新增账号的限制")
+      setError("复制全部后会超过某个源账号最多新增 100 个新增账号的限制")
       return
     }
     if (total * 2 > 300) {
@@ -1581,7 +1605,7 @@ function BatchCloneDialog({ accounts, availableModelTypes, open, busy, result, o
             <Select value={sourceGroupFilter} onValueChange={setSourceGroupFilter} disabled={busy}>
               <SelectTrigger className="h-10 w-full text-sm sm:w-52" aria-label="按源账号分组筛选"><SelectValue placeholder="按所在分组筛选" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">全部分组</SelectItem>
+                <SelectItem value="all">All</SelectItem>
                 <SelectItem value="__unassigned">未分配分组</SelectItem>
                 {sourceGroupOptions.map((group) => <SelectItem key={group.external_id} value={String(group.external_id)}>{group.name} · 倍率 {multiplier(group.rate_multiplier)}</SelectItem>)}
               </SelectContent>
@@ -1627,35 +1651,46 @@ function BatchCloneDialog({ accounts, availableModelTypes, open, busy, result, o
 
 export default function RelayStationsPage() {
   const stations = useRelayStations()
+  usePrefetchRelayOverviews(stations.data?.map((station) => station.id) ?? [])
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [selectedID, setSelectedID] = useState<number | null>(null)
   const [detailModule, setDetailModule] = usePersistedDetailModule("uh_relay_detail_module")
   const [usageRange, setUsageRange] = useState<RelayUsageRange>("today")
+  const [latencyGranularity, setLatencyGranularity] = useState<LatencyBucketGranularity>("auto")
+  const [accountViewMode, setAccountViewMode] = usePersistedRelayAccountViewMode()
+  const [visibleAccountColumns, setVisibleAccountColumns] = usePersistedAccountColumns("gatewayops_relay_account_columns")
+  const accountDisplayBucketCount = relayAccountDisplayBucketCount(accountViewMode)
   const overview = useRelayOverview(selectedID)
-  const usage = useRelayUsage(detailModule === "accounts" ? selectedID : null, usageRange)
-  const recentUsage = useRelayRecentUsage(detailModule === "usage" ? selectedID : null)
+  const overviewReady = overview.data !== null
+  const channels = useChannels()
+  const channelAssociations = useChannelRelayAssociations()
+  const channelLatencyBuckets = useChannelLatencyBuckets(usageRange, latencyGranularity, accountDisplayBucketCount, detailModule === "accounts" && overviewReady)
+  const channelConsumptionBuckets = useChannelConsumptionBuckets(usageRange, latencyGranularity, accountDisplayBucketCount, detailModule === "accounts" && overviewReady)
+  const accountModelCatalog = useRelayAccountModelCatalog(selectedID, detailModule === "accounts")
+  const dailyConsumption = useRelayDailyConsumption(overviewReady ? selectedID : null, "30d")
+  const usage = useRelayUsage(detailModule === "accounts" && overviewReady ? selectedID : null, usageRange)
+  const scoreLatencyBuckets = useRelayLatencyBuckets(detailModule === "accounts" && overviewReady ? selectedID : null, usageRange, "auto", 60)
+  const latencyBuckets = useRelayLatencyBuckets(detailModule === "accounts" && overviewReady ? selectedID : null, usageRange, latencyGranularity, accountDisplayBucketCount)
+  const accountConsumptionBuckets = useRelayAccountConsumptionBuckets(detailModule === "accounts" && overviewReady ? selectedID : null, usageRange, latencyGranularity, accountDisplayBucketCount)
+  const recentUsage = useRelayRecentUsage(detailModule === "usage" && overviewReady ? selectedID : null, usageRange)
   const [historyUser, setHistoryUser] = useState<{ id: number; email: string; name: string } | null>(null)
   const userHistory = useRelayUserBalanceHistory(selectedID, historyUser?.id ?? null, 1)
-  const syncSettings = useSyncSettings()
   const [form, setForm] = useState<StationForm>(emptyForm)
   const [editingID, setEditingID] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [batchCloneOpen, setBatchCloneOpen] = useState(false)
   const [batchCloneResult, setBatchCloneResult] = useState<RelayAccountBatchCloneResult | null>(null)
   const [busy, setBusy] = useState(false)
-  const [autoRateSyncEnabled, setAutoRateSyncEnabled] = useState(false)
-  const [autoRateSyncInterval, setAutoRateSyncInterval] = useState(10)
-  const [autoSnapshotSyncEnabled, setAutoSnapshotSyncEnabled] = useState(false)
-  const [autoSnapshotSyncInterval, setAutoSnapshotSyncInterval] = useState(3600)
   const [autoAdjustEnabled, setAutoAdjustEnabled] = useState(false)
   const [autoAdjustNoProfitEnabled, setAutoAdjustNoProfitEnabled] = useState(false)
   const [autoPriorityEnabled, setAutoPriorityEnabled] = useState(false)
   const [autoPriorityRecallEnabled, setAutoPriorityRecallEnabled] = useState(false)
   const [autoPriorityRecallMinutes, setAutoPriorityRecallMinutes] = useState(180)
   const [accountNameFilter, setAccountNameFilter] = useState("")
+  const [accountSearchResetVersion, setAccountSearchResetVersion] = useState(0)
   const [riskFilter, setRiskFilter] = useState<RiskFilter>("all")
   const [modelTypeFilter, setModelTypeFilter] = useState("all")
-  const [schedulableFilter, setSchedulableFilter] = useState<"enabled" | "disabled" | "all">("all")
+  const [schedulableFilter, setSchedulableFilter] = useState<"enabled" | "disabled" | "all">("enabled")
   const [groupFilter, setGroupFilter] = useState("all")
   const [selected, setSelected] = useState<number[]>([])
   const [batchMode, setBatchMode] = useState<BatchMode>("channel_group")
@@ -1688,7 +1723,7 @@ export default function RelayStationsPage() {
   const [groupTestResult, setGroupTestResult] = useState<RelayGroupTestResult | null>(null)
   const [groupTestError, setGroupTestError] = useState("")
   const [groupTestNeedsKey, setGroupTestNeedsKey] = useState(false)
-  const [accountSort, setAccountSort] = useState<SortState<AccountSortKey>>(null)
+  const [accountSort, setAccountSort] = useState<SortState<AccountSortKey>>({ key: "score", direction: "desc" })
   const [accountListOpen, setAccountListOpen] = usePersistedOpen("uh_relay_account_risk_open")
   const [accountAdjustmentDialog, setAccountAdjustmentDialog] = useState<AccountAdjustmentDialogState>(null)
   const [accountAdjustmentSelections, setAccountAdjustmentSelections] = useState<AccountAdjustmentSelection>({})
@@ -1696,7 +1731,6 @@ export default function RelayStationsPage() {
   const accountAdjustmentResolver = useRef<((selection: AccountAdjustmentSelection | null) => void) | null>(null)
 
   useEffect(() => { if (selectedID == null && stations.data?.[0]) setSelectedID(stations.data[0].id); if (selectedID != null && stations.data && !stations.data.some((station) => station.id === selectedID)) setSelectedID(stations.data[0]?.id ?? null) }, [stations.data, selectedID])
-  useEffect(() => { if (!syncSettings.data) return; setAutoRateSyncEnabled(syncSettings.data.relay_rate_enabled); setAutoRateSyncInterval(syncSettings.data.relay_rate_interval_seconds || (syncSettings.data.relay_rate_interval_minutes || 0) * 60 || 10); setAutoSnapshotSyncEnabled(syncSettings.data.relay_snapshot_enabled); setAutoSnapshotSyncInterval(syncSettings.data.relay_snapshot_interval_seconds || (syncSettings.data.relay_snapshot_interval_minutes || 60) * 60) }, [syncSettings.data])
   useEffect(() => { if (!overview.data) return; setAutoAdjustEnabled(overview.data.station.auto_adjust_enabled); setAutoAdjustNoProfitEnabled(overview.data.station.auto_adjust_no_profit_enabled); setAutoPriorityEnabled(overview.data.station.auto_priority_enabled); setAutoPriorityRecallEnabled(overview.data.station.auto_priority_recall_enabled); setAutoPriorityRecallMinutes(overview.data.station.auto_priority_recall_minutes || 180) }, [overview.data])
   useEffect(() => { setSelected([]) }, [selectedID])
   useEffect(() => { setBatchCloneOpen(false); setBatchCloneResult(null) }, [selectedID])
@@ -1717,7 +1751,32 @@ export default function RelayStationsPage() {
       usage_failed_accounts: usage.data?.failed_accounts ?? 0,
     }
   }, [baseOverview, usage.data, usageRange])
+  const latencyBucketsByAccount = useMemo(() => new Map((latencyBuckets.data ?? []).map((item) => [item.account_id, item.buckets])), [latencyBuckets.data])
+  const scoreLatencyBucketsByAccount = useMemo(() => new Map((scoreLatencyBuckets.data ?? []).map((item) => [item.account_id, item.buckets])), [scoreLatencyBuckets.data])
+  const consumptionBucketsByAccount = useMemo(() => new Map((accountConsumptionBuckets.data ?? []).map((item) => [item.account_id, item.buckets])), [accountConsumptionBuckets.data])
+  const channelLatencyBucketsByChannel = useMemo(() => new Map((channelLatencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [channelLatencyBuckets.data])
+  const channelConsumptionBucketsByChannel = useMemo(() => new Map((channelConsumptionBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [channelConsumptionBuckets.data])
+  const channelLinksByRelayAccount = useMemo(() => channelComparisonsByRelayAccount(channelAssociations.data, channels.data ?? []), [channelAssociations.data, channels.data])
+  const accountTableGridStyle = useMemo(() => accountGridStyle(visibleAccountColumns), [visibleAccountColumns])
   const managedAccounts = useMemo(() => (currentOverview?.accounts ?? []).filter((account) => account.type?.trim().toLowerCase() !== "oauth"), [currentOverview])
+  const healthScoreByAccount = useMemo(() => {
+    const scores = new Map<number, LatencyHealthScore | null>()
+    for (const account of managedAccounts) {
+      scores.set(account.external_id, latencyHealthScore(account.latency_samples ?? [], scoreLatencyBucketsByAccount.get(account.external_id) ?? []))
+    }
+    return scores
+  }, [managedAccounts, scoreLatencyBucketsByAccount])
+  const latestCallByAccount = useMemo(() => {
+    const latest = new Map<number, number>()
+    for (const account of managedAccounts) {
+      for (const sample of account.latency_samples ?? []) {
+        const at = Date.parse(sample.created_at)
+        if (!Number.isFinite(at)) continue
+        if (at > (latest.get(account.external_id) ?? 0)) latest.set(account.external_id, at)
+      }
+    }
+    return latest
+  }, [managedAccounts])
   const cloneableAccounts = useMemo(() => managedAccounts.filter((account) => batchCloneableAccountTypes.has(account.type?.trim().toLowerCase() ?? "")), [managedAccounts])
   const managedAccountIDs = useMemo(() => new Set(managedAccounts.map((account) => account.external_id)), [managedAccounts])
   const usageTotals = useMemo(() => (usage.data?.accounts ?? []).filter((account) => managedAccountIDs.has(account.external_id)).reduce((totals, account) => ({
@@ -1735,49 +1794,68 @@ export default function RelayStationsPage() {
     }
   }, [selectedStation?.base_url])
   const accountModelTypeOptions = useMemo(() => Array.from(new Set(managedAccounts.map((account) => account.model_type?.trim()).filter(Boolean) as string[])).sort((a, b) => a.localeCompare(b, "zh-CN")), [managedAccounts])
+  const supportedModelsByAccount = useMemo(() => new Map((accountModelCatalog.data ?? []).map((item) => [item.account_id, item.models])), [accountModelCatalog.data])
+  const accountSearchIndex = useMemo(() => new Map(managedAccounts.map((account) => [
+    account.external_id,
+    relayAccountSearchText(account, supportedModelsByAccount.get(account.external_id), accountURLHost(account.base_url)),
+  ])), [managedAccounts, supportedModelsByAccount])
+  const activeAccountFilterCount = Number(modelTypeFilter !== "all") + Number(schedulableFilter !== "all") + Number(riskFilter !== "all") + Number(groupFilter !== "all")
+  const hasActiveAccountFilters = activeAccountFilterCount > 0 || accountNameFilter.trim() !== ""
   const filteredAccounts = useMemo(() => {
+    const query = accountNameFilter.trim().toLocaleLowerCase()
     const accounts = managedAccounts.filter((account) => {
-    if (accountNameFilter.trim() && !account.name.toLowerCase().includes(accountNameFilter.trim().toLowerCase())) return false
-    if (modelTypeFilter === "__unassigned" && account.model_type?.trim()) return false
-    if (modelTypeFilter !== "all" && modelTypeFilter !== "__unassigned" && account.model_type?.trim() !== modelTypeFilter) return false
-    if (schedulableFilter === "enabled" && !account.schedulable) return false
-    if (schedulableFilter === "disabled" && account.schedulable) return false
-    if (riskFilter === "adjustable" && !account.can_apply) return false
-    if (riskFilter === "downgradable" && accountDowngradeGroups(account).length === 0) return false
-    if (riskFilter !== "all" && riskFilter !== "adjustable" && riskFilter !== "downgradable" && account.risk_state !== riskFilter) return false
-    if (groupFilter !== "all" && !account.current_groups.some((group) => String(group.external_id) === groupFilter)) return false
-    return true
+      const searchMatches = query === "" || (accountSearchIndex.get(account.external_id) ?? "").includes(query)
+      if (!searchMatches) return false
+      if (modelTypeFilter === "__unassigned" && account.model_type?.trim()) return false
+      if (modelTypeFilter !== "all" && modelTypeFilter !== "__unassigned" && account.model_type?.trim() !== modelTypeFilter) return false
+      if (schedulableFilter === "enabled" && !account.schedulable) return false
+      if (schedulableFilter === "disabled" && account.schedulable) return false
+      if (riskFilter === "adjustable" && !account.can_apply) return false
+      if (riskFilter === "downgradable" && accountDowngradeGroups(account).length === 0) return false
+      if (riskFilter !== "all" && riskFilter !== "adjustable" && riskFilter !== "downgradable" && account.risk_state !== riskFilter) return false
+      if (groupFilter !== "all" && !account.current_groups.some((group) => String(group.external_id) === groupFilter)) return false
+      return true
     })
     if (!accountSort) return accounts
-    const direction = accountSort.direction === "asc" ? 1 : -1
+    const compareNumber = (left: number | null, right: number | null) => {
+      if (left == null && right == null) return 0
+      if (left == null) return 1
+      if (right == null) return -1
+      const result = left - right
+      return accountSort.direction === "asc" ? result : -result
+    }
     return [...accounts].sort((a, b) => {
-      let first: number | null
-      let second: number | null
-      if (accountSort.key === "latency") {
-        first = latencySmoothnessScore(a)
-        second = latencySmoothnessScore(b)
-      } else if (accountSort.key === "priority") {
-        first = a.priority
-        second = b.priority
-      } else if (accountSort.key === "cost") {
-        first = a.cost_multiplier ?? null
-        second = b.cost_multiplier ?? null
-      } else {
-        first = a.user_charge_amount ?? null
-        second = b.user_charge_amount ?? null
+      let result = 0
+      switch (accountSort.key) {
+        case "score":
+          result = compareNumber(healthScoreByAccount.get(a.external_id)?.score ?? null, healthScoreByAccount.get(b.external_id)?.score ?? null)
+          break
+        case "recent_call":
+          result = compareNumber(latestCallByAccount.get(a.external_id) ?? null, latestCallByAccount.get(b.external_id) ?? null)
+          break
+        case "last_used": {
+          const left = a.last_used_at ? Date.parse(a.last_used_at) : Number.NaN
+          const right = b.last_used_at ? Date.parse(b.last_used_at) : Number.NaN
+          result = compareNumber(Number.isFinite(left) ? left : null, Number.isFinite(right) ? right : null)
+          break
+        }
+        case "priority":
+          result = compareNumber(a.priority, b.priority)
+          break
+        case "cost":
+          result = compareNumber(a.cost_multiplier ?? null, b.cost_multiplier ?? null)
+          break
+        case "usage":
+          result = compareNumber(a.user_charge_amount ?? null, b.user_charge_amount ?? null)
+          if (result === 0) result = compareNumber(a.usage_total_tokens ?? null, b.usage_total_tokens ?? null)
+          break
+        case "name":
+          result = a.name.localeCompare(b.name, "zh-CN", { numeric: true, sensitivity: "base" }) * (accountSort.direction === "asc" ? 1 : -1)
+          break
       }
-      if (first == null && second == null) return a.name.localeCompare(b.name, "zh-CN")
-      if (first == null) return 1
-      if (second == null) return -1
-      const compared = (first - second) * direction
-      if (compared !== 0) return compared
-      if (accountSort.key === "usage") {
-        const tokenCompared = ((a.usage_total_tokens ?? 0) - (b.usage_total_tokens ?? 0)) * direction
-        if (tokenCompared !== 0) return tokenCompared
-      }
-      return a.name.localeCompare(b.name, "zh-CN")
+      return result || a.external_id - b.external_id
     })
-  }, [managedAccounts, accountNameFilter, modelTypeFilter, schedulableFilter, riskFilter, groupFilter, accountSort])
+  }, [managedAccounts, accountNameFilter, modelTypeFilter, schedulableFilter, riskFilter, groupFilter, accountSort, healthScoreByAccount, latestCallByAccount, accountSearchIndex])
   const allFilteredSelected = filteredAccounts.length > 0 && filteredAccounts.every((account) => selected.includes(account.external_id))
   const filteredEnableCount = filteredAccounts.filter((account) => !account.schedulable).length
   const filteredDisableCount = filteredAccounts.filter((account) => account.schedulable).length
@@ -1817,9 +1895,11 @@ export default function RelayStationsPage() {
   async function saveStation(event: React.FormEvent) { event.preventDefault(); setBusy(true); try { const payload = editingID == null ? form : { name: form.name, base_url: form.base_url, ...(form.api_key ? { api_key: form.api_key } : {}) }; const station = await apiFetch<RelayStation>(editingID == null ? "/relay-stations" : `/relay-stations/${editingID}`, { method: editingID == null ? "POST" : "PUT", body: JSON.stringify(payload) }); setShowForm(false); setSelectedID(station.id); await reload(); toast.success(editingID == null ? "中转站已添加" : "中转站配置已更新") } catch (error) { toast.error(error instanceof Error ? error.message : "保存失败") } finally { setBusy(false) } }
   async function sync() { if (!selectedID) return; setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}/sync`, { method: "POST" }); await reload(); toast.success("已实时探测 API Key 成本并刷新账号快照") } catch (error) { toast.error(error instanceof Error ? error.message : "同步失败"); await reload() } finally { setBusy(false) } }
   async function syncAll() { setBusy(true); try { const result = await apiFetch<{ synced: number; failed: number }>("/relay-stations/sync-all", { method: "POST" }); await reload(); toast.success(`已同步 ${result.synced} 个中转站${result.failed ? `，${result.failed} 个失败` : ""}`) } catch (error) { toast.error(error instanceof Error ? error.message : "同步失败") } finally { setBusy(false) } }
-  async function saveAutoSync() { if (!syncSettings.data) return; setBusy(true); try { await apiFetch("/sync-settings", { method: "PUT", body: JSON.stringify({ channel_enabled: syncSettings.data.channel_enabled, channel_interval_minutes: syncSettings.data.channel_interval_minutes, relay_rate_enabled: autoRateSyncEnabled, relay_rate_interval_minutes: Math.ceil(autoRateSyncInterval / 60), relay_rate_interval_seconds: autoRateSyncInterval, relay_snapshot_enabled: autoSnapshotSyncEnabled, relay_snapshot_interval_minutes: Math.ceil(autoSnapshotSyncInterval / 60), relay_snapshot_interval_seconds: autoSnapshotSyncInterval }) }); await syncSettings.refetch(); toast.success("中转站同步计划已保存") } catch (error) { toast.error(error instanceof Error ? error.message : "保存失败") } finally { setBusy(false) } }
-  function resetFilters() { setAccountNameFilter(""); setModelTypeFilter("all"); setSchedulableFilter("all"); setRiskFilter("all"); setGroupFilter("all"); setAccountSort(null) }
-  function toggleAccountSort(key: AccountSortKey, initialDirection: SortDirection) { setAccountSort((current) => current?.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: initialDirection }) }
+  function changeUsageRange(nextRange: RelayUsageRange) {
+    setUsageRange(nextRange)
+    setLatencyGranularity((current) => normalizeLatencyGranularity(nextRange, current))
+  }
+  function resetFilters() { setAccountNameFilter(""); setAccountSearchResetVersion((value) => value + 1); setModelTypeFilter("all"); setSchedulableFilter("all"); setRiskFilter("all"); setGroupFilter("all") }
   async function savePolicy() { if (!selectedID) return; setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}`, { method: "PUT", body: JSON.stringify({ auto_adjust_enabled: autoAdjustEnabled, auto_adjust_no_profit_enabled: autoAdjustNoProfitEnabled }) }); await reload(); toast.success("自动调组策略已保存") } catch (error) { toast.error(error instanceof Error ? error.message : "保存失败") } finally { setBusy(false) } }
   async function savePriorityPolicy() { if (!selectedID) return; setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}`, { method: "PUT", body: JSON.stringify({ auto_priority_enabled: autoPriorityEnabled, auto_priority_recall_enabled: autoPriorityRecallEnabled, auto_priority_recall_minutes: autoPriorityRecallMinutes }) }); await reload(); toast.success("自动优先级策略已保存") } catch (error) { toast.error(error instanceof Error ? error.message : "保存失败") } finally { setBusy(false) } }
   async function updateGroup(groupID: number, patch: RelayGroupPatch) { if (!selectedID) return; await apiFetch(`/relay-stations/${selectedID}/groups/${groupID}`, { method: "PUT", body: JSON.stringify(patch) }); await reload(); toast.success("分组已更新") }
@@ -1835,7 +1915,7 @@ export default function RelayStationsPage() {
   async function runGroupTest() { if (!selectedID || !testGroup || !groupTestModel) return; const count = Number(groupTestCount); if (!Number.isInteger(count) || count < 1 || count > 10) { setGroupTestError("调用次数必须是 1 到 10 次"); return } setGroupTestResult(null); setGroupTestError(""); setGroupTestNeedsKey(false); setTestingGroupID(testGroup.external_id); try { const result = await apiFetch<RelayGroupTestResult>(`/relay-stations/${selectedID}/groups/${testGroup.external_id}/test`, { method: "POST", body: JSON.stringify({ model: groupTestModel, count }) }); setGroupTestResult(result); await recentUsage.refetch(); if (result.failed === 0) toast.success(`${result.succeeded} 次真实调用均成功`); else toast.error(`测试完成：成功 ${result.succeeded} 次，失败 ${result.failed} 次`) } catch (error) { setGroupTestNeedsKey(isMissingGroupAPIKeyError(error)); setGroupTestError(error instanceof Error ? error.message : "分组快速测试失败") } finally { setTestingGroupID(null) } }
   async function deleteGroup(group: RelayGroupView) { if (!selectedID) return; const accepted = await confirm({ title: `删除分组“${group.name}”？`, description: `将从当前中转站真实删除该分组，操作不可恢复。${group.account_count > 0 ? `当前关联 ${group.account_count} 个账号，删除后这些账号的分组配置可能受到影响。` : ""}`, confirmLabel: "确认删除", destructive: true }); if (!accepted) return; setDeletingGroupID(group.external_id); try { await apiFetch(`/relay-stations/${selectedID}/groups/${group.external_id}`, { method: "DELETE" }); if (testGroup?.external_id === group.external_id) setTestGroup(null); await reload(); toast.success(`分组“${group.name}”已删除`) } catch (error) { toast.error(error instanceof Error ? error.message : "删除分组失败") } finally { setDeletingGroupID(null) } }
   async function deleteAccount(account: RelayAccountView) { if (!selectedID) return; const accepted = await confirm({ title: `删除账号“${account.name}”？`, description: "将从当前中转站真实删除该账号及其调度配置，操作不可恢复；历史使用记录不会被删除。", confirmLabel: "确认删除", destructive: true }); if (!accepted) return; setDeletingAccountID(account.external_id); try { await apiFetch(`/relay-stations/${selectedID}/accounts/${account.external_id}`, { method: "DELETE" }); setSelected((current) => current.filter((id) => id !== account.external_id)); if (groupEditor?.external_id === account.external_id) setGroupEditor(null); if (testAccount?.external_id === account.external_id) setTestAccount(null); await reload(); toast.success(`账号“${account.name}”已删除`) } catch (error) { toast.error(error instanceof Error ? error.message : "删除账号失败") } finally { setDeletingAccountID(null) } }
-  async function refreshAccounts() { await Promise.all([overview.refetch(), usage.refetch()]); toast.success("账号列表已刷新") }
+  async function refreshAccounts() { await Promise.all([overview.refetch(), usage.refetch(), scoreLatencyBuckets.refetch(), latencyBuckets.refetch(), accountConsumptionBuckets.refetch()]); toast.success("账号列表已刷新") }
   async function refreshGroups() { await overview.refetch(); toast.success("分组列表已刷新") }
   async function saveBatchOverride(clear = false) { if (!selectedID || selected.length === 0) return; if (batchMode === "groups") { setBatchGroupDialogOpen(true); return } if (!clear && batchMode === "channel_group" && (!batchChannelID || !batchGroup)) { toast.error("请选择渠道和渠道分组"); return } if (!clear && batchMode === "manual" && (!batchMultiplier || !Number.isFinite(Number(batchMultiplier)) || Number(batchMultiplier) < 0)) { toast.error("手工倍率必须是非负数"); return } setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}/accounts/cost-overrides`, { method: "PUT", body: JSON.stringify({ account_external_ids: selected, clear, mode: batchMode, monitor_channel_id: batchChannelID ? Number(batchChannelID) : undefined, upstream_group: batchGroup, manual_multiplier: batchMode === "manual" ? Number(batchMultiplier) : undefined }) }); setSelected([]); await reload(); toast.success(clear ? "已清除账号成本覆盖" : "账号成本覆盖已保存") } catch (error) { toast.error(error instanceof Error ? error.message : "保存成本覆盖失败") } finally { setBusy(false) } }
   async function submitBatchClone(groups: RelayAccountBatchCloneGroup[]) { if (!selectedID) return; setBusy(true); try { const result = await apiFetch<RelayAccountBatchCloneResult>(`/relay-stations/${selectedID}/accounts/batch-clone`, { method: "POST", body: JSON.stringify({ groups }) }); setBatchCloneResult(result); await reload(); if (result.sync_error) toast.warning(`已新增 ${result.succeeded} 个账号，但本地快照刷新失败`); else if (result.failed) toast.warning(`批量新增完成：成功 ${result.succeeded} 个，失败 ${result.failed} 个`); else toast.success(`已批量新增 ${result.succeeded} 个账号`) } catch (error) { toast.error(error instanceof Error ? error.message : "批量新增账号失败") } finally { setBusy(false) } }
@@ -1845,31 +1925,21 @@ export default function RelayStationsPage() {
   async function runFilteredAccountAction(path: string, schedulable: boolean | undefined, successLabel: string) { if (!selectedID || filteredAccounts.length === 0) { toast.info("当前筛选没有账号"); return } let accountGroupExternalIDs: AccountAdjustmentSelection | undefined; if (path === "apply-suggestions" || path === "add-downgrades") { const previewAccounts = path === "apply-suggestions" ? filteredSuggestionAccounts : filteredDowngradeAccounts; if (previewAccounts.length === 0) { toast.info(path === "apply-suggestions" ? "当前筛选没有可应用建议的账号" : "当前筛选没有可降价账号"); return } const selection = await openAccountAdjustmentDialog({ mode: path === "apply-suggestions" ? "suggestion" : "downgrade", title: path === "apply-suggestions" ? `接受 ${previewAccounts.length} 个账号的推荐调组？` : `接受 ${previewAccounts.length} 个账号的推荐降价？`, confirmLabel: path === "apply-suggestions" ? "接受推荐调组" : "接受推荐降价", accounts: previewAccounts, totalCount: filteredAccounts.length }); if (!selection) return; accountGroupExternalIDs = selection } setBusy(true); try { const result = await apiFetch<RelayAccountBatchActionResult>(`/relay-stations/${selectedID}/accounts/${path}`, { method: path === "schedulable" ? "PUT" : "POST", body: JSON.stringify({ account_external_ids: filteredAccounts.map((account) => account.external_id), ...(path === "schedulable" ? { schedulable } : {}), ...(accountGroupExternalIDs ? { account_group_external_ids: accountGroupExternalIDs } : {}) }) }); setSelected([]); await reload(); const detail = result.failed ? `，失败 ${result.failed} 个${result.errors?.[0] ? `：${result.errors[0]}` : ""}` : ""; const message = `${successLabel}：已处理 ${result.applied} 个，跳过 ${result.skipped} 个${detail}`; if (result.failed) toast.warning(message); else toast.success(message) } catch (error) { toast.error(error instanceof Error ? error.message : `${successLabel}失败`) } finally { setBusy(false) } }
   async function remove() { if (!selectedID || !selectedStation) return; const accepted = await confirm({ title: `删除中转站“${selectedStation.name}”？`, description: "将从系统真实删除该中转站及其账号快照、调整记录，操作不可恢复；历史使用记录不会被删除。", confirmLabel: "确认删除", destructive: true }); if (!accepted) return; setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}`, { method: "DELETE" }); setSelectedID(null); await reload(); toast.success("中转站已删除") } catch (error) { toast.error(error instanceof Error ? error.message : "删除失败") } finally { setBusy(false) } }
 
-  return <section className="space-y-4"><header className="flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3"><div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><Server className="size-5 text-brand" />中转站管理</h1><p className="mt-1 text-xs text-muted-foreground">同步时实时探测 API Key 上游倍率，并按平台、账号类型和模型类型评估销售分组与降级候选。</p></div><div className="flex flex-wrap items-center gap-2"><Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" onClick={openCreate}><Plus className="size-3.5" />添加中转站</Button>{stations.data?.length ? <Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy} onClick={() => void syncAll()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步全部</Button> : null}{selectedStation ? <><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/relay-monitor/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><Activity className="size-3.5" />分组监控</a></Button><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/model-pricing/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><CircleDollarSign className="size-3.5" />模型价格</a></Button><Button variant="outline" size="sm" className="h-11 sm:h-9" onClick={openEdit}>编辑</Button><Button size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy || !selectedStation.api_key_configured} onClick={() => void sync()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />实时同步</Button><Button variant="ghost" size="icon" className="size-11 sm:size-9" aria-label="删除中转站" disabled={busy} onClick={() => void remove()}><Trash2 className="size-4 text-danger" /></Button></> : null}</div></header>
+  return <section className="space-y-4"><header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3"><div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><Server className="size-5 text-brand" />中转站管理</h1><p className="mt-1 text-xs text-muted-foreground">同步时实时探测 API Key 上游倍率，并按平台、账号类型和模型类型评估销售分组与降级候选。</p></div><div className="flex flex-wrap items-center gap-2"><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href="/settings#background-tasks" title="前往系统设置修改全部中转站的同步任务"><Settings2 className="size-3.5" />全局同步设置</a></Button><Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" onClick={openCreate}><Plus className="size-3.5" />添加中转站</Button>{stations.data?.length ? <Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy} onClick={() => void syncAll()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步全部</Button> : null}{selectedStation ? <><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/relay-monitor/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><Activity className="size-3.5" />分组监控</a></Button><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/model-pricing/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><CircleDollarSign className="size-3.5" />模型价格</a></Button><Button variant="outline" size="sm" className="h-11 sm:h-9" onClick={openEdit}>编辑</Button><Button size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy || !selectedStation.api_key_configured} onClick={() => void sync()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />实时同步</Button><Button variant="ghost" size="icon" className="size-11 sm:size-9" aria-label="删除中转站" disabled={busy} onClick={() => void remove()}><Trash2 className="size-4 text-danger" /></Button></> : null}</div></header>
 
     {showForm ? <form onSubmit={saveStation} autoComplete="off" className="grid gap-3 border border-border bg-card p-4 md:grid-cols-[1fr_1.3fr_1.5fr_auto] md:items-end"><div className="space-y-1.5"><Label htmlFor="relay-name">名称</Label><Input id="relay-name" name="gatewayops-relay-name" autoComplete="off" value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} required /></div><div className="space-y-1.5"><Label htmlFor="relay-url">中转站地址</Label><Input id="relay-url" name="gatewayops-relay-base-url" autoComplete="off" type="url" value={form.base_url} onChange={(event) => setForm({ ...form, base_url: event.target.value })} required /></div><div className="space-y-1.5"><Label htmlFor="relay-key">管理员 API Key</Label><Input id="relay-key" name="gatewayops-relay-admin-key" type="password" autoComplete="new-password" data-lpignore="true" value={form.api_key} onChange={(event) => setForm({ ...form, api_key: event.target.value })} placeholder={editingID == null ? "粘贴 x-api-key" : "留空表示不修改"} required={editingID == null} /></div><div className="flex gap-2"><Button type="submit" disabled={busy}>保存</Button><Button type="button" variant="outline" onClick={() => setShowForm(false)}>取消</Button></div></form> : null}
 
-    {stations.loading && !stations.data ? <div className="py-10 text-center text-sm text-muted-foreground">正在读取中转站配置...</div> : stations.data?.length ? <div><div className="mb-3 flex max-w-full items-center gap-2 overflow-x-auto border-b border-border pb-1 [scrollbar-width:thin]">{stations.data.map((station) => <button key={station.id} type="button" onClick={() => setSelectedID(station.id)} title={`${station.name} · ${station.base_url}`} className={cn("inline-flex shrink-0 cursor-pointer items-center gap-2 border-b-2 px-3 py-2 text-left text-sm transition-colors duration-200", selectedID === station.id ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground")}><span className="max-w-48 truncate">{station.name}</span><span className={cn("size-1.5 rounded-full", station.last_error ? "bg-danger" : station.api_key_configured ? "bg-success" : "bg-warning")} /></button>)}</div><div className="min-w-0">{overview.loading && !currentOverview ? <div className="py-10 text-center text-sm text-muted-foreground">正在读取账号快照...</div> : currentOverview ? <div className="space-y-3">{overview.error ? <Alert variant="destructive"><CircleAlert /><AlertTitle>刷新失败，正在显示上次数据</AlertTitle><AlertDescription>{overview.error}</AlertDescription></Alert> : null}{currentOverview.station.last_error ? <Alert variant="destructive"><CircleAlert /><AlertTitle>最近同步失败</AlertTitle><AlertDescription>{currentOverview.station.last_error}</AlertDescription></Alert> : null}{!currentOverview.station.last_synced_at ? <Alert><CircleAlert /><AlertTitle>还没有账号快照</AlertTitle><AlertDescription>实时同步后将读取远端账号、成本倍率与分组关联。</AlertDescription></Alert> : null}<RiskSummary overview={currentOverview} />
+    {stations.loading && !stations.data ? <div className="py-10 text-center text-sm text-muted-foreground">正在读取中转站配置...</div> : stations.data?.length ? <div><div className="mb-3 flex max-w-full items-center gap-2 overflow-x-auto border-b border-border pb-1 [scrollbar-width:thin]">{stations.data.map((station) => <button key={station.id} type="button" onClick={() => setSelectedID(station.id)} title={`${station.name} · ${station.base_url}`} className={cn("inline-flex shrink-0 cursor-pointer items-center gap-2 border-b-2 px-3 py-2 text-left text-sm transition-colors duration-200", selectedID === station.id ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground")}><span className="max-w-48 truncate">{station.name}</span><span className={cn("size-1.5 rounded-full", station.last_error ? "bg-danger" : station.api_key_configured ? "bg-success" : "bg-warning")} /></button>)}</div><div className="min-w-0">{overview.loading && !currentOverview ? <div className="py-10 text-center text-sm text-muted-foreground">正在读取账号快照...</div> : currentOverview ? <div className="space-y-3">{overview.error ? <Alert variant="destructive"><CircleAlert /><AlertTitle>刷新失败，正在显示上次数据</AlertTitle><AlertDescription>{overview.error}</AlertDescription></Alert> : null}{currentOverview.station.last_error ? <Alert variant="destructive"><CircleAlert /><AlertTitle>最近同步失败</AlertTitle><AlertDescription>{currentOverview.station.last_error}</AlertDescription></Alert> : null}{!currentOverview.station.last_synced_at ? <Alert><CircleAlert /><AlertTitle>还没有账号快照</AlertTitle><AlertDescription>实时同步后将读取远端账号、成本倍率与分组关联。</AlertDescription></Alert> : null}<RiskSummary overview={currentOverview} /><RelayDailyConsumptionTrend data={dailyConsumption.data ?? []} loading={dailyConsumption.loading} />
 
-      <div className="grid gap-3 xl:grid-cols-3">
-        <Card className="gap-0 border border-border py-0 shadow-none">
-          <CardHeader className="flex flex-row items-center justify-between gap-3 px-4 py-3">
-            <div className="min-w-0"><CardTitle className="flex items-center gap-2 text-sm font-semibold"><Clock3 className="size-4 text-brand" />同步计划</CardTitle><p className="mt-1 truncate text-xs text-muted-foreground">应用于全部中转站，倍率探测与快照刷新独立执行。</p></div>
-            <Button size="sm" className="h-9 shrink-0 gap-1.5" disabled={busy || !syncSettings.data} onClick={() => void saveAutoSync()}><Save className="size-3.5" />保存</Button>
-          </CardHeader>
-          <CardContent className="grid divide-y divide-border border-t border-border px-4 md:grid-cols-2 md:divide-x md:divide-y-0">
-            <div className="grid min-h-11 grid-cols-[auto_minmax(0,1fr)_6rem] items-center gap-3 py-4 md:pr-6"><Switch checked={autoRateSyncEnabled} onCheckedChange={setAutoRateSyncEnabled} disabled={!syncSettings.data} aria-label="启用倍率探测" /><div className="min-w-0"><p className="text-xs font-medium">倍率探测</p><p className="mt-1 flex items-center gap-1 text-[11px] leading-4 text-muted-foreground"><span className="truncate">读取上游成本倍率</span><SyncPlanHelp label="倍率探测" help={rateSyncHelp} /></p></div><Select value={String(autoRateSyncInterval)} onValueChange={(value) => setAutoRateSyncInterval(Number(value))} disabled={!autoRateSyncEnabled}><SelectTrigger className="h-9 w-24 text-xs"><SelectValue /></SelectTrigger><SelectContent>{rateIntervals.map((value) => <SelectItem key={value} value={String(value)}>{intervalLabel(value)}</SelectItem>)}</SelectContent></Select></div>
-            <div className="grid min-h-11 grid-cols-[auto_minmax(0,1fr)_6rem] items-center gap-3 py-4 md:pl-6"><Switch checked={autoSnapshotSyncEnabled} onCheckedChange={setAutoSnapshotSyncEnabled} disabled={!syncSettings.data} aria-label="启用快照同步" /><div className="min-w-0"><p className="text-xs font-medium">快照同步</p><p className="mt-1 flex items-center gap-1 text-[11px] leading-4 text-muted-foreground"><span className="truncate">刷新账号和分组快照</span><SyncPlanHelp label="快照同步" help={snapshotSyncHelp} /></p></div><Select value={String(autoSnapshotSyncInterval)} onValueChange={(value) => setAutoSnapshotSyncInterval(Number(value))} disabled={!autoSnapshotSyncEnabled}><SelectTrigger className="h-9 w-24 text-xs"><SelectValue /></SelectTrigger><SelectContent>{snapshotIntervals.map((value) => <SelectItem key={value} value={String(value)}>{snapshotIntervalLabel(value)}</SelectItem>)}</SelectContent></Select></div>
-          </CardContent>
-        </Card>
+      <div className="grid gap-3 xl:grid-cols-2">
         <Card className="gap-0 border border-border py-0 shadow-none">
           <CardHeader className="flex flex-row items-center justify-between gap-3 px-4 py-3">
             <div className="min-w-0"><CardTitle className="flex items-center gap-2 text-sm font-semibold"><Cog className="size-4 text-brand" />自动调组策略</CardTitle><p className="mt-1 truncate text-xs text-muted-foreground">分别控制亏损风险和无利润账号的自动处理。</p></div>
             <Button size="sm" className="h-9 shrink-0 gap-1.5" disabled={busy} onClick={() => void savePolicy()}><Save className="size-3.5" />保存</Button>
           </CardHeader>
           <CardContent className="grid divide-y divide-border border-t border-border px-4 md:grid-cols-2 md:divide-x md:divide-y-0">
-            <div className="flex min-h-11 items-center justify-between gap-6 py-4 md:pr-6"><div className="min-w-0"><p className="truncate text-xs font-medium">亏损风险</p><p className="mt-1 truncate text-[11px] text-muted-foreground">成本高于销售倍率时调整</p></div><Switch className="relative shrink-0 cursor-pointer before:absolute before:-inset-3 before:content-['']" checked={autoAdjustEnabled} onCheckedChange={setAutoAdjustEnabled} aria-label="自动处理亏损风险" /></div>
-            <div className="flex min-h-11 items-center justify-between gap-6 py-4 md:pl-6"><div className="min-w-0"><p className="truncate text-xs font-medium">无利润分组</p><p className="mt-1 truncate text-[11px] text-muted-foreground">销售倍率与成本完全相同时调整</p></div><Switch className="relative shrink-0 cursor-pointer before:absolute before:-inset-3 before:content-['']" checked={autoAdjustNoProfitEnabled} onCheckedChange={setAutoAdjustNoProfitEnabled} aria-label="自动处理无利润分组" /></div>
+            <div className="flex min-h-11 items-center justify-between gap-6 py-4 md:pr-6"><div className="min-w-0"><p className="truncate text-xs font-medium">亏损风险</p><p className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground"><span className="min-w-0 flex-1 truncate">成本高于销售倍率时调整</span><SyncPlanHelp label="亏损风险" help="当账号成本倍率高于当前销售倍率时，自动处理该账号，避免继续承担亏损。" /></p></div><Switch className="relative shrink-0 cursor-pointer before:absolute before:-inset-3 before:content-['']" checked={autoAdjustEnabled} onCheckedChange={setAutoAdjustEnabled} aria-label="自动处理亏损风险" /></div>
+            <div className="flex min-h-11 items-center justify-between gap-6 py-4 md:pl-6"><div className="min-w-0"><p className="truncate text-xs font-medium">无利润分组</p><p className="mt-1 flex min-w-0 items-center gap-1 text-[11px] text-muted-foreground"><span className="min-w-0 flex-1 truncate">销售倍率与成本完全相同时调整</span><SyncPlanHelp label="无利润分组" help="当账号销售倍率与成本倍率完全相同时，自动处理无利润账号。" /></p></div><Switch className="relative shrink-0 cursor-pointer before:absolute before:-inset-3 before:content-['']" checked={autoAdjustNoProfitEnabled} onCheckedChange={setAutoAdjustNoProfitEnabled} aria-label="自动处理无利润分组" /></div>
           </CardContent>
         </Card>
         <Card className="gap-0 border border-border py-0 shadow-none">
@@ -1879,52 +1949,73 @@ export default function RelayStationsPage() {
           </CardHeader>
           <CardContent className="grid divide-y divide-border border-t border-border px-4 md:grid-cols-2 md:divide-x md:divide-y-0">
             <div className="flex min-h-11 items-center justify-between gap-4 py-4 md:pr-6"><div className="min-w-0"><p className="whitespace-nowrap text-xs font-medium">流畅度排序</p><p className="mt-1 flex items-center gap-1 truncate text-[11px] text-muted-foreground">按近期响应排序<Tooltip delayDuration={200}><TooltipTrigger asChild><button type="button" className="shrink-0 rounded text-muted-foreground hover:text-foreground" aria-label="查看流畅度排序说明"><CircleHelp className="size-3.5" /></button></TooltipTrigger><TooltipContent side="top" className="max-w-72 text-xs">OAuth 账号固定为优先级 1；未调用及响应最流畅的 API Key 从优先级 2 开始，按最近调用的首字与总耗时综合排序，最慢逐级排到 10。</TooltipContent></Tooltip></p></div><Switch className="relative shrink-0 cursor-pointer before:absolute before:-inset-3 before:content-['']" checked={autoPriorityEnabled} onCheckedChange={setAutoPriorityEnabled} aria-label="按最近调用流畅度自动调整优先级" /></div>
-            <div className="grid min-h-11 grid-cols-[auto_minmax(0,1fr)_5.5rem] items-center gap-2 py-4 md:pl-6"><Switch className="shrink-0" checked={autoPriorityRecallEnabled} onCheckedChange={setAutoPriorityRecallEnabled} disabled={!autoPriorityEnabled} aria-label="启用自动回调优先级" /><div className="min-w-0"><p className="whitespace-nowrap text-xs font-medium">自动回调优先级</p><p className="mt-1 flex items-center gap-1 truncate text-[11px] text-muted-foreground">超时逐步提升<Tooltip delayDuration={200}><TooltipTrigger asChild><button type="button" className="shrink-0 rounded text-muted-foreground hover:text-foreground" aria-label="查看自动回调优先级说明"><CircleHelp className="size-3.5" /></button></TooltipTrigger><TooltipContent side="top" className="max-w-72 text-xs">已启用调度的 API Key 账号若在设定时间内未被调用，每次快照同步会将当前优先级提高一级，最低提升到按流畅度计算出的基础优先级 2；账号重新产生调用后继续按近期表现排序。</TooltipContent></Tooltip></p></div><Select value={String(autoPriorityRecallMinutes)} onValueChange={(value) => setAutoPriorityRecallMinutes(Number(value))} disabled={!autoPriorityEnabled || !autoPriorityRecallEnabled}><SelectTrigger className="h-9 w-[88px] px-2 text-xs"><SelectValue /></SelectTrigger><SelectContent>{[[30,"30 分"],[60,"1 小时"],[180,"3 小时"],[360,"6 小时"],[720,"12 小时"],[1440,"1 天"]].map(([value,label]) => <SelectItem key={value} value={String(value)}>{label}</SelectItem>)}</SelectContent></Select></div>
+            <div className="flex min-w-0 min-h-11 items-center gap-2 py-4 md:pl-6"><Switch className="shrink-0" checked={autoPriorityRecallEnabled} onCheckedChange={setAutoPriorityRecallEnabled} disabled={!autoPriorityEnabled} aria-label="启用自动回调优先级" /><CompactPolicySelect label="自动回调优先级" help="已启用调度的 API Key 账号若在设定时间内未被调用，每次快照同步会将当前优先级提高一级，最低提升到按流畅度计算出的基础优先级 2；账号重新产生调用后继续按近期表现排序。" value={autoPriorityRecallMinutes} options={[30, 60, 180, 360, 720, 1440]} formatOption={(value) => ({ 30: "30 分", 60: "1 小时", 180: "3 小时", 360: "6 小时", 720: "12 小时", 1440: "1 天" })[value] ?? "未设置"} onValueChange={setAutoPriorityRecallMinutes} disabled={!autoPriorityEnabled || !autoPriorityRecallEnabled} /></div>
           </CardContent>
         </Card>
       </div>
 
-      <div className="flex max-w-full items-center gap-1 overflow-x-auto border-b border-border pb-1" role="tablist" aria-label="中转站详情模块">
-        {([
-          ["accounts", ShieldAlert, "账号列表"],
-          ["usage", History, "最近使用记录"],
-          ["users", Users, "用户管理"],
-          ["groups", Layers3, "分组管理"],
-        ] as const).map(([value, Icon, label]) => (
-          <button
-            key={value}
-            type="button"
-            role="tab"
-            aria-selected={detailModule === value}
-            onClick={() => setDetailModule(value)}
-            className={cn(
-              "inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-3 text-xs transition-colors sm:h-9",
-              detailModule === value ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
-            )}
-          >
-            <Icon className="size-3.5" />
-            {label}
-          </button>
-        ))}
+      <div className="flex max-w-full flex-wrap items-center justify-between gap-2 border-b border-border pb-1">
+        <div className="flex min-w-0 items-center gap-1 overflow-x-auto" role="tablist" aria-label="中转站详情模块">
+          {([
+            ["accounts", ShieldAlert, "账号列表"],
+            ["usage", History, "最近使用记录"],
+            ["users", Users, "用户管理"],
+            ["groups", Layers3, "分组管理"],
+          ] as const).map(([value, Icon, label]) => (
+            <button
+              key={value}
+              type="button"
+              role="tab"
+              aria-selected={detailModule === value}
+              onClick={() => setDetailModule(value)}
+              className={cn(
+                "inline-flex h-10 shrink-0 items-center gap-1.5 border-b-2 px-3 text-xs transition-colors sm:h-9",
+                detailModule === value ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+              )}
+            >
+              <Icon className="size-3.5" />
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="list-panel-controls flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2" aria-label="中转站统一时间条件">
+          <div className="inline-flex max-w-full flex-wrap rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="中转站统计时间范围">
+            {usageRanges.map((item) => (
+              <button key={item.value} type="button" onClick={() => changeUsageRange(item.value)} className={cn("h-11 rounded px-3 text-xs transition-colors sm:h-8", usageRange === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
+                {item.label}
+              </button>
+            ))}
+          </div>
+          <Select value={latencyGranularity} onValueChange={(value) => setLatencyGranularity(value as LatencyBucketGranularity)}>
+            <SelectTrigger className="h-11 w-36 text-xs sm:h-9" aria-label="时间稳定性与调用消耗趋势聚合粒度" title="作用于时间稳定性与消费趋势"><SelectValue /></SelectTrigger>
+            <SelectContent>{latencyGranularityOptionsForRange(usageRange).map((item) => <SelectItem key={item.value} value={item.value}>{`粒度：${item.label}`}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
       </div>
 
-      {detailModule === "usage" ? <RecentUsageTable rows={recentUsage.data ?? []} loading={recentUsage.loading} refreshing={recentUsage.refreshing} error={recentUsage.error} onRefresh={recentUsage.refetch} groupNames={new Map(currentOverview.groups.map((group) => [group.external_id, group.name]))} accountNames={new Map(currentOverview.accounts.map((account) => [account.external_id, account.name]))} accountURLs={new Map(currentOverview.accounts.filter((account) => account.base_url).map((account) => [account.external_id, account.base_url!] as const))} systemCapacity={{ current: currentOverview.accounts.reduce((sum, account) => sum + account.current_concurrency, 0), total: currentOverview.accounts.reduce((sum, account) => sum + account.concurrency, 0) }} onUserClick={(userID, userEmail, userName) => setHistoryUser({ id: userID, email: userEmail, name: userName })} /> : null}
+      {detailModule === "usage" ? <RecentUsageTable rows={recentUsage.data ?? []} loading={recentUsage.loading} refreshing={recentUsage.refreshing} error={recentUsage.error} onRefresh={recentUsage.refetch} range={usageRange} groupNames={new Map(currentOverview.groups.map((group) => [group.external_id, group.name]))} accountNames={new Map(currentOverview.accounts.map((account) => [account.external_id, account.name]))} accountURLs={new Map(currentOverview.accounts.filter((account) => account.base_url).map((account) => [account.external_id, account.base_url!] as const))} systemCapacity={{ current: currentOverview.accounts.reduce((sum, account) => sum + account.current_concurrency, 0), total: currentOverview.accounts.reduce((sum, account) => sum + account.concurrency, 0) }} onUserClick={(userID, userEmail, userName) => setHistoryUser({ id: userID, email: userEmail, name: userName })} /> : null}
       <UserBalanceHistoryDialog open={historyUser != null} userEmail={historyUser?.email ?? ""} userName={historyUser?.name ?? ""} data={userHistory.data} loading={userHistory.loading} error={userHistory.error} onClose={() => setHistoryUser(null)} />
 
-      {detailModule === "users" ? <UserManagement stationID={selectedID!} /> : null}
+      {detailModule === "users" ? <UserManagement stationID={selectedID!} range={usageRange} /> : null}
 
       {detailModule === "groups" ? <GroupManagement overview={currentOverview} busy={busy} refreshing={overview.refreshing} testingGroupID={testingGroupID} deletingGroupID={deletingGroupID} onUpdate={updateGroup} onOrderChange={updateGroupOrder} onTest={(group) => void openGroupTest(group)} onDelete={(group) => void deleteGroup(group)} onRefresh={() => void refreshGroups()} /> : null}
 
-      {detailModule === "accounts" ? <Card className="gap-0 border border-border py-0 shadow-none">
-        <CardHeader className="gap-3 px-4 py-3">
-          <div className="flex items-center justify-between gap-3"><div className="min-w-0"><CardTitle className="flex items-center gap-2 text-sm font-semibold"><ShieldAlert className="size-4 text-brand" />账号列表</CardTitle>{accountListOpen ? <p className="mt-1 text-xs text-muted-foreground">展示非 OAuth 账号的调度、成本、销售分组与风险；成本覆盖优先于实时探测。</p> : null}</div><div className="flex min-w-0 flex-1 flex-wrap items-center justify-end gap-2">{accountListOpen ? <>{usage.loading ? <span className="flex items-center gap-1 text-xs text-muted-foreground" aria-live="polite"><RefreshCw className="size-3 animate-spin" />消费统计读取中</span> : usage.error ? <span className="max-w-[min(34rem,50vw)] text-right text-xs leading-5 text-danger" title={usage.error}>消费统计读取失败</span> : usage.data && !usage.data.complete ? <span className="max-w-[min(38rem,50vw)] text-right text-xs leading-5 text-warning">有 {usage.data.failed_accounts} 个账号的区间消费读取失败，账号卡片中的消费数据可能不完整。</span> : null}<span className="shrink-0 text-xs text-muted-foreground">{filteredAccounts.length} / {managedAccounts.length} 个</span></> : null}<Button type="button" variant="ghost" size="icon" className="size-9 shrink-0" aria-label={accountListOpen ? "收起账号列表" : "展开账号列表"} aria-expanded={accountListOpen} onClick={() => setAccountListOpen((value) => !value)}><ChevronDown className={cn("size-4 transition-transform duration-200", accountListOpen && "rotate-180")} /></Button></div></div>
-          {accountListOpen ? <div className="flex flex-wrap items-center justify-end gap-2"><div className="mr-auto flex flex-wrap items-center gap-4" aria-live="polite"><div className="flex min-w-32 items-center gap-2"><span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-amber-400/15 text-amber-600 dark:text-amber-400"><Box className="size-4" /></span><div><p className="text-[10px] text-muted-foreground">总 Token</p><p className="font-mono text-sm font-semibold tabular-nums text-foreground">{usage.loading && !usage.data ? "读取中…" : compactNumber.format(usageTotals.tokens)}</p></div></div><div className="flex min-w-32 items-center gap-2"><span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-success/10 text-success"><CircleDollarSign className="size-4" /></span><div><p className="text-[10px] text-muted-foreground">总消费</p><p className="font-mono text-sm font-semibold tabular-nums text-success">{usage.loading && !usage.data ? "读取中…" : chargeAmount(usageTotals.charge)}</p></div></div></div><div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input value={accountNameFilter} onChange={(event) => setAccountNameFilter(event.target.value)} placeholder="输入账号名称" aria-label="按账号名称筛选" className="h-11 w-44 pl-8 text-xs sm:h-9 sm:w-40" /></div><Select value={usageRange} onValueChange={(value) => setUsageRange(value as RelayUsageRange)}><SelectTrigger className="h-11 w-24 text-xs sm:h-9" aria-label="账号消费统计时间范围"><SelectValue /></SelectTrigger><SelectContent>{usageRanges.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select><Select value={modelTypeFilter} onValueChange={setModelTypeFilter}><SelectTrigger className="h-11 w-32 text-xs sm:h-9" aria-label="按模型类型筛选"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部模型类型</SelectItem><SelectItem value="__unassigned">未绑定模型类型</SelectItem>{accountModelTypeOptions.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><Select value={schedulableFilter} onValueChange={(value) => setSchedulableFilter(value as "enabled" | "disabled" | "all")}><SelectTrigger className="h-11 w-28 text-xs sm:h-9"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="enabled">调度开启</SelectItem><SelectItem value="disabled">调度关闭</SelectItem><SelectItem value="all">全部调度</SelectItem></SelectContent></Select><Select value={riskFilter} onValueChange={(value) => setRiskFilter(value as RiskFilter)}><SelectTrigger className="h-11 w-28 text-xs sm:h-9" aria-label="按账号状态筛选"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部账号</SelectItem><SelectItem value="adjustable">可调组</SelectItem><SelectItem value="downgradable">可降级</SelectItem>{Object.entries(stateMeta).map(([value, meta]) => <SelectItem key={value} value={value}>{meta.label}</SelectItem>)}</SelectContent></Select><Select value={groupFilter} onValueChange={setGroupFilter}><SelectTrigger className="h-11 w-36 text-xs sm:h-9"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部销售分组</SelectItem>{publicFirst(currentOverview.groups).map((group) => <SelectItem key={group.external_id} value={String(group.external_id)}><span className="flex w-full min-w-0 items-center justify-between gap-3"><span className="truncate">{group.name} · {group.platform || "-"}</span><span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium", group.is_exclusive ? "bg-warning/10 text-warning" : "bg-blue-500/10 text-blue-700 dark:text-blue-400")}>{group.is_exclusive ? "专属" : "公开"}</span></span></SelectItem>)}</SelectContent></Select><Button type="button" variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" onClick={resetFilters}><RotateCcw className="size-3.5" />重置</Button><Button type="button" variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy || overview.refreshing} onClick={() => void refreshAccounts()}><RefreshCw className={cn("size-3.5", overview.refreshing && "animate-spin")} />刷新</Button></div> : null}
-          {accountListOpen ? <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-2"><span className="ml-auto whitespace-nowrap text-xs text-muted-foreground">作用于当前筛选的 <strong className="font-semibold text-foreground">{filteredAccounts.length}</strong> 个账号</span><Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" title={`启用当前筛选结果中 ${filteredEnableCount} 个未开启调度的账号`} disabled={busy || filteredEnableCount === 0} onClick={() => void runFilteredAccountAction("schedulable", true, "一键启用调度")}><Power className="size-3.5" />全部启用</Button><Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" title={`禁用当前筛选结果中 ${filteredDisableCount} 个已开启调度的账号`} disabled={busy || filteredDisableCount === 0} onClick={() => void runFilteredAccountAction("schedulable", false, "一键禁用调度")}><PowerOff className="size-3.5" />全部禁用</Button><Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" title={`接受当前筛选结果中 ${filteredSuggestionCount} 个账号的推荐调组`} disabled={busy || filteredSuggestionCount === 0} onClick={() => void runFilteredAccountAction("apply-suggestions", undefined, "接受推荐调组")}><ListChecks className="size-3.5" />接受推荐调组 <span className="text-[10px] text-muted-foreground">{filteredSuggestionCount}</span></Button><Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" title={`接受当前筛选结果中 ${filteredDowngradeCount} 个账号的推荐降级`} disabled={busy || filteredDowngradeCount === 0} onClick={() => void runFilteredAccountAction("add-downgrades", undefined, "接受推荐降级")}><TrendingDown className="size-3.5" />接受推荐降级 <span className="text-[10px] text-muted-foreground">{filteredDowngradeCount}</span></Button><Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" disabled={busy || !cloneableAccounts.length} onClick={openBatchClone}><Plus className="size-3.5" />批量新增账号</Button></div> : null}
-        </CardHeader>
+      {detailModule === "accounts" ? <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
+        <ListPanelHeader
+          secondaryPlacement="inline"
+          actionsPlacement="secondary"
+          title={<CardTitle className="flex items-center gap-2 text-sm font-semibold"><ShieldAlert className="size-4 text-brand" />账号列表</CardTitle>}
+          description={accountListOpen ? <p className="mt-1 truncate text-xs text-muted-foreground">展示非 OAuth 账号的调度、成本、销售分组与风险；成本覆盖优先于实时探测。</p> : null}
+          summary={accountListOpen ? <div className="flex flex-wrap items-center gap-3" aria-live="polite"><div className="flex min-w-0 items-center gap-2"><span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-amber-400/15 text-amber-600 dark:text-amber-400"><Box className="size-4" /></span><div><p className="text-[10px] text-muted-foreground">总 Token</p><p className="font-mono text-sm font-semibold tabular-nums text-foreground">{usage.loading && !usage.data ? "读取中…" : compactNumber.format(usageTotals.tokens)}</p></div></div><div className="flex min-w-0 items-center gap-2"><span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-success/10 text-success"><CircleDollarSign className="size-4" /></span><div><p className="text-[10px] text-muted-foreground">总消费</p><p className="font-mono text-sm font-semibold tabular-nums text-success">{usage.loading && !usage.data ? "读取中…" : chargeAmount(usageTotals.charge)}</p></div></div><div className="flex min-w-0 items-center gap-2"><span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground"><Users className="size-4" /></span><div><p className="text-[10px] text-muted-foreground">账号数量</p><p className="font-mono text-sm font-semibold tabular-nums text-foreground">{filteredAccounts.length} / {managedAccounts.length}</p></div></div><div className="flex min-w-0 items-center gap-2"><span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-brand/10 text-brand"><ListChecks className="size-4" /></span><div><p className="text-[10px] text-muted-foreground">可调组</p><p className="font-mono text-sm font-semibold tabular-nums text-foreground">{filteredSuggestionCount}</p></div></div><div className="flex min-w-0 items-center gap-2"><span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-warning/10 text-warning"><TrendingDown className="size-4" /></span><div><p className="text-[10px] text-muted-foreground">可降级</p><p className="font-mono text-sm font-semibold tabular-nums text-foreground">{filteredDowngradeCount}</p></div></div></div> : null}
+          actions={accountListOpen ? <>{accountViewMode === "gallery" ? <div className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-md border border-border px-2.5 text-xs text-muted-foreground sm:h-9" title="全选当前筛选账号；图册展示每个账号最近 60 次调用和 60 段趋势"><Checkbox checked={allFilteredSelected} onCheckedChange={(value) => { const ids = filteredAccounts.map((account) => account.external_id); setSelected((current) => value === true ? Array.from(new Set([...current, ...ids])) : current.filter((id) => !ids.includes(id))) }} aria-label="全选当前筛选账号" /><span>全选当前筛选</span><span className="font-mono text-[10px] tabular-nums text-foreground">{filteredAccounts.length}</span><span className="hidden font-mono text-[10px] text-muted-foreground min-[1920px]:inline">60 次 / 60 段</span></div> : null}<DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="sm" variant="outline" className="h-11 gap-1.5 text-xs sm:h-9"><ListChecks className="size-3.5" />批量操作</Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-64"><DropdownMenuLabel className="text-xs text-muted-foreground">账号批量操作</DropdownMenuLabel><DropdownMenuItem disabled={busy || !cloneableAccounts.length} onSelect={openBatchClone}><Plus className="size-3.5" />批量新增账号</DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem disabled={busy || filteredEnableCount === 0} onSelect={() => void runFilteredAccountAction("schedulable", true, "一键启用调度")}><Power className="size-3.5" />批量启用调度 <span className="ml-auto text-xs text-muted-foreground">{filteredEnableCount}</span></DropdownMenuItem><DropdownMenuItem disabled={busy || filteredDisableCount === 0} onSelect={() => void runFilteredAccountAction("schedulable", false, "一键禁用调度")}><PowerOff className="size-3.5" />批量禁用调度 <span className="ml-auto text-xs text-muted-foreground">{filteredDisableCount}</span></DropdownMenuItem><DropdownMenuSeparator /><DropdownMenuItem disabled={busy || filteredSuggestionCount === 0} onSelect={() => void runFilteredAccountAction("apply-suggestions", undefined, "接受推荐调组")}><ListChecks className="size-3.5" />接受推荐调组 <span className="ml-auto text-xs text-muted-foreground">{filteredSuggestionCount}</span></DropdownMenuItem><DropdownMenuItem disabled={busy || filteredDowngradeCount === 0} onSelect={() => void runFilteredAccountAction("add-downgrades", undefined, "接受推荐降级")}><TrendingDown className="size-3.5" />接受推荐降级 <span className="ml-auto text-xs text-muted-foreground">{filteredDowngradeCount}</span></DropdownMenuItem></DropdownMenuContent></DropdownMenu></> : null}
+          secondary={accountListOpen ? <><DebouncedAccountSearchInput initialValue={accountNameFilter} resetVersion={accountSearchResetVersion} onValueChange={setAccountNameFilter} /><DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="sm" variant="outline" className="h-11 gap-1.5 text-xs sm:h-9"><SlidersHorizontal className="size-3.5" />筛选{activeAccountFilterCount > 0 ? <span className="rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand">{activeAccountFilterCount}</span> : null}</Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-56"><DropdownMenuLabel className="text-xs text-muted-foreground">账号筛选</DropdownMenuLabel><DropdownMenuSeparator /><DropdownMenuSub><DropdownMenuSubTrigger>模型类型</DropdownMenuSubTrigger><DropdownMenuSubContent className="w-52"><DropdownMenuRadioGroup value={modelTypeFilter} onValueChange={setModelTypeFilter}><DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem><DropdownMenuRadioItem value="__unassigned">未绑定模型类型</DropdownMenuRadioItem>{accountModelTypeOptions.map((value) => <DropdownMenuRadioItem key={value} value={value}>{value}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup></DropdownMenuSubContent></DropdownMenuSub><DropdownMenuSub><DropdownMenuSubTrigger>调度状态</DropdownMenuSubTrigger><DropdownMenuSubContent className="w-44"><DropdownMenuRadioGroup value={schedulableFilter} onValueChange={(value) => setSchedulableFilter(value as "enabled" | "disabled" | "all")}><DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem><DropdownMenuRadioItem value="enabled">调度开启</DropdownMenuRadioItem><DropdownMenuRadioItem value="disabled">调度关闭</DropdownMenuRadioItem></DropdownMenuRadioGroup></DropdownMenuSubContent></DropdownMenuSub><DropdownMenuSub><DropdownMenuSubTrigger>账号状态</DropdownMenuSubTrigger><DropdownMenuSubContent className="w-48"><DropdownMenuRadioGroup value={riskFilter} onValueChange={(value) => setRiskFilter(value as RiskFilter)}><DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem><DropdownMenuRadioItem value="adjustable">可调组</DropdownMenuRadioItem><DropdownMenuRadioItem value="downgradable">可降级</DropdownMenuRadioItem>{Object.entries(stateMeta).map(([value, meta]) => <DropdownMenuRadioItem key={value} value={value}>{meta.label}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup></DropdownMenuSubContent></DropdownMenuSub><DropdownMenuSub><DropdownMenuSubTrigger>销售分组</DropdownMenuSubTrigger><DropdownMenuSubContent className="max-h-80 w-64 overflow-y-auto"><DropdownMenuRadioGroup value={groupFilter} onValueChange={setGroupFilter}><DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>{publicFirst(currentOverview.groups).map((group) => <DropdownMenuRadioItem key={group.external_id} value={String(group.external_id)}>{group.name} · {group.platform || "-"}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup></DropdownMenuSubContent></DropdownMenuSub><DropdownMenuSeparator /><DropdownMenuItem disabled={!hasActiveAccountFilters} onSelect={resetFilters}><RotateCcw className="size-3.5" />清除筛选与搜索</DropdownMenuItem></DropdownMenuContent></DropdownMenu><DropdownMenu><DropdownMenuTrigger asChild><Button type="button" size="sm" variant="outline" className="h-11 gap-1.5 text-xs sm:h-9">排序：{accountSortOptions.find((item) => item.value === accountSort?.key)?.label ?? "综合评分"}{accountSort?.direction === "asc" ? <ArrowUp className="size-3.5" /> : <ArrowDown className="size-3.5" />}</Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-56"><DropdownMenuLabel className="text-xs text-muted-foreground">排序维度</DropdownMenuLabel><DropdownMenuRadioGroup value={accountSort?.key ?? "score"} onValueChange={(value) => { const key = value as AccountSortKey; setAccountSort({ key, direction: defaultAccountSortDirection(key) }) }}>{accountSortOptions.map((item) => <DropdownMenuRadioItem key={item.value} value={item.value}>{item.label}</DropdownMenuRadioItem>)}</DropdownMenuRadioGroup><DropdownMenuSeparator /><DropdownMenuLabel className="text-xs text-muted-foreground">排序方向</DropdownMenuLabel><DropdownMenuRadioGroup value={accountSort?.direction ?? "desc"} onValueChange={(value) => setAccountSort((current) => ({ key: current?.key ?? "score", direction: value as SortDirection }))}><DropdownMenuRadioItem value="desc"><ArrowDown className="size-3.5" />降序（高 → 低 / 新 → 旧）</DropdownMenuRadioItem><DropdownMenuRadioItem value="asc"><ArrowUp className="size-3.5" />升序（低 → 高 / 旧 → 新）</DropdownMenuRadioItem></DropdownMenuRadioGroup></DropdownMenuContent></DropdownMenu><div className="inline-flex items-center rounded-md border border-border bg-muted/20 p-0.5" aria-label="账号列表展示模式"><Button type="button" size="sm" variant={accountViewMode === "gallery" ? "secondary" : "ghost"} className="h-8 gap-1.5 px-2.5 text-xs shadow-none" aria-pressed={accountViewMode === "gallery"} onClick={() => setAccountViewMode("gallery")}><LayoutGrid className="size-3.5" />图册</Button><Button type="button" size="sm" variant={accountViewMode === "list" ? "secondary" : "ghost"} className="h-8 gap-1.5 px-2.5 text-xs shadow-none" aria-pressed={accountViewMode === "list"} onClick={() => setAccountViewMode("list")}><List className="size-3.5" />列表</Button></div>{accountViewMode === "list" ? <DropdownMenu><DropdownMenuTrigger asChild><Button type="button" variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><Columns3 className="size-3.5" />列设置</Button></DropdownMenuTrigger><DropdownMenuContent align="end" className="w-48"><DropdownMenuLabel>账号列表列</DropdownMenuLabel><DropdownMenuSeparator />{accountColumnDefinitions.map((column) => <DropdownMenuCheckboxItem key={column.key} checked={visibleAccountColumns.has(column.key)} onSelect={(event) => event.preventDefault()} onCheckedChange={(checked) => setVisibleAccountColumns((current) => { const next = new Set(current); if (checked === true) next.add(column.key); else if (next.size > 1) next.delete(column.key); return next })}>{column.label}</DropdownMenuCheckboxItem>)}<DropdownMenuSeparator /><DropdownMenuItem onSelect={() => setVisibleAccountColumns(new Set(defaultAccountColumns))}>恢复默认列</DropdownMenuItem></DropdownMenuContent></DropdownMenu> : null}<Button type="button" variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy || overview.refreshing || usage.refreshing || scoreLatencyBuckets.refreshing || latencyBuckets.refreshing || accountConsumptionBuckets.refreshing} onClick={() => void refreshAccounts()}><RefreshCw className={cn("size-3.5", (overview.refreshing || usage.refreshing || scoreLatencyBuckets.refreshing || latencyBuckets.refreshing || accountConsumptionBuckets.refreshing) && "animate-spin")} />刷新</Button></> : null}
+          meta={<><div className="flex min-w-0 flex-wrap items-center justify-end gap-2">{accountListOpen ? <>{usage.loading ? <span className="flex items-center gap-1 text-xs text-muted-foreground" aria-live="polite"><RefreshCw className="size-3 animate-spin" />消费统计读取中</span> : usage.error ? <span className="max-w-[min(34rem,50vw)] text-right text-xs leading-5 text-danger" title={usage.error}>消费统计读取失败</span> : usage.data && !usage.data.complete ? <span className="max-w-[min(38rem,50vw)] text-right text-xs leading-5 text-warning">有 {usage.data.failed_accounts} 个账号的区间消费读取失败，账号卡片中的消费数据可能不完整。</span> : null}</> : null}<Button type="button" variant="ghost" size="icon" className="size-11 sm:size-9 shrink-0" aria-label={accountListOpen ? "收起账号列表" : "展开账号列表"} aria-expanded={accountListOpen} onClick={() => setAccountListOpen((value) => !value)}><ChevronDown className={cn("size-4 transition-transform duration-200", accountListOpen && "rotate-180")} /></Button></div></>}
+        ></ListPanelHeader>
         {accountListOpen ? <CardContent className="border-t border-border p-0">
           {selected.length ? <div className="border-b border-brand/20 bg-brand/5 px-4 py-2.5"><div className="flex flex-wrap items-center gap-2"><div className="mr-2 flex items-center gap-2 text-xs font-medium text-brand"><Users className="size-4" />已选 {selected.length} 个账号</div><Select value={batchMode} onValueChange={(value) => { setBatchMode(value as BatchMode); setBatchRuntimeValue("") }}><SelectTrigger className="h-9 w-40 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="groups">批量调整分组</SelectItem><SelectItem value="model_type">设置模型类型</SelectItem><SelectItem value="concurrency">设置并发数</SelectItem><SelectItem value="priority">设置优先级</SelectItem><SelectItem value="retry_count">设置同账号重试次数</SelectItem><SelectItem value="channel_group">渠道分组绑定</SelectItem><SelectItem value="manual">手工设置倍率</SelectItem></SelectContent></Select>{batchMode === "model_type" ? <><Select value={batchModelType || "__empty"} onValueChange={(value) => setBatchModelType(value === "__empty" ? "" : value)}><SelectTrigger className="h-9 w-44 text-xs"><SelectValue placeholder="选择模型类型" /></SelectTrigger><SelectContent><SelectItem value="__empty">清除类型</SelectItem>{modelTypeOptions.map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><Button size="sm" className="h-9 gap-1.5" disabled={busy} onClick={() => void saveBatchModelType()}><Save className="size-3.5" />保存</Button></> : batchMode === "channel_group" ? <><Select value={batchChannelID} onValueChange={(value) => { setBatchChannelID(value); setBatchGroup("") }}><SelectTrigger className="h-9 w-48 text-xs"><SelectValue placeholder="选择当前渠道" /></SelectTrigger><SelectContent>{currentOverview.monitor_channels.map((channel) => <SelectItem key={channel.id} value={String(channel.id)}>{channel.name}</SelectItem>)}</SelectContent></Select><Select value={batchGroup} onValueChange={(value) => setBatchGroup(value)} disabled={!batchChannelID}><SelectTrigger className="h-9 w-52 text-xs"><SelectValue placeholder="选择渠道分组" /></SelectTrigger><SelectContent>{batchGroups.map((group) => <SelectItem key={group} value={group}>{group}</SelectItem>)}</SelectContent></Select></> : batchMode === "manual" ? <Input className="h-9 w-44 font-mono text-xs" inputMode="decimal" value={batchMultiplier} onChange={(event) => setBatchMultiplier(event.target.value)} placeholder="成本倍率，如 0.8" /> : batchMode === "concurrency" || batchMode === "priority" || batchMode === "retry_count" ? <Input className="h-9 w-36 font-mono text-xs" inputMode="numeric" value={batchRuntimeValue} onChange={(event) => setBatchRuntimeValue(event.target.value)} placeholder={batchMode === "retry_count" ? "同账号重试次数 0-10" : batchMode === "concurrency" ? "并发数 1-1000" : "优先级 1-1000"} aria-label={batchMode === "retry_count" ? "批量设置同账号重试次数" : batchMode === "concurrency" ? "批量设置并发数" : "批量设置优先级"} /> : <Button size="sm" variant="outline" className="h-9 gap-1.5" disabled={busy} onClick={() => setBatchGroupDialogOpen(true)}><SlidersHorizontal className="size-3.5" />选择销售分组</Button>}{batchMode === "groups" || batchMode === "model_type" ? null : batchMode === "concurrency" || batchMode === "priority" || batchMode === "retry_count" ? <Button size="sm" className="h-9 gap-1.5" disabled={busy} onClick={() => void saveBatchRuntimeSettings()}><Save className="size-3.5" />保存</Button> : <><Button size="sm" className="h-9 gap-1.5" disabled={busy} onClick={() => void saveBatchOverride()}><Save className="size-3.5" />保存覆盖</Button><Button size="sm" variant="outline" className="h-9 gap-1.5" disabled={busy} onClick={() => void saveBatchOverride(true)}><X className="size-3.5" />清除覆盖</Button></>}</div></div> : null}
-          <div className="relative isolate h-[min(72vh,760px)]">{overview.refreshing || usage.refreshing ? <div className="pointer-events-none absolute inset-x-0 top-10 z-50 flex justify-center"><span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><RefreshCw className="size-3.5 animate-spin text-brand" />正在刷新账号列表</span></div> : null}<div className="h-full overflow-auto"><div className="relay-account-grid sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-muted px-4 py-2 text-[11px] text-foreground/90 font-medium lg:grid lg:gap-0 lg:p-0 lg:[&>*]:px-4 lg:[&>*]:py-2"><span className="fixed-column-shadow-desktop fixed-column-shadow-left lg:sticky lg:left-0 lg:z-40 lg:flex lg:self-stretch lg:items-center lg:bg-muted"><Checkbox checked={allFilteredSelected} onCheckedChange={(value) => { const ids = filteredAccounts.map((account) => account.external_id); setSelected((current) => value === true ? Array.from(new Set([...current, ...ids])) : current.filter((id) => !ids.includes(id))) }} aria-label="选择筛选结果" /></span><span className="fixed-column-shadow-desktop fixed-column-shadow-left hidden lg:sticky lg:left-[64px] lg:z-40 lg:flex lg:self-stretch lg:items-center lg:bg-muted">账号</span><span className="hidden lg:inline">平台</span><span className="hidden lg:inline">并发数</span><span className="hidden lg:inline" title="Sub2API 实时并发占用 / 并发上限">容量</span><SortButton label="优先级" title="数值越小调度优先级越高" active={accountSort?.key === "priority"} direction={accountSort?.key === "priority" ? accountSort.direction : undefined} onClick={() => toggleAccountSort("priority", "asc")} className="hidden lg:inline-flex" /><span className="hidden lg:inline" title="池模式下同一账号的失败重试次数">重试次数</span><span className="hidden lg:inline">调度</span><span className="hidden lg:inline-flex items-center gap-1">模型类型<ModelTypeHelp /></span><SortButton label="最近调用" title="综合最近调用的首字时间和总耗时排序，升序更流畅" active={accountSort?.key === "latency"} direction={accountSort?.key === "latency" ? accountSort.direction : undefined} onClick={() => toggleAccountSort("latency", "asc")} className="hidden lg:inline-flex" /><SortButton label="区间消费" active={accountSort?.key === "usage"} direction={accountSort?.key === "usage" ? accountSort.direction : undefined} onClick={() => toggleAccountSort("usage", "desc")} className="hidden lg:inline-flex" /><SortButton label="成本" active={accountSort?.key === "cost"} direction={accountSort?.key === "cost" ? accountSort.direction : undefined} onClick={() => toggleAccountSort("cost", "desc")} className="hidden lg:inline-flex" /><span className="hidden lg:inline">当前销售分组</span><span className="hidden lg:inline">风险</span><span className="hidden lg:inline" title="利润率 = (销售倍率 - 成本倍率) / 成本倍率">利润</span><span className="hidden lg:inline" title="存在倍率低于当前销售分组且仍高于账号成本的可用分组">可降级</span><span className="fixed-column-shadow-desktop fixed-column-shadow-right hidden lg:sticky lg:right-0 lg:z-50 lg:flex lg:self-stretch lg:items-center lg:justify-end lg:bg-muted">操作</span><span className="ml-auto lg:hidden">当前筛选 {filteredAccounts.length} 个</span></div>
-          {filteredAccounts.length === 0 ? <div className="px-4 py-10 text-center text-sm text-muted-foreground">当前筛选没有账号</div> : filteredAccounts.map((account) => <RiskRow key={account.external_id} account={account} overview={currentOverview} selected={selected.includes(account.external_id)} busy={busy} scheduling={schedulingAccountID === account.external_id} probing={probingAccountID === account.external_id} testing={testingAccountID === account.external_id} deleting={deletingAccountID === account.external_id} onToggle={(checked) => setSelected((current) => checked ? [...new Set([...current, account.external_id])] : current.filter((id) => id !== account.external_id))} onApply={() => void applySuggestion(account)} onAddDowngrade={() => void addDowngradeGroups(account)} onEditGroups={() => setGroupEditor(account)} onSchedulableChange={(checked) => void setSchedulable(account, checked)} onProbe={() => void probeAccount(account)} onTest={() => void openAccountTest(account)} onDelete={() => void deleteAccount(account)} />)}</div></div>
+          {accountViewMode === "gallery" ? <div className="relative p-3">{overview.refreshing || usage.refreshing || scoreLatencyBuckets.refreshing || latencyBuckets.refreshing || accountConsumptionBuckets.refreshing ? <div className="pointer-events-none absolute inset-x-0 top-4 z-50 flex justify-center"><span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background/90 px-3 py-1 text-xs text-muted-foreground shadow-sm"><RefreshCw className="size-3.5 animate-spin text-brand" />正在刷新账号图册</span></div> : null}{filteredAccounts.length === 0 ? <div className="px-4 py-10 text-center text-sm text-muted-foreground">当前筛选没有账号</div> : <div className="grid grid-cols-1 items-stretch gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">{filteredAccounts.map((account) => <RelayAccountGalleryCard key={account.external_id} account={account} overview={currentOverview} selected={selected.includes(account.external_id)} busy={busy} scheduling={schedulingAccountID === account.external_id} probing={probingAccountID === account.external_id} testing={testingAccountID === account.external_id} deleting={deletingAccountID === account.external_id} stationID={selectedID!} latencyGranularity={latencyGranularity} stabilityBuckets={latencyBucketsByAccount.get(account.external_id) ?? []} stabilityLoading={latencyBuckets.loading} consumptionBuckets={consumptionBucketsByAccount.get(account.external_id) ?? []} consumptionLoading={accountConsumptionBuckets.loading} channelLinks={channelLinksByRelayAccount.get(relayAccountComparisonKey(selectedID!, account.external_id)) ?? []} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} channelConsumptionBucketsByChannel={channelConsumptionBucketsByChannel} healthScore={healthScoreByAccount.get(account.external_id) ?? null} onToggle={(checked) => setSelected((current) => checked ? [...new Set([...current, account.external_id])] : current.filter((id) => id !== account.external_id))} onApply={() => void applySuggestion(account)} onAddDowngrade={() => void addDowngradeGroups(account)} onEditGroups={() => setGroupEditor(account)} onSchedulableChange={(checked) => void setSchedulable(account, checked)} onProbe={() => void probeAccount(account)} onTest={() => void openAccountTest(account)} onDelete={() => void deleteAccount(account)} />)}</div>}</div> : null}
+          {accountViewMode === "list" ? <div className="relative isolate h-[min(72vh,760px)]">{overview.refreshing || usage.refreshing || scoreLatencyBuckets.refreshing || latencyBuckets.refreshing || accountConsumptionBuckets.refreshing ? <div className="pointer-events-none absolute inset-x-0 top-10 z-50 flex justify-center"><span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><RefreshCw className="size-3.5 animate-spin text-brand" />正在刷新账号列表</span></div> : null}<div data-relay-account-scroll className="h-full overflow-auto"><div style={accountTableGridStyle} className="relay-account-grid sticky top-0 z-40 flex items-center gap-3 border-b border-border bg-muted px-4 py-2 text-[11px] text-foreground/90 font-medium lg:grid lg:gap-0 lg:p-0 lg:[&>*]:px-4 lg:[&>*]:py-2"><span className="fixed-column-shadow-desktop fixed-column-shadow-left lg:sticky lg:left-0 lg:z-40 lg:flex lg:self-stretch lg:items-center lg:bg-muted"><Checkbox checked={allFilteredSelected} onCheckedChange={(value) => { const ids = filteredAccounts.map((account) => account.external_id); setSelected((current) => value === true ? Array.from(new Set([...current, ...ids])) : current.filter((id) => !ids.includes(id))) }} aria-label="选择筛选结果" /></span><span className="fixed-column-shadow-desktop fixed-column-shadow-left hidden lg:sticky lg:left-[64px] lg:z-40 lg:flex lg:self-stretch lg:items-center lg:bg-muted">账号</span>{visibleAccountColumns.has("score") ? <span className="hidden lg:inline">综合评分</span> : null}{visibleAccountColumns.has("platform") ? <span className="hidden lg:inline">平台</span> : null}{visibleAccountColumns.has("concurrency") ? <span className="hidden lg:inline">并发数</span> : null}{visibleAccountColumns.has("capacity") ? <span className="hidden lg:inline" title="Sub2API 实时并发占用 / 并发上限">容量</span> : null}{visibleAccountColumns.has("priority") ? <span className="hidden lg:inline" title="数值越小调度优先级越高">优先级</span> : null}{visibleAccountColumns.has("retry") ? <span className="hidden lg:inline" title="池模式下同一账号的失败重试次数">重试次数</span> : null}{visibleAccountColumns.has("schedulable") ? <span className="hidden lg:inline">调度</span> : null}{visibleAccountColumns.has("model") ? <span className="hidden lg:inline-flex items-center gap-1">模型类型<ModelTypeHelp /></span> : null}{visibleAccountColumns.has("recent") ? <span className="hidden lg:inline">最近调用</span> : null}{visibleAccountColumns.has("stability") ? <span className="hidden lg:inline">时间稳定性</span> : null}{visibleAccountColumns.has("usage") ? <span className="hidden lg:inline">区间消费</span> : null}{visibleAccountColumns.has("consumption_trend") ? <span className="hidden lg:inline">消费趋势</span> : null}{visibleAccountColumns.has("cost") ? <span className="hidden lg:inline">成本</span> : null}{visibleAccountColumns.has("groups") ? <span className="hidden lg:inline">当前销售分组</span> : null}{visibleAccountColumns.has("risk") ? <span className="hidden lg:inline">风险</span> : null}{visibleAccountColumns.has("profit") ? <span className="hidden lg:inline" title="利润率 = (销售倍率 - 成本倍率) / 成本倍率">利润</span> : null}{visibleAccountColumns.has("downgrade") ? <span className="hidden lg:inline" title="存在倍率低于当前销售分组且仍高于账号成本的可用分组">可降级</span> : null}<span className="fixed-column-shadow-desktop fixed-column-shadow-right hidden lg:sticky lg:right-0 lg:z-50 lg:flex lg:self-stretch lg:items-center lg:justify-end lg:bg-muted">操作</span><span className="ml-auto lg:hidden">当前筛选 {filteredAccounts.length} 个</span></div>
+          {filteredAccounts.length === 0 ? <div className="px-4 py-10 text-center text-sm text-muted-foreground">当前筛选没有账号</div> : filteredAccounts.map((account) => <RiskRow key={account.external_id} account={account} overview={currentOverview} selected={selected.includes(account.external_id)} busy={busy} scheduling={schedulingAccountID === account.external_id} probing={probingAccountID === account.external_id} testing={testingAccountID === account.external_id} deleting={deletingAccountID === account.external_id} stationID={selectedID!} latencyGranularity={latencyGranularity} stabilityBuckets={latencyBucketsByAccount.get(account.external_id) ?? []} stabilityLoading={latencyBuckets.loading} consumptionBuckets={consumptionBucketsByAccount.get(account.external_id) ?? []} consumptionLoading={accountConsumptionBuckets.loading} channelLinks={channelLinksByRelayAccount.get(relayAccountComparisonKey(selectedID!, account.external_id)) ?? []} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} channelConsumptionBucketsByChannel={channelConsumptionBucketsByChannel} healthScore={healthScoreByAccount.get(account.external_id) ?? null} visibleColumns={visibleAccountColumns} gridStyle={accountTableGridStyle} onToggle={(checked) => setSelected((current) => checked ? [...new Set([...current, account.external_id])] : current.filter((id) => id !== account.external_id))} onApply={() => void applySuggestion(account)} onAddDowngrade={() => void addDowngradeGroups(account)} onEditGroups={() => setGroupEditor(account)} onSchedulableChange={(checked) => void setSchedulable(account, checked)} onProbe={() => void probeAccount(account)} onTest={() => void openAccountTest(account)} onDelete={() => void deleteAccount(account)} />)}</div></div> : null}
         </CardContent> : null}
       </Card> : null}
 
