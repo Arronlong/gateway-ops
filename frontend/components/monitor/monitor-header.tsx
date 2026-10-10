@@ -11,7 +11,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth-context"
 import { useTriggerRefresh } from "@/lib/refresh-context"
-import { useChannels } from "@/lib/queries"
+import { useChannels, useSystemSettings } from "@/lib/queries"
 import { relativeTime } from "@/lib/format"
 import {
   DropdownMenu,
@@ -26,7 +26,8 @@ export function MonitorHeader() {
   const { theme, setTheme } = useTheme()
   const { username, authDisabled, logout } = useAuth()
   const refresh = useTriggerRefresh()
-  const channels = useChannels()
+  const channels = useChannels(false)
+  const systemSettings = useSystemSettings()
   const location = useLocation()
   const [mounted, setMounted] = useState(false)
   const [syncing, setSyncing] = useState(false)
@@ -58,9 +59,11 @@ export function MonitorHeader() {
     setTimeout(() => setSyncing(false), 800)
   }
 
+  const channelPageEnabled = systemSettings.data?.channels_page_enabled === true
+  const operationsManagementEnabled = systemSettings.data?.operations_management_enabled === true
   const navItems = [
     { to: "/", label: "首页", icon: Home, end: true },
-    { to: "/channels", label: "渠道管理", icon: LayoutList },
+    ...(channelPageEnabled ? [{ to: "/channels", label: "渠道管理", icon: LayoutList }] : []),
     { to: "/relay-stations", label: "中转站管理", icon: Server },
   ]
 
@@ -103,6 +106,20 @@ export function MonitorHeader() {
               {item.label}
             </NavLink>
           ))}
+          {operationsManagementEnabled ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className={cn("inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors hover:bg-muted/60 hover:text-foreground", operationActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")} aria-label="运营管理菜单">
+                  <WalletCards className="size-3.5" />运营管理<ChevronDown className="size-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-40">
+                <DropdownMenuLabel>运营管理</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                {operationItems.map((item) => <DropdownMenuItem key={item.to} asChild><Link to={item.to}><item.icon />{item.label}</Link></DropdownMenuItem>)}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button type="button" className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" aria-label="状态监控菜单">
@@ -146,6 +163,20 @@ export function MonitorHeader() {
               </div>
 
               <DropdownMenuSeparator className="my-2" />
+              {operationsManagementEnabled ? (
+                <>
+                  <DropdownMenuLabel className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-foreground">
+                    <span className="flex size-7 items-center justify-center rounded-md bg-brand/10 text-brand"><WalletCards className="size-3.5" /></span>
+                    运营管理
+                  </DropdownMenuLabel>
+                  <div className="ml-3 space-y-0.5 border-l border-border pl-3">
+                    {operationItems.map((item) => {
+                      const active = isPathActive(item.to)
+                      return <DropdownMenuItem key={item.to} asChild className={cn("min-h-11 rounded-md px-3 sm:min-h-9", active && "bg-muted font-medium text-foreground")}><Link to={item.to}><item.icon />{item.label}{active ? <span className="ml-auto text-[10px] font-medium text-brand">当前</span> : null}</Link></DropdownMenuItem>
+                    })}
+                  </div>
+                </>
+              ) : null}
               <DropdownMenuLabel className="flex items-center gap-2 px-2 py-1.5 text-xs font-semibold text-foreground">
                 <span className="flex size-7 items-center justify-center rounded-md bg-brand/10 text-brand"><Activity className="size-3.5" /></span>
                 状态监控

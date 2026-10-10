@@ -72,7 +72,7 @@ export default function Page() {
 
   return (
     <section className="space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
+      <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
         <div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><Activity className="size-5 text-brand" />{"运营总览"}</h1><p className="mt-1 text-xs text-muted-foreground">{"汇总渠道余额、倍率变化、中转站账号风险和经营收支；账本记录请在成本管理中维护。"}</p></div>
         <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="统计时间范围">{ranges.map((item) => <button key={item.value} type="button" onClick={() => setRange(item.value)} className={cn("h-11 rounded px-3 text-xs transition-colors sm:h-8", range === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>{item.label}</button>)}</div>
       </header>

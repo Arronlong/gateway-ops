@@ -1,8 +1,9 @@
 "use client"
 
-import { Outlet } from "react-router-dom"
+import { Outlet, useLocation } from "react-router-dom"
 import { MonitorHeader } from "@/components/monitor/monitor-header"
 import { DockBar } from "@/components/monitor/dock-bar"
+import { PageErrorBoundary } from "@/components/ui/page-error-boundary"
 
 /**
  * AppShell 是所有路由共享的外壳：顶部 header + 中间 Outlet（+ 可选底部 dock）。
@@ -13,6 +14,7 @@ import { DockBar } from "@/components/monitor/dock-bar"
 const SHOW_DOCK = false
 
 export function AppShell() {
+  const location = useLocation()
   return (
     <div className="min-h-screen bg-background">
       <MonitorHeader />
@@ -23,7 +25,9 @@ export function AppShell() {
             : "w-full space-y-4 px-6 py-4"
         }
       >
-        <Outlet />
+        <PageErrorBoundary resetKey={location.pathname + location.search}>
+          <Outlet />
+        </PageErrorBoundary>
       </main>
       {SHOW_DOCK ? <DockBar /> : null}
       <footer className="px-6 pb-5 pt-2 text-center text-[11px] text-muted-foreground">
