@@ -45,6 +45,22 @@ interface FetchOptions extends RequestInit {
   skipAuthErrorHandler?: boolean
 }
 
+function waitBeforeRetry(delayMs: number, signal?: AbortSignal) {
+  if (signal?.aborted) return Promise.reject(new DOMException("The operation was aborted", "AbortError"))
+  return new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort)
+      resolve()
+    }, delayMs)
+    const onAbort = () => {
+      clearTimeout(timer)
+      signal?.removeEventListener("abort", onAbort)
+      reject(new DOMException("The operation was aborted", "AbortError"))
+    }
+    signal?.addEventListener("abort", onAbort, { once: true })
+  })
+}
+
 /**
  * apiFetch 自动拼 /api 前缀、加 Authorization 头、统一解包 { data } 或抛错。
  */
@@ -72,8 +88,8 @@ export async function apiFetch<T = unknown>(
     res = await fetch(url, requestOptions)
   } catch (error) {
     const method = (options.method ?? "GET").toUpperCase()
-    if (method !== "GET" || !(error instanceof TypeError)) throw error
-    await new Promise((resolve) => setTimeout(resolve, 450))
+    if (options.signal?.aborted || method !== "GET" || !(error instanceof TypeError)) throw error
+    await waitBeforeRetry(450, options.signal ?? undefined)
     res = await fetch(url, requestOptions)
   }
 
