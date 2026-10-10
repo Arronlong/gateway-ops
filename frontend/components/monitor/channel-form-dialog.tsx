@@ -27,17 +27,20 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import type { BalanceMode, CaptchaConfig, Channel, ChannelType, CredentialMode, RequestKV } from "@/lib/api-types"
+import type { BalanceMode, CaptchaConfig, Channel, ChannelRelayAssociationSnapshot, ChannelType, CredentialMode, RequestKV } from "@/lib/api-types"
 import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { useCaptchaConfigs } from "@/lib/queries"
 import { cn } from "@/lib/utils"
+import { ChannelRelayAssociationEditor } from "@/components/monitor/channel-relay-association-editor"
 
 interface ChannelFormDialogProps {
   open: boolean
   onOpenChange: (v: boolean) => void
   /** 编辑模式时传入；为空表示新增 */
   channel?: Channel | null
+  associationSnapshot?: ChannelRelayAssociationSnapshot | null
+  onAssociationChanged?: () => Promise<void>
 }
 
 /**
@@ -273,7 +276,7 @@ function buildAdditionalAccountPayloads(accounts: AdditionalAccountForm[], type:
   })
 }
 
-export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDialogProps) {
+export function ChannelFormDialog({ open, onOpenChange, channel, associationSnapshot, onAssociationChanged }: ChannelFormDialogProps) {
   const [form, setForm] = useState<FormState>(() => initialState(channel))
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -499,7 +502,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="remark">备注（可选）</Label>
+            <Label htmlFor="remark">渠道备注（可选）</Label>
             <Input
               id="remark"
               value={form.remark}
@@ -637,19 +640,19 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
           {!isManualBalance && isTokenMode ? (
             <>
               <div className="space-y-1.5">
-                <Label htmlFor="username-display">备注（可选）</Label>
+                <Label htmlFor="username-display">账号标识 / 展示名称（可选）</Label>
                 <Input
                   id="username-display"
                   name="gatewayops-channel-username-display"
                   autoComplete="off"
                   data-lpignore="true"
-                  placeholder="如：worry@example.com"
+                  placeholder="如：worry@example.com 或板栗 API 主账号"
                   value={form.username}
                   onChange={(e) => setForm({ ...form, username: e.target.value })}
                   disabled={submitting}
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  仅作展示，不参与鉴权
+                  Token 模式下不参与鉴权；自动关联会使用此标识匹配中转站账号身份
                 </p>
               </div>
 
@@ -861,6 +864,15 @@ export function ChannelFormDialog({ open, onOpenChange, channel }: ChannelFormDi
                 </div>
               ) : null}
             </>
+          ) : null}
+
+          {channel && onAssociationChanged ? (
+            <ChannelRelayAssociationEditor
+              channel={channel}
+              snapshot={associationSnapshot ?? null}
+              disabled={submitting}
+              onChanged={onAssociationChanged}
+            />
           ) : null}
 
           {error ? (

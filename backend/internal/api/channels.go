@@ -23,6 +23,7 @@ func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp.GET("", func(c *gin.Context) { listChannels(c, d) })
 	gp.GET("/metrics", func(c *gin.Context) { channelMetrics(c, d) })
 	gp.GET("/latency-trends", func(c *gin.Context) { channelLatencyTrends(c, d) })
+	gp.GET("/associations", func(c *gin.Context) { channelRelayAssociations(c, d) })
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllChannels(c, d) })
 	gp.POST("", func(c *gin.Context) { createChannel(c, d) })
 	gp.GET("/:id", func(c *gin.Context) { getChannel(c, d) })
@@ -39,6 +40,78 @@ func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp.PUT("/:id/rates/:rate_id", func(c *gin.Context) { updateChannelRate(c, d) })
 	gp.DELETE("/:id/rates/:rate_id", func(c *gin.Context) { deleteChannelRate(c, d) })
 	gp.GET("/:id/balance-history", func(c *gin.Context) { balanceHistory(c, d) })
+	gp.PUT("/:id/accounts/:account_id/relay-links/:station_id", func(c *gin.Context) { updateChannelRelayAssociation(c, d) })
+}
+
+type channelRelayAssociationInput struct {
+	RelayAccountExternalID *int64 `json:"relay_account_external_id"`
+	Mode                   string `json:"mode"`
+}
+
+func channelRelayAssociations(c *gin.Context, d *Deps) {
+	snapshot, err := d.RelayStations.ChannelRelayAssociationSnapshot()
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": snapshot})
+}
+
+func updateChannelRelayAssociation(c *gin.Context, d *Deps) {
+	channelID64, err := strconv.ParseUint(c.Param("id"), 10, 64)
+	if err != nil || channelID64 == 0 {
+		fail(c, http.StatusBadRequest, errors.New("无效的渠道 ID"))
+		return
+	}
+	accountID64, err := strconv.ParseUint(c.Param("account_id"), 10, 64)
+	if err != nil || accountID64 == 0 {
+		fail(c, http.StatusBadRequest, errors.New("无效的渠道账号 ID"))
+		return
+	}
+	stationID64, err := strconv.ParseUint(c.Param("station_id"), 10, 64)
+	if err != nil || stationID64 == 0 {
+		fail(c, http.StatusBadRequest, errors.New("无效的中转站 ID"))
+		return
+	}
+	var input channelRelayAssociationInput
+	if err := c.ShouldBindJSON(&input); err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	mode := strings.TrimSpace(input.Mode)
+	if mode == "" {
+		mode = storage.ChannelRelayLinkModeManual
+	}
+	if err := d.RelayStations.SetChannelRelayAccountLink(
+		uint(channelID64),
+		uint(accountID64),
+		uint(stationID64),
+		input.RelayAccountExternalID,
+		mode,
+	); err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			fail(c, http.StatusNotFound, err)
+			return
+		}
+		if errors.Is(err, gorm.ErrDuplicatedKey) {
+			fail(c, http.StatusConflict, errors.New("该中转站账号已经关联到其他渠道账号"))
+			return
+		}
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	if mode == storage.ChannelRelayLinkModeAuto {
+		if err := d.RelayStations.ReconcileChannelRelayAccountLinks(); err != nil {
+			fail(c, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	snapshot, err := d.RelayStations.ChannelRelayAssociationSnapshot()
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": snapshot})
 }
 
 type channelInput struct {
@@ -354,12 +427,6 @@ func createChannel(c *gin.Context, d *Deps) {
 		fail(c, channelErrorStatus(err), err)
 		return
 	}
-	if created.BalanceMode == storage.BalanceModeManual {
-		if err := d.Relay.ReconcileManualChannelLinks(); err != nil {
-			fail(c, http.StatusInternalServerError, fmt.Errorf("渠道已创建，但自动关联账号失败: %w", err))
-			return
-		}
-	}
 	views, err := channelViews(d, []storage.Channel{*created})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -418,10 +485,6 @@ func updateChannel(c *gin.Context, d *Deps) {
 	})
 	if err != nil {
 		fail(c, channelErrorStatus(err), err)
-		return
-	}
-	if err := d.Relay.ReconcileManualChannelLinks(); err != nil {
-		fail(c, http.StatusInternalServerError, fmt.Errorf("渠道已更新，但同步自动关联账号失败: %w", err))
 		return
 	}
 	views, err := channelViews(d, []storage.Channel{*updated})

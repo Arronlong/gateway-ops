@@ -42,8 +42,8 @@ const (
 // CredentialMode + PasswordCipher 的语义重载：
 //   - password 模式（默认）：Username + PasswordCipher 存账号密码，由 Connector.Login 用
 //   - token    模式：PasswordCipher 存 JSON blob（NewAPI: {cookie,user_id} / Sub2API: {access_token}），
-//     channel.Service 解析后直接构造 AuthSession，跳过 Login。Username 字段在 token 模式下保留
-//     用户填写的备注（一般是邮箱），仅做展示。
+//     channel.Service 解析后直接构造 AuthSession，跳过 Login。Username 字段在 token 模式下保存
+//     用户填写的账号标识或展示名称，不参与 Token 鉴权，但可用于渠道与中转站账号自动关联。
 //
 // 复用 PasswordCipher 而不新增 TokenCipher 是为了让现有的 GORM 行 / 加密路径 / 迁移流程零变动。
 type Channel struct {
@@ -122,6 +122,25 @@ type ChannelAccount struct {
 }
 
 func (ChannelAccount) TableName() string { return "channel_accounts" }
+
+// ChannelRelayAccountLink records the relationship between one channel login
+// account and one relay-station account. A channel account may be linked once
+// per relay station, allowing the same upstream account to exist in multiple
+// relay stations without collapsing those stations together.
+//
+// This relationship is metadata only. Channel monitoring always reads
+// channel-owned usage data and never substitutes relay telemetry.
+type ChannelRelayAccountLink struct {
+	ID                     uint      `gorm:"primaryKey" json:"id"`
+	ChannelAccountID       uint      `gorm:"not null;uniqueIndex:idx_channel_relay_station;index" json:"channel_account_id"`
+	RelayStationID         uint      `gorm:"not null;uniqueIndex:idx_channel_relay_station;index" json:"relay_station_id"`
+	RelayAccountExternalID int64     `gorm:"not null;index" json:"relay_account_external_id"`
+	Mode                   string    `gorm:"size:16;not null;default:'auto';index" json:"mode"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+func (ChannelRelayAccountLink) TableName() string { return "channel_relay_account_links" }
 
 // AuthSession 渠道登录后保存的凭据，按 ChannelID 一对一关联。
 // *Cipher 字段都用 AES-GCM 加密；UserID 是上游账号 ID 字符串（非敏感），明文存放。
@@ -506,22 +525,23 @@ func (RelayChannelPricingChange) TableName() string { return "relay_channel_pric
 // RelayAccount 是从 Sub2API 管理端读取的实际上游账号。RateMultiplier 是该账号
 // 的成本倍率；GroupIDs 通过 RelayAccountGroup 关联到销售分组。
 type RelayAccount struct {
-	ID                 uint   `gorm:"primaryKey" json:"id"`
-	RelayStationID     uint   `gorm:"not null;uniqueIndex:idx_relay_account_external" json:"relay_station_id"`
-	ExternalID         int64  `gorm:"not null;uniqueIndex:idx_relay_account_external" json:"external_id"`
-	Name               string `gorm:"size:256;not null" json:"name"`
-	BaseURL            string `gorm:"size:1024" json:"base_url,omitempty"`
-	Platform           string `gorm:"size:64" json:"platform,omitempty"`
-	Type               string `gorm:"size:64" json:"type,omitempty"`
-	Status             string `gorm:"size:32" json:"status,omitempty"`
-	Schedulable        bool   `json:"schedulable"`
-	Concurrency        int    `gorm:"not null;default:3" json:"concurrency"`
-	CurrentConcurrency int    `gorm:"not null;default:0" json:"current_concurrency"`
-	Priority           int    `gorm:"not null;default:50" json:"priority"`
-	PoolMode           bool   `gorm:"not null;default:false" json:"pool_mode"`
-	PoolModeRetryCount int    `gorm:"not null;default:3" json:"pool_mode_retry_count"`
-	AccountPlan        string `gorm:"size:64" json:"account_plan,omitempty"`
-	ModelType          string `gorm:"size:64" json:"model_type,omitempty"`
+	ID                 uint       `gorm:"primaryKey" json:"id"`
+	RelayStationID     uint       `gorm:"not null;uniqueIndex:idx_relay_account_external" json:"relay_station_id"`
+	ExternalID         int64      `gorm:"not null;uniqueIndex:idx_relay_account_external" json:"external_id"`
+	Name               string     `gorm:"size:256;not null" json:"name"`
+	BaseURL            string     `gorm:"size:1024" json:"base_url,omitempty"`
+	Identity           string     `gorm:"size:256;index" json:"identity,omitempty"`
+	Platform           string     `gorm:"size:64" json:"platform,omitempty"`
+	Type               string     `gorm:"size:64" json:"type,omitempty"`
+	Status             string     `gorm:"size:32" json:"status,omitempty"`
+	Schedulable        bool       `json:"schedulable"`
+	Concurrency        int        `gorm:"not null;default:3" json:"concurrency"`
+	CurrentConcurrency int        `gorm:"not null;default:0" json:"current_concurrency"`
+	Priority           int        `gorm:"not null;default:50" json:"priority"`
+	PoolMode           bool       `gorm:"not null;default:false" json:"pool_mode"`
+	PoolModeRetryCount int        `gorm:"not null;default:3" json:"pool_mode_retry_count"`
+	AccountPlan        string     `gorm:"size:64" json:"account_plan,omitempty"`
+	ModelType          string     `gorm:"size:64" json:"model_type,omitempty"`
 	// This value is populated only from extra.upstream_billing_probe. The
 	// remote accounts.rate_multiplier defaults to 1 and is not upstream cost.
 	RateMultiplier *float64   `json:"rate_multiplier,omitempty"`
