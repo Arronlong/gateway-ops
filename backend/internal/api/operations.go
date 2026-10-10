@@ -19,6 +19,7 @@ var ledgerCategories = map[string]string{
 	"account_purchase":  "expense",
 	"upstream_recharge": "expense",
 	"refund":            "expense",
+	"purchase_refund":   "income",
 	"operating_expense": "expense",
 	"other_expense":     "expense",
 }
@@ -43,6 +44,7 @@ type operationSummaryView struct {
 	Ledger    storage.LedgerSummary           `json:"ledger"`
 	Breakdown []storage.LedgerCategorySummary `json:"breakdown"`
 	LocalPool storage.LocalAccountSummary     `json:"local_pool"`
+	Cost      operationCostMetrics            `json:"cost"`
 }
 
 func operationsSummary(c *gin.Context, d *Deps) {
@@ -52,23 +54,84 @@ func operationsSummary(c *gin.Context, d *Deps) {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
+	channels, err := d.Channels.List()
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	channelBalanceDecrease, err := d.Rates.ChannelConsumptionTotals(since)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	stationExpenses, err := d.Operations.StationExpenseTotals(since)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
 	stations, err := d.RelayStations.List()
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
+	costMetrics := operationCostMetrics{
+		RelayCostComplete:     true,
+		RelayCallCostComplete: true,
+		RelayStations:         make([]operationRelayStationView, 0, len(stations)),
+	}
+	for _, channel := range channels {
+		costMetrics.ChannelBalanceAmount += currentChannelBalance(channel)
+		costMetrics.ChannelBalanceDecreaseAmount += channelBalanceDecrease[channel.ID]
+	}
 	successfulRelayCount := int64(0)
 	for _, station := range stations {
-		usage, usageErr := d.Relay.UsageTotal(c.Request.Context(), station.ID, rangeName, since)
-		if usageErr != nil {
+		stationExpense := stationExpenses[station.ID]
+		revenueUsage, revenueErr := d.Relay.UsageTotal(c.Request.Context(), station.ID, rangeName, since)
+		if revenueErr != nil {
 			if d.Log != nil {
-				d.Log.Warn("operation relay revenue failed", "station_id", station.ID, "err", usageErr)
+				d.Log.Warn("operation relay revenue failed", "station_id", station.ID, "err", revenueErr)
 			}
-			continue
+			costMetrics.RelayCostComplete = false
+		} else {
+			successfulRelayCount++
 		}
-		ledger.RelayRevenueAmount += usage.UserCharge
-		successfulRelayCount++
+
+		costUsage, costErr := d.Relay.UsageStats(c.Request.Context(), station.ID, rangeName, since)
+		stationCost := relayCostSummaryFromUsage(costUsage)
+		if revenueErr == nil {
+			stationCost.UserCharge = revenueUsage.UserCharge
+		}
+		if costErr != nil {
+			stationCost.Complete = false
+			if stationCost.FailedAccounts == 0 {
+				stationCost.FailedAccounts = 1
+			}
+			costMetrics.RelayCallCostComplete = false
+		}
+		stationComplete := revenueErr == nil && costErr == nil && stationCost.Complete
+		if !stationCost.Complete {
+			costMetrics.RelayCallCostComplete = false
+		}
+		stationActualCost := operationActualCost(stationExpense.AccountPurchase, stationExpense.UpstreamRecharge, 0)
+		costMetrics.RelayRevenueAmount += stationCost.UserCharge
+		costMetrics.RelayCallCostAmount += stationCost.Cost
+		costMetrics.RelayFailedAccounts += stationCost.FailedAccounts
+		costMetrics.RelayUnknownCostAccounts += stationCost.UnknownCostAccounts
+		costMetrics.RelayStations = append(costMetrics.RelayStations, operationRelayStationView{
+			ID: station.ID, Name: station.Name, UserChargeAmount: stationCost.UserCharge,
+			CallCostAmount: stationCost.Cost, AccountPurchaseAmount: stationExpense.AccountPurchase,
+			UpstreamRechargeAmount: stationExpense.UpstreamRecharge, ActualCostAmount: stationActualCost,
+			Complete: stationComplete, FailedAccounts: stationCost.FailedAccounts,
+			UnknownCostAccounts: stationCost.UnknownCostAccounts,
+		})
 	}
+	ledger.RelayRevenueAmount = costMetrics.RelayRevenueAmount
+	costMetrics.RelayAccountPurchaseAmount = ledger.AccountPurchaseAmount
+	costMetrics.RelayUpstreamRechargeAmount = ledger.UpstreamRechargeAmount
+	costMetrics.RelayActualCostAmount = operationActualCost(costMetrics.RelayAccountPurchaseAmount, costMetrics.RelayUpstreamRechargeAmount, costMetrics.ChannelBalanceAmount)
+	costMetrics.ChannelRechargeAmount = ledger.UpstreamRechargeAmount
+	costMetrics.RealtimeMultiplier = operationMultiplier(costMetrics.RelayRevenueAmount, costMetrics.RelayActualCostAmount)
+	costMetrics.ChannelCostVariance = costMetrics.ChannelRechargeAmount - costMetrics.RelayCallCostAmount
 	ledger.IncomeAmount += ledger.RelayRevenueAmount
 	ledger.NetAmount += ledger.RelayRevenueAmount
 	if ledger.RelayRevenueAmount > 0 {
@@ -80,7 +143,7 @@ func operationsSummary(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": operationSummaryView{
-		Range: rangeName, Ledger: ledger, Breakdown: breakdown, LocalPool: pool,
+		Range: rangeName, Ledger: ledger, Breakdown: breakdown, LocalPool: pool, Cost: costMetrics,
 	}})
 }
 
@@ -88,7 +151,7 @@ func listOperationLedger(c *gin.Context, d *Deps) {
 	since, _ := operationSince(c.DefaultQuery("range", "30d"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "300"))
 	list, err := d.Operations.ListLedger(storage.LedgerFilter{
-		Since: since, Direction: c.Query("direction"), Category: c.Query("category"), Limit: limit,
+		Since: since, Direction: c.Query("direction"), Category: c.Query("category"), Query: c.Query("q"), Limit: limit,
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -99,6 +162,7 @@ func listOperationLedger(c *gin.Context, d *Deps) {
 
 type ledgerInput struct {
 	Direction      string  `json:"direction" binding:"required"`
+	Source         string  `json:"source"`
 	Category       string  `json:"category" binding:"required"`
 	Amount         float64 `json:"amount" binding:"required"`
 	Description    string  `json:"description" binding:"required"`
@@ -163,6 +227,13 @@ func bindLedgerInput(c *gin.Context) (*storage.OperationLedgerEntry, error) {
 	}
 	direction := strings.ToLower(strings.TrimSpace(in.Direction))
 	category := strings.ToLower(strings.TrimSpace(in.Category))
+	source := strings.ToLower(strings.TrimSpace(in.Source))
+	if source == "" {
+		source = storage.LedgerSourceManual
+	}
+	if source != storage.LedgerSourceManual && source != storage.LedgerSourceHistoryImport {
+		return nil, errors.New("账本来源无效")
+	}
 	expectedDirection, ok := ledgerCategories[category]
 	if !ok {
 		return nil, errors.New("账本类别无效")
@@ -182,7 +253,7 @@ func bindLedgerInput(c *gin.Context) (*storage.OperationLedgerEntry, error) {
 		return nil, errors.New("发生时间格式无效")
 	}
 	return &storage.OperationLedgerEntry{
-		Direction: direction, Category: category, Amount: in.Amount, Currency: "CNY",
+		Direction: direction, Category: category, Amount: in.Amount, Currency: "CNY", Source: source,
 		Description: description, ChannelID: in.ChannelID, RelayStationID: in.RelayStationID,
 		OccurredAt: occurredAt,
 	}, nil

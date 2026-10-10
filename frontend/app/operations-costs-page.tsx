@@ -1,11 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { AlertCircle, Pencil, Plus, ReceiptText, RefreshCw, RotateCcw, Trash2, WalletCards } from "lucide-react"
+import { AlertCircle, Pencil, Plus, ReceiptText, RefreshCw, RotateCcw, Search, SlidersHorizontal, Trash2, WalletCards } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { TableActionButton } from "@/components/ui/table-action-button"
+import { ListPanelHeader } from "@/components/ui/list-panel"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -13,11 +16,11 @@ import { apiFetch } from "@/lib/api"
 import { useChannels, useOperationLedger, useOperationSummary, useRelayStations } from "@/lib/queries"
 import type { OperationLedgerEntry, OperationRange } from "@/lib/api-types"
 import { cn } from "@/lib/utils"
-import { cny, OperationSummaryCards } from "@/components/operations/summary-cards"
+import { cny, usd, OperationSummaryCards } from "@/components/operations/summary-cards"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 
 const ranges: { value: OperationRange; label: string }[] = [
-  { value: "all", label: "全部" },
+  { value: "all", label: "All" },
   { value: "today", label: "今天" },
   { value: "24h", label: "24 小时" },
   { value: "7d", label: "7 天" },
@@ -27,6 +30,7 @@ const ranges: { value: OperationRange; label: string }[] = [
 const categories = [
   { value: "user_revenue", label: "用户收入", direction: "income" },
   { value: "other_income", label: "其他收入", direction: "income" },
+  { value: "purchase_refund", label: "采购退款回款", direction: "income" },
   { value: "account_purchase", label: "账号采购", direction: "expense" },
   { value: "upstream_recharge", label: "上游充值", direction: "expense" },
   { value: "refund", label: "退款", direction: "expense" },
@@ -47,6 +51,18 @@ function categoryLabel(value: string) {
 
 function rangeLabel(range: OperationRange) {
   return ranges.find((item) => item.value === range)?.label ?? range
+}
+
+function ActiveFilterSubTrigger({ label, value }: { label: string; value?: string | null }) {
+  const active = Boolean(value)
+  return (
+    <DropdownMenuSubTrigger className={cn(active && "text-brand")}>
+      <span className="flex min-w-0 flex-1 items-center justify-between gap-2">
+        <span className="shrink-0">{label}</span>
+        {active ? <span className="max-w-24 truncate rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand" title={value ?? undefined}>{value}</span> : null}
+      </span>
+    </DropdownMenuSubTrigger>
+  )
 }
 
 function relationLabel(row: OperationLedgerEntry) {
@@ -71,21 +87,23 @@ function LedgerRow({ row, onEdit, onDelete }: LedgerRowProps) {
       <span className="truncate text-muted-foreground" title={categoryLabel(row.category)}>{categoryLabel(row.category)}</span>
       <span className="font-mono font-semibold tabular-nums">{cny(row.amount)}</span>
       <span className="truncate text-muted-foreground" title={relationLabel(row)}>{relationLabel(row)}</span>
-      <span className="text-muted-foreground">{row.source === "local_account" ? "本地号池" : "手工"}</span>
+      <span className="text-muted-foreground">{row.source === "local_account" ? "本地号池" : row.source === "history_import" ? "历史导入" : "手工"}</span>
       <span className="truncate text-foreground" title={row.description}>{row.description}</span>
       <span className="fixed-column-shadow-right sticky right-0 z-10 flex min-h-8 self-stretch items-center bg-card">
-        {row.source === "manual" ? <><Button type="button" variant="ghost" size="icon" className="size-8" aria-label="编辑账本记录" onClick={() => onEdit(row)}><Pencil className="size-3.5" /></Button><Button type="button" variant="ghost" size="icon" className="size-8 text-muted-foreground hover:text-danger" aria-label="删除账本记录" onClick={() => onDelete(row)}><Trash2 className="size-3.5" /></Button></> : null}
+        {row.source === "manual" || row.source === "history_import" ? <><TableActionButton type="button" aria-label="编辑账本记录" title="编辑账本记录" onClick={() => onEdit(row)}><Pencil className="size-3.5" /></TableActionButton><TableActionButton destructive type="button" aria-label="删除账本记录" title="删除账本记录" onClick={() => onDelete(row)}><Trash2 className="size-3.5" /></TableActionButton></> : <span className="whitespace-nowrap text-[11px] text-muted-foreground">本地号池管理</span>}
       </span>
     </div>
   )
 }
 
 export default function OperationsCostsPage() {
-  const [range, setRange] = useState<OperationRange>("today")
+  const [range, setRange] = useState<OperationRange>("all")
+  const [ledgerRange, setLedgerRange] = useState<OperationRange>("all")
   const [ledgerDirection, setLedgerDirection] = useState<LedgerDirection>("all")
   const [ledgerCategory, setLedgerCategory] = useState("all")
+  const [ledgerQuery, setLedgerQuery] = useState("")
   const summary = useOperationSummary(range)
-  const ledger = useOperationLedger(range, { direction: ledgerDirection, category: ledgerCategory })
+  const ledger = useOperationLedger(ledgerRange, { direction: ledgerDirection, category: ledgerCategory, q: ledgerQuery })
   const channels = useChannels()
   const stations = useRelayStations()
   const refresh = useTriggerRefresh()
@@ -103,6 +121,10 @@ export default function OperationsCostsPage() {
   const rows = ledger.data ?? []
   const formCategories = useMemo(() => categories.filter((item) => item.direction === direction), [direction])
   const filterCategories = useMemo(() => categories.filter((item) => ledgerDirection === "all" || item.direction === ledgerDirection), [ledgerDirection])
+  const activeLedgerFilterCount = Number(ledgerDirection !== "all") + Number(ledgerCategory !== "all")
+  const hasActiveLedgerFilters = activeLedgerFilterCount > 0 || ledgerQuery.trim() !== ""
+  const activeLedgerDirectionLabel = ledgerDirection === "income" ? "收入" : ledgerDirection === "expense" ? "支出" : null
+  const activeLedgerCategoryLabel = ledgerCategory !== "all" ? categoryLabel(ledgerCategory) : null
 
   function resetForm(row?: OperationLedgerEntry) {
     const nextDirection = row?.direction ?? "expense"
@@ -132,6 +154,12 @@ export default function OperationsCostsPage() {
     if (value !== "all" && ledgerCategory !== "all" && categories.find((item) => item.value === ledgerCategory)?.direction !== value) {
       setLedgerCategory("all")
     }
+  }
+
+  function resetLedgerFilters() {
+    setLedgerDirection("all")
+    setLedgerCategory("all")
+    setLedgerQuery("")
   }
 
   async function saveEntry(event: React.FormEvent) {
@@ -183,7 +211,7 @@ export default function OperationsCostsPage() {
 
   return (
     <section className="space-y-4">
-      <header className="flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
+      <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
         <div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><WalletCards className="size-5 text-brand" />成本管理</h1><p className="mt-1 text-xs text-muted-foreground">维护显式收支账本，汇总渠道成本、中转站用户扣费与账号采购成本。</p></div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="成本统计时间范围">{ranges.map((item) => <button type="button" key={item.value} onClick={() => setRange(item.value)} className={cn("h-10 rounded px-3 text-xs transition-colors sm:h-8", range === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>{item.label}</button>)}</div>
@@ -195,21 +223,73 @@ export default function OperationsCostsPage() {
 
       <OperationSummaryCards data={data} loading={summary.loading} />
 
-      <p className="rounded-md border border-success/20 bg-success/5 px-3 py-2 text-xs text-muted-foreground">所选时间范围内，中转站用户实际扣费 {cny(data?.ledger.relay_revenue_amount)} 已自动计入收入，并与手工新增收入合并。</p>
+      <div className="rounded-md border border-brand/20 bg-brand/5 px-3 py-2 text-xs leading-5 text-muted-foreground">实时倍率 = 实际消耗成本 ÷ 中转站用户消耗，汇率按 1:1 计算。实际消耗成本 = 支出 - 当前渠道余额。</div>
 
       <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
-        <CardHeader className="gap-3 px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div><CardTitle className="flex items-center gap-2 text-sm font-semibold"><ReceiptText className="size-4 text-brand" />收支账本</CardTitle><p className="mt-1 text-xs text-muted-foreground">{rangeLabel(range)} · {rows.length} 条。现金净额只表示已记录收支差额，不代表利润。</p></div>
+<ListPanelHeader
+          title={<CardTitle className="text-sm font-semibold">中转站收支汇总表</CardTitle>}
+          description={<p className="mt-1 text-xs text-muted-foreground">{rangeLabel(range)} · 按当前选定时间范围，分中转站展示用户消耗、账号采购成本、上游充值支出和支出合计。渠道余额属于全局资产，不在中转站之间分摊。</p>}
+        ></ListPanelHeader>
+        <CardContent className="border-t border-border p-0">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[620px] text-xs">
+              <thead className="bg-muted text-left text-[11px] text-foreground/90"><tr><th className="px-4 py-2.5 font-medium">中转站</th><th className="px-4 py-2.5 text-right font-medium">中转站用户消耗</th><th className="px-4 py-2.5 text-right font-medium">账号采购成本</th><th className="px-4 py-2.5 text-right font-medium">上游充值支出</th><th className="px-4 py-2.5 text-right font-medium">支出合计</th></tr></thead>
+              <tbody>{data?.cost.relay_stations.map((station) => <tr key={station.id} className="border-t border-border"><td className="px-4 py-2.5 font-medium">{station.name}</td><td className="px-4 py-2.5 text-right font-mono tabular-nums text-success">{usd(station.user_charge_amount)}</td><td className="px-4 py-2.5 text-right font-mono tabular-nums text-muted-foreground">{cny(station.account_purchase_amount)}</td><td className="px-4 py-2.5 text-right font-mono tabular-nums text-muted-foreground">{cny(station.upstream_recharge_amount)}</td><td className="px-4 py-2.5 text-right font-mono tabular-nums text-danger">{cny(station.actual_cost_amount)}</td></tr>)}</tbody>
+            </table>
+            {!summary.loading && (data?.cost.relay_stations.length ?? 0) === 0 ? <p className="px-4 py-8 text-center text-sm text-muted-foreground">暂无中转站收支数据</p> : null}
           </div>
-          <div className="flex flex-wrap justify-end gap-2">
-            <Select value={ledgerDirection} onValueChange={(value) => changeLedgerDirection(value as LedgerDirection)}><SelectTrigger className="h-9 w-28 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部方向</SelectItem><SelectItem value="income">收入</SelectItem><SelectItem value="expense">支出</SelectItem></SelectContent></Select>
-            <Select value={ledgerCategory} onValueChange={setLedgerCategory}><SelectTrigger className="h-9 w-32 text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">全部类别</SelectItem>{filterCategories.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select>
-            <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => { setLedgerDirection("all"); setLedgerCategory("all") }}><RotateCcw className="size-3.5" />重置</Button>
-            <Button type="button" variant="outline" size="sm" className="h-9 gap-1.5" onClick={() => { summary.refetch(); ledger.refetch() }}><RefreshCw className="size-3.5" />刷新</Button>
-          </div>
-          {ledger.error ? <p className="flex items-center gap-2 text-xs text-danger"><AlertCircle className="size-3.5" />账本刷新失败，保留上次结果：{ledger.error}</p> : null}
-        </CardHeader>
+        </CardContent>
+      </Card>
+
+      <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
+        <ListPanelHeader
+          title={<CardTitle className="flex items-center gap-2 text-sm font-semibold"><ReceiptText className="size-4 text-brand" />收支账本</CardTitle>}
+          description={<p className="mt-1 truncate text-xs text-muted-foreground">{rangeLabel(ledgerRange)} · {rows.length} 条。现金净额只表示已记录收支差额，不代表利润。</p>}
+          actions={<div className="contents" aria-label="收支账本筛选">
+          <div className="inline-flex shrink-0 rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="账本时间范围">
+            {ranges.map((item) => <button type="button" key={item.value} onClick={() => setLedgerRange(item.value)} className={cn("h-10 rounded px-3 text-xs transition-colors sm:h-8", ledgerRange === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>{item.label}</button>)}
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative shrink-0"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input value={ledgerQuery} onChange={(event) => setLedgerQuery(event.target.value)} placeholder={"搜索说明 / 渠道 / 中转站"} aria-label={"按说明、渠道名称或中转站名称搜索"} className="h-11 w-64 pl-8 text-xs sm:h-9" /></div>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button type="button" size="sm" variant="outline" className="h-11 shrink-0 gap-1.5 text-xs sm:h-9">
+                <SlidersHorizontal className="size-3.5" />{"筛选"}
+                {activeLedgerFilterCount > 0 ? <span className="rounded-full bg-brand/10 px-1.5 py-0.5 text-[10px] font-semibold text-brand">{activeLedgerFilterCount}</span> : null}
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel className="text-xs text-muted-foreground">{"账本筛选"}</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuSub>
+                <ActiveFilterSubTrigger label={"收支方向"} value={activeLedgerDirectionLabel} />
+                <DropdownMenuSubContent className="w-44">
+                  <DropdownMenuRadioGroup value={ledgerDirection} onValueChange={(value) => changeLedgerDirection(value as LedgerDirection)}>
+                    <DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="income">{"收入"}</DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="expense">{"支出"}</DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSub>
+                <ActiveFilterSubTrigger label={"收支类别"} value={activeLedgerCategoryLabel} />
+                <DropdownMenuSubContent className="w-48">
+                  <DropdownMenuRadioGroup value={ledgerCategory} onValueChange={setLedgerCategory}>
+                    <DropdownMenuRadioItem value="all">All</DropdownMenuRadioItem>
+                    {filterCategories.map((item) => <DropdownMenuRadioItem key={item.value} value={item.value}>{item.label}</DropdownMenuRadioItem>)}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuSubContent>
+              </DropdownMenuSub>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled={!hasActiveLedgerFilters} onSelect={resetLedgerFilters}>
+                <RotateCcw className="size-3.5" />{"清除筛选与搜索"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <Button type="button" variant="outline" size="sm" className="h-11 shrink-0 gap-1.5 sm:h-9" onClick={() => { summary.refetch(); ledger.refetch() }}><RefreshCw className="size-3.5" />{"刷新"}</Button>
+            </div>
+          </div>}
+        >{ledger.error ? <p className="flex items-center gap-2 text-xs text-danger"><AlertCircle className="size-3.5" />账本刷新失败，保留上次结果：{ledger.error}</p> : null}</ListPanelHeader>
         <CardContent className="border-t border-border p-0">
           <div className="isolate max-h-[min(52vh,520px)] overflow-auto">
             <div className="min-w-[1220px]">
