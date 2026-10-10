@@ -32,7 +32,7 @@ func ValidateHostPattern(pattern string) error {
 			return fmt.Errorf("%w: ** must occupy a complete hostname label", errInvalidHostPattern)
 		}
 		for _, r := range label {
-			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '*' {
+			if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' || r == '*' {
 				continue
 			}
 			return fmt.Errorf("%w: unsupported character %q", errInvalidHostPattern, r)

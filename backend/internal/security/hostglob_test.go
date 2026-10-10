@@ -31,6 +31,8 @@ func TestHostGlobMatchesExpectedHosts(t *testing.T) {
 		{name: "exact label not substring", pattern: "**.devai.**", host: "mydevai.com", want: false},
 		{name: "case insensitive", pattern: "*.Example.COM", host: "A.example.com", want: true},
 		{name: "host trailing dot", pattern: "example.com", host: "example.com.", want: true},
+		{name: "internal hostname with underscore", pattern: "devai_cn.xxx.cn", host: "devai_cn.xxx.cn", want: true},
+		{name: "underscore with wildcard", pattern: "devai_*.xxx.cn", host: "devai_cn.xxx.cn", want: true},
 	}
 
 	for _, tt := range tests {
@@ -58,7 +60,6 @@ func TestHostGlobRejectsInvalidPatterns(t *testing.T) {
 		"example.com:8443",
 		"a..example.com",
 		"ab**cd.example.com",
-		"foo_bar.example.com",
 	} {
 		pattern := pattern
 		t.Run(pattern, func(t *testing.T) {

@@ -37,6 +37,7 @@ type Deps struct {
 	Relay         *relay.Service
 	RelayStations *storage.RelayStations
 	Operations    *storage.Operations
+	Settings      *storage.Settings
 	Scheduler     *scheduler.Scheduler
 	Dispatcher    *notify.Dispatcher
 	Log           *slog.Logger
@@ -83,11 +84,12 @@ func Register(r *gin.Engine, d *Deps) {
 		registerDashboard(api, d)
 		registerRelayStations(api, d)
 		registerSyncSettings(api, d)
+		registerSystemSettings(api, d)
 		registerOperations(api, d)
 	}
 
 	if d.Frontend != nil {
-		registerFrontend(r, d.Frontend)
+		registerFrontend(r, d.Frontend, d.Settings)
 	}
 }
 
@@ -99,7 +101,7 @@ func Register(r *gin.Engine, d *Deps) {
 //
 // /api/*、/healthz 都已被前面的具体路由占了，不会走到这里。
 // 安全起见仍然做一次前缀拦截，避免任何意外情况下"未鉴权读 index.html"压到 /api 上。
-func registerFrontend(r *gin.Engine, dist fs.FS) {
+func registerFrontend(r *gin.Engine, dist fs.FS, settings *storage.Settings) {
 	fileServer := http.FileServer(http.FS(dist))
 
 	r.NoRoute(func(c *gin.Context) {
@@ -110,6 +112,8 @@ func registerFrontend(r *gin.Engine, dist fs.FS) {
 			c.AbortWithStatus(http.StatusNotFound)
 			return
 		}
+
+		applyFramePolicy(c, settings)
 
 		// 文件存在就直接 serve，否则回落到 index.html。
 		clean := strings.TrimPrefix(path, "/")
