@@ -598,6 +598,16 @@ func validateCredential(channelType storage.ChannelType, mode storage.Credential
 		if strings.TrimSpace(cred.AccessToken) == "" {
 			return errors.New("Sub2API token 模式需要 access_token")
 		}
+		if strings.TrimSpace(cred.RefreshToken) == "" {
+			return errors.New("Sub2API token 模式需要 refresh_token，Access Token 过期后才能自动续期")
+		}
+		expiresAt := cred.ExpiresAt
+		if expiresAt.IsZero() {
+			expiresAt = jwtExpiry(cred.AccessToken)
+		}
+		if !expiresAt.IsZero() && !expiresAt.After(time.Now()) {
+			return fmt.Errorf("Sub2API access_token 已过期（%s），请从当前有效会话重新复制 Access Token + Refresh Token", expiresAt.Local().Format(time.RFC3339))
+		}
 	default:
 		return fmt.Errorf("unknown channel type: %s", channelType)
 	}
@@ -899,6 +909,17 @@ func (s *Service) reloadTokenChannel(c *storage.Channel) (*storage.Channel, erro
 	return latest, nil
 }
 
+func sub2APICredentialFromSession(session *connector.AuthSession) Sub2APITokenCredential {
+	if session == nil {
+		return Sub2APITokenCredential{}
+	}
+	return Sub2APITokenCredential{
+		AccessToken:  session.AccessToken,
+		RefreshToken: session.RefreshToken,
+		ExpiresAt:    session.ExpiresAt,
+	}
+}
+
 func (s *Service) refreshSub2APIToken(
 	ctx context.Context,
 	c *storage.Channel,
@@ -942,11 +963,7 @@ func (s *Service) refreshSub2APIToken(
 	if err != nil {
 		return nil, fmt.Errorf("刷新 Sub2API token 失败: %w", err)
 	}
-	cred := Sub2APITokenCredential{
-		AccessToken:  fresh.AccessToken,
-		RefreshToken: fresh.RefreshToken,
-		ExpiresAt:    fresh.ExpiresAt,
-	}
+	cred := sub2APICredentialFromSession(fresh)
 	raw, err := json.Marshal(cred)
 	if err != nil {
 		return nil, fmt.Errorf("encode refreshed credential: %w", err)
