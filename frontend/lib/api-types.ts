@@ -84,6 +84,36 @@ export interface ChannelAccount {
   updated_at: string
 }
 
+export interface ChannelRelayAssociationAccount {
+  external_id: number
+  name: string
+  base_url?: string
+  identity?: string
+}
+
+export interface ChannelRelayAssociationStation {
+  id: number
+  name: string
+  accounts: ChannelRelayAssociationAccount[]
+}
+
+export interface ChannelRelayAssociation {
+  channel_id: number
+  channel_account_id: number
+  channel_account_username: string
+  relay_station_id: number
+  relay_station_name: string
+  relay_account_external_id: number
+  relay_account_name?: string
+  mode: "auto" | "manual" | string
+  linked: boolean
+}
+
+export interface ChannelRelayAssociationSnapshot {
+  stations: ChannelRelayAssociationStation[]
+  links: ChannelRelayAssociation[]
+}
+
 export interface ChannelMetric {
   channel_id: number
   consumption_amount: number

@@ -999,6 +999,47 @@ func remoteAccountPlan(account remoteAccount) string {
 	return "unknown"
 }
 
+func remoteAccountIdentity(account remoteAccount) string {
+	for _, source := range []map[string]any{account.Credentials.Raw, account.Extra} {
+		for _, key := range []string{"email", "username", "account", "login"} {
+			value := strings.TrimSpace(fmt.Sprint(source[key]))
+			if value != "" && value != "<nil>" {
+				return value
+			}
+		}
+	}
+	name := strings.TrimSpace(account.Name)
+	if name == "" {
+		return ""
+	}
+	if at := strings.Index(name, "@"); at > 0 {
+		start := at - 1
+		for start >= 0 {
+			ch := name[start]
+			if !(ch == '.' || ch == '_' || ch == '-' || ch == '+' || ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z') {
+				break
+			}
+			start--
+		}
+		end := at + 1
+		for end < len(name) {
+			ch := name[end]
+			if !(ch == '.' || ch == '_' || ch == '-' || ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z') {
+				break
+			}
+			end++
+		}
+		candidate := strings.TrimSpace(name[start+1 : end])
+		if strings.Contains(candidate, "@") && strings.Contains(candidate[at-(start+1)+1:], ".") {
+			return candidate
+		}
+	}
+	if !strings.Contains(strings.ToLower(name), "http") && !strings.ContainsAny(name, "【】[]()") {
+		return name
+	}
+	return ""
+}
+
 func accountPoolModeRetryCount(account remoteAccount) int {
 	if account.Credentials.PoolModeRetryCount != nil && *account.Credentials.PoolModeRetryCount >= 0 {
 		return *account.Credentials.PoolModeRetryCount
@@ -3191,46 +3232,17 @@ func (s *Service) Sync(ctx context.Context, stationID uint) error {
 	return s.syncSnapshot(ctx, stationID, true)
 }
 
-// ReconcileManualChannelLinks persists the safe subset of URL matches for
-// manually managed channels. A matching account must have a successfully
-// probed multiplier, and an existing user-created binding always wins.
+// ReconcileManualChannelLinks keeps the dedicated channel-account association
+// table in sync after a relay snapshot. The old cost/rate projection remains
+// disabled: association metadata must never become a channel monitoring source.
 func (s *Service) ReconcileManualChannelLinks() error {
-	if s.channels == nil {
+	if s.stations == nil {
 		return nil
 	}
-	channels, err := s.channels.List()
-	if err != nil {
+	if err := s.stations.ReconcileAutomaticChannelAccountBindings(nil); err != nil {
 		return err
 	}
-	manualChannels := make([]storage.Channel, 0, len(channels))
-	for _, channel := range channels {
-		if channel.BalanceMode == storage.BalanceModeManual {
-			manualChannels = append(manualChannels, channel)
-		}
-	}
-	stations, err := s.stations.List()
-	if err != nil {
-		return err
-	}
-	bindings := make([]storage.AutomaticChannelAccountBinding, 0)
-	for _, station := range stations {
-		accounts, err := s.stations.ListAccounts(station.ID)
-		if err != nil {
-			return err
-		}
-		overrides, err := s.stations.ListCostOverrides(station.ID)
-		if err != nil {
-			return err
-		}
-		bindings = append(bindings, automaticManualChannelBindings(manualChannels, station, accounts, overrides)...)
-	}
-	sort.Slice(bindings, func(i, j int) bool {
-		if bindings[i].RelayStationID != bindings[j].RelayStationID {
-			return bindings[i].RelayStationID < bindings[j].RelayStationID
-		}
-		return bindings[i].RelayAccountExternalID < bindings[j].RelayAccountExternalID
-	})
-	return s.stations.ReconcileAutomaticChannelAccountBindings(bindings)
+	return s.stations.ReconcileChannelRelayAccountLinks()
 }
 
 func automaticManualChannelBindings(channels []storage.Channel, station storage.RelayStation, accounts []storage.RelayAccount, overrides []storage.RelayAccountCostOverride) []storage.AutomaticChannelAccountBinding {
@@ -3372,7 +3384,7 @@ func (s *Service) syncSnapshot(ctx context.Context, stationID uint, probeRates b
 		}
 		localAccounts = append(localAccounts, storage.RelayAccount{
 			RelayStationID: station.ID, ExternalID: account.ID, Name: account.Name,
-			BaseURL:  account.Credentials.BaseURL,
+			BaseURL: account.Credentials.BaseURL, Identity: remoteAccountIdentity(account),
 			Platform: account.Platform, Type: account.Type, Status: account.Status, Schedulable: account.Schedulable,
 			Concurrency: account.Concurrency, CurrentConcurrency: account.CurrentConcurrency, Priority: account.Priority,
 			PoolMode: account.Credentials.PoolMode, PoolModeRetryCount: accountPoolModeRetryCount(account),

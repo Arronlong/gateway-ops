@@ -8,6 +8,7 @@ import type {
   BalanceTrendPoint,
   CaptchaConfig,
   Channel,
+  ChannelRelayAssociationSnapshot,
   ChannelMetric,
   ChannelLatencyTrend,
   DashboardSummary,
@@ -193,8 +194,12 @@ export function useBalanceTrend(range: BalanceTrendRange = "7d") {
   return useApi<BalanceTrendPoint[]>(`/dashboard/balance-trend?range=${range}`)
 }
 
-export function useChannels() {
+export function useChannels(cancelOnNavigation = true) {
   return useApi<Channel[]>("/channels")
+}
+
+export function useChannelRelayAssociations() {
+  return useApi<ChannelRelayAssociationSnapshot>("/channels/associations")
 }
 
 export function useChannelMetrics(range: RelayUsageRange = "today") {
