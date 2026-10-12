@@ -65,3 +65,10 @@ frontend/tsconfig.tsbuildinfo
 frontend/.pnpm-store/
 
 docs/md
+
+# Patch backups and rejected hunks
+*.orig
+*.rej
+
+# Local development and verification artifacts
+/outputs/
