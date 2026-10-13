@@ -19,6 +19,7 @@ import type {
   ChannelLatencyBucketSeries,
   ChannelConsumptionBucketSeries,
   RelayAccountLatencyBucketSeries,
+  RelayLatencyTrend,
   RelayAccountConsumptionBucketSeries,
   RelayAccountModelCatalogItem,
   DashboardSummary,
@@ -243,6 +244,10 @@ export function useChannelMetrics(range: RelayUsageRange = "today") {
 
 export function useChannelLatencyTrends(limit = 60, enabled = true) {
   return useApi<ChannelLatencyTrend[]>(enabled ? `/channels/latency-trends?limit=${limit}` : null)
+}
+
+export function useRelayLatencyTrends(limit = 60, enabled = true) {
+  return useApi<RelayLatencyTrend[]>(enabled ? `/relay-stations/latency-trends?limit=${limit}` : null)
 }
 
 export function useChannelLatencyBuckets(range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 60, enabled = true) {

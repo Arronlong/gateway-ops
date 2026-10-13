@@ -6,7 +6,7 @@ import type { ReactNode } from "react"
 import type { ConsumptionBucket, LatencyBucket, LatencyBucketGranularity, RelayAccountConsumptionBucket, RelayUsageRange } from "@/lib/api-types"
 import type { ChannelCompareLink, RelayCompareAccount, RelayCompareLink } from "@/lib/channel-relay-association"
 import { useRelayAccountConsumptionBuckets, useRelayLatencyBuckets } from "@/lib/queries"
-import { formatLatency, latencyTooltipTextClass, latencyTone } from "@/lib/latency"
+import { formatLatency, formatOutputTokenSpeed, latencyTooltipTextClass, latencyTone } from "@/lib/latency"
 import { money } from "@/lib/format"
 import { pickRelayCompareBucket, type RelayCompareBucket } from "@/lib/relay-compare-bucket"
 import { cn } from "@/lib/utils"
@@ -122,6 +122,11 @@ function LatencyAccount({ account, buckets, bucketStart, showBucketWindow, style
             <span className={toneTextClass(durationP50, "duration", styles.hint)}>{formatLatency(durationP50)}</span>
             <span className={styles.hint}> / </span>
             <span className={toneTextClass(durationP95, "duration", styles.hint)}>{formatLatency(durationP95)}</span>
+          </Row>
+          <Row label="输出速度 P50 / P95" styles={styles}>
+            <span>{formatOutputTokenSpeed(bucket?.output_token_speed_p50)}</span>
+            <span className={styles.hint}> / </span>
+            <span>{formatOutputTokenSpeed(bucket?.output_token_speed_p95)}</span>
           </Row>
           <Row label="成功率" styles={styles}>
             {successRate == null ? "未提供" : (successRate * 100).toFixed(successRate === 1 ? 0 : 1) + "%"}
@@ -288,6 +293,16 @@ function LatencyPairValue({ channelValue, relayValue, metric }: {
   )
 }
 
+function OutputSpeedPairValue({ firstValue, secondValue }: { firstValue: number | null; secondValue: number | null }) {
+  return (
+    <span className="whitespace-nowrap font-mono font-semibold tabular-nums">
+      <span>{formatOutputTokenSpeed(firstValue)}</span>
+      <span className="px-1 text-muted-foreground">/</span>
+      <span>{formatOutputTokenSpeed(secondValue)}</span>
+    </span>
+  )
+}
+
 function RelayLatencyComparisonAccount({ account, channelBucket, relayBucket }: {
   account: RelayCompareAccount
   channelBucket: LatencyBucket
@@ -308,6 +323,9 @@ function RelayLatencyComparisonAccount({ account, channelBucket, relayBucket }: 
         <span className="text-muted-foreground">总耗时</span>
         <LatencyPairValue channelValue={channelBucket.duration_p50_ms} relayValue={relayBucket?.duration_p50_ms ?? null} metric="duration" />
         <LatencyPairValue channelValue={channelBucket.duration_p95_ms} relayValue={relayBucket?.duration_p95_ms ?? null} metric="duration" />
+        <span className="text-muted-foreground">输出速度</span>
+        <OutputSpeedPairValue firstValue={channelBucket.output_token_speed_p50} secondValue={relayBucket?.output_token_speed_p50 ?? null} />
+        <OutputSpeedPairValue firstValue={channelBucket.output_token_speed_p95} secondValue={relayBucket?.output_token_speed_p95 ?? null} />
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <div className="rounded-md border border-border bg-card px-2.5 py-2">
@@ -431,6 +449,9 @@ function ChannelLatencyComparisonEntry({ relayAccountName, link, relayBucket, ch
         <span className="text-muted-foreground">总耗时</span>
         <RelayFirstLatencyPairValue relayValue={relayBucket.duration_p50_ms} channelValue={channelBucket?.duration_p50_ms ?? null} metric="duration" />
         <RelayFirstLatencyPairValue relayValue={relayBucket.duration_p95_ms} channelValue={channelBucket?.duration_p95_ms ?? null} metric="duration" />
+        <span className="text-muted-foreground">输出速度</span>
+        <OutputSpeedPairValue firstValue={relayBucket.output_token_speed_p50} secondValue={channelBucket?.output_token_speed_p50 ?? null} />
+        <OutputSpeedPairValue firstValue={relayBucket.output_token_speed_p95} secondValue={channelBucket?.output_token_speed_p95 ?? null} />
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2">
         <div className="rounded-md border border-border bg-card px-2.5 py-2">
@@ -457,6 +478,16 @@ export function ChannelLatencyComparisonTooltip({ bucket, relayAccountName, link
   links: ChannelCompareLink[]
   channelBucketsByChannel: Map<number, LatencyBucket[]>
 }) {
+  const entries = links.map((link) => (
+    <ChannelLatencyComparisonEntry
+      key={link.channelID}
+      relayAccountName={relayAccountName}
+      link={link}
+      relayBucket={bucket}
+      channelBucket={pickRelayCompareBucket(channelBucketsByChannel.get(link.channelID), bucket.start)}
+    />
+  ))
+
   return (
     <div className="w-[min(24rem,calc(100vw-32px))] p-1 text-xs">
       <div className="flex items-start justify-between gap-4">
@@ -471,15 +502,7 @@ export function ChannelLatencyComparisonTooltip({ bucket, relayAccountName, link
         </span>
       </div>
       <div className="mt-2 rounded-lg border border-border bg-popover p-2.5 shadow-sm">
-        {links.map((link) => (
-          <ChannelLatencyComparisonEntry
-            key={link.channelID}
-            relayAccountName={relayAccountName}
-            link={link}
-            relayBucket={bucket}
-            channelBucket={pickRelayCompareBucket(channelBucketsByChannel.get(link.channelID), bucket.start)}
-          />
-        ))}
+        {entries}
       </div>
     </div>
   )

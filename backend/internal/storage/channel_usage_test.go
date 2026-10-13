@@ -1,6 +1,9 @@
 package storage
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestGroupChannelUsageModelsKeepsChannelsSeparateAndOrdered(t *testing.T) {
 	rows := []channelUsageModelRow{
@@ -15,5 +18,13 @@ func TestGroupChannelUsageModelsKeepsChannelsSeparateAndOrdered(t *testing.T) {
 	}
 	if len(got[2]) != 1 || got[2][0] != "gemini-2.5-pro" {
 		t.Fatalf("channel 2 models = %#v", got[2])
+	}
+}
+
+func TestChannelUsageSamplesExposeChannelAccountID(t *testing.T) {
+	events := []ChannelUsageEvent{{ChannelAccountID: 42, OccurredAt: time.Unix(1, 0)}}
+	samples := channelUsageSamples(events)
+	if len(samples) != 1 || samples[0].ChannelAccountID != 42 {
+		t.Fatalf("samples = %#v", samples)
 	}
 }

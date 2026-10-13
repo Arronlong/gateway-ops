@@ -41,6 +41,23 @@ func TestBuildLatencyBucketsComputesPercentilesSuccessAndCounts(t *testing.T) {
 	}
 }
 
+func TestBuildLatencyBucketsComputesOutputTokenSpeedPercentilesFromTotalDuration(t *testing.T) {
+	start := time.Date(2026, 10, 12, 0, 0, 0, 0, time.UTC)
+	samples := []storage.RelayLatencySample{
+		{FirstTokenMS: 9500, DurationMS: 10000, OutputTokens: 900, CreatedAt: start.Add(time.Minute)},
+		{FirstTokenMS: 100, DurationMS: 7000, OutputTokens: 1200, CreatedAt: start.Add(2 * time.Minute)},
+		{FirstTokenMS: 0, DurationMS: 10000, OutputTokens: 1000, CreatedAt: start.Add(3 * time.Minute)},
+	}
+
+	bucket := buildLatencyBuckets(samples, start, start.Add(10*time.Minute), 10*time.Minute)[0]
+	if bucket.OutputTokenSpeedP50 == nil || math.Abs(*bucket.OutputTokenSpeedP50-100) > 1e-9 {
+		t.Fatalf("output token speed P50 = %v, want 100 tokens/s", bucket.OutputTokenSpeedP50)
+	}
+	if bucket.OutputTokenSpeedP95 == nil || math.Abs(*bucket.OutputTokenSpeedP95-164.28571428571428) > 1e-9 {
+		t.Fatalf("output token speed P95 = %v, want 164.2857 tokens/s", bucket.OutputTokenSpeedP95)
+	}
+}
+
 func TestBuildLatencyBucketsKeepsEmptyBuckets(t *testing.T) {
 	start := time.Date(2026, 9, 18, 0, 0, 0, 0, time.UTC)
 	samples := []storage.RelayLatencySample{

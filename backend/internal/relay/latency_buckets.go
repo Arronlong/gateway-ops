@@ -16,14 +16,16 @@ import (
 )
 
 type LatencyBucket struct {
-	Start           time.Time `json:"start"`
-	End             time.Time `json:"end"`
-	FirstTokenP50MS int64     `json:"first_token_p50_ms"`
-	FirstTokenP95MS int64     `json:"first_token_p95_ms"`
-	DurationP50MS   int64     `json:"duration_p50_ms"`
-	DurationP95MS   int64     `json:"duration_p95_ms"`
-	SuccessRate     float64   `json:"success_rate"`
-	RequestCount    int       `json:"request_count"`
+	Start               time.Time `json:"start"`
+	End                 time.Time `json:"end"`
+	FirstTokenP50MS     int64     `json:"first_token_p50_ms"`
+	FirstTokenP95MS     int64     `json:"first_token_p95_ms"`
+	DurationP50MS       int64     `json:"duration_p50_ms"`
+	DurationP95MS       int64     `json:"duration_p95_ms"`
+	OutputTokenSpeedP50 *float64  `json:"output_token_speed_p50"`
+	OutputTokenSpeedP95 *float64  `json:"output_token_speed_p95"`
+	SuccessRate         float64   `json:"success_rate"`
+	RequestCount        int       `json:"request_count"`
 }
 
 type LatencyBucketSpec struct {
@@ -106,6 +108,7 @@ func aggregateLatencyBuckets(samples []storage.RelayLatencySample, windows []lat
 	type bucketValues struct {
 		first    []int64
 		duration []int64
+		speeds   []float64
 		success  int
 	}
 	values := make([]bucketValues, len(windows))
@@ -124,6 +127,9 @@ func aggregateLatencyBuckets(samples []storage.RelayLatencySample, windows []lat
 		}
 		values[index].first = append(values[index].first, sample.FirstTokenMS)
 		values[index].duration = append(values[index].duration, sample.DurationMS)
+		if speed, ok := outputTokenSpeed(sample.OutputTokens, sample.DurationMS); ok {
+			values[index].speeds = append(values[index].speeds, speed)
+		}
 		if sample.StatusCode == 0 || (sample.StatusCode >= 200 && sample.StatusCode < 400) {
 			values[index].success++
 		}
@@ -137,11 +143,38 @@ func aggregateLatencyBuckets(samples []storage.RelayLatencySample, windows []lat
 			bucket.FirstTokenP95MS = percentileInt64(values[i].first, 0.95)
 			bucket.DurationP50MS = percentileInt64(values[i].duration, 0.50)
 			bucket.DurationP95MS = percentileInt64(values[i].duration, 0.95)
+			bucket.OutputTokenSpeedP50 = percentileFloat64Ptr(values[i].speeds, 0.50)
+			bucket.OutputTokenSpeedP95 = percentileFloat64Ptr(values[i].speeds, 0.95)
 			bucket.SuccessRate = float64(values[i].success) / float64(requestCount)
 		}
 		buckets[i] = bucket
 	}
 	return buckets
+}
+
+func outputTokenSpeed(outputTokens, durationMS int64) (float64, bool) {
+	if outputTokens <= 0 || durationMS <= 0 {
+		return 0, false
+	}
+	return float64(outputTokens) * 1000 / float64(durationMS), true
+}
+
+func percentileFloat64Ptr(values []float64, percentile float64) *float64 {
+	if len(values) == 0 {
+		return nil
+	}
+	ordered := append([]float64(nil), values...)
+	sort.Float64s(ordered)
+	if len(ordered) == 1 {
+		value := ordered[0]
+		return &value
+	}
+	position := percentile * float64(len(ordered)-1)
+	lower := int(math.Floor(position))
+	upper := int(math.Ceil(position))
+	weight := position - float64(lower)
+	value := ordered[lower]*(1-weight) + ordered[upper]*weight
+	return &value
 }
 
 type consumptionSample struct {
@@ -914,6 +947,36 @@ func (s *Service) AccountLatencySamples(_ context.Context, stationID uint, accou
 		samples = samples[:limit]
 	}
 	return samples, nil
+}
+
+func (s *Service) RecentAccountLatencySamples(stationID uint, limit int) (map[int64][]storage.RelayLatencySample, error) {
+	accounts, err := s.stations.ListAccounts(stationID)
+	if err != nil {
+		return nil, err
+	}
+	events, err := s.stations.RecentUsageEventsByAccount(stationID, limit)
+	if err != nil {
+		return nil, err
+	}
+	accountByID := make(map[int64]storage.RelayAccount, len(accounts))
+	out := make(map[int64][]storage.RelayLatencySample, len(accounts))
+	for _, account := range accounts {
+		accountByID[account.ExternalID] = account
+		out[account.ExternalID] = []storage.RelayLatencySample{}
+	}
+	for _, event := range events {
+		account, ok := accountByID[event.AccountExternalID]
+		if !ok {
+			continue
+		}
+		sample, ok := latencySampleFromUsage(remoteUsageFromEvent(event))
+		if !ok {
+			continue
+		}
+		sample.Platform = account.Platform
+		out[event.AccountExternalID] = append(out[event.AccountExternalID], sample)
+	}
+	return out, nil
 }
 
 func (s *Service) ChannelLatencyBucketsByRange(ctx context.Context, channels []storage.Channel, since, until time.Time, spec LatencyBucketSpec) (map[uint][]LatencyBucket, error) {
