@@ -75,8 +75,84 @@ test("public monitor cards do not inject failure-summary explanations into recen
 
 test("public recent-call tooltips use each call latency instead of only its bucket", () => {
   const page = readFileSync(new URL("../components/monitor/latency-stability-lane.tsx", import.meta.url), "utf8")
-  assert.match(page, /function RecentSampleTooltip\(\{ sample, bucket \}/)
+  assert.match(page, /function RecentSampleTooltip\(\{ sample, primarySamples, relay, channel \}/)
   assert.match(page, /formatLatency\(sample\.first_token_ms\)/)
   assert.match(page, /formatLatency\(sample\.duration_ms\)/)
-  assert.match(page, /当前调用延迟；同时对比所属时间段的 P50\/P95/)
+  assert.match(page, /matchRelatedRecentCall/)
+  assert.doesNotMatch(page, /channel\.links\.length > 0 && bucket/)
+  assert.match(page, /RecentSampleTooltip sample=\{sample\} primarySamples=\{primarySamples\} relay=\{relay\} channel=\{channel\}/)
+})
+
+test("recent-call comparison uses decoded data labels and the same three metrics as stability", () => {
+  const page = readFileSync(new URL("../components/monitor/latency-stability-lane.tsx", import.meta.url), "utf8")
+  const pair = page.slice(page.indexOf("function RecentCallPair"), page.indexOf("function RecentSampleTooltip"))
+  const tooltip = page.slice(page.indexOf("function RecentSampleTooltip"), page.indexOf("function bucketForSample"))
+
+  assert.match(tooltip, /const valueOrder = relayPairs\.length > 0/)
+  assert.match(tooltip, /primaryLabel: "\\u6e20\\u9053\\u6570\\u636e"/)
+  assert.match(tooltip, /counterpartLabel: "\\u4e2d\\u8f6c\\u7ad9\\u6570\\u636e"/)
+  assert.match(tooltip, /primaryLabel: "\\u4e2d\\u8f6c\\u7ad9\\u6570\\u636e"/)
+  assert.match(tooltip, /counterpartLabel: "\\u6e20\\u9053\\u6570\\u636e"/)
+  assert.match(tooltip, /flex items-start justify-between gap-3[\s\S]*formatSampleTime\(sample\.created_at\)[\s\S]*RecentValueOrder/)
+  assert.match(tooltip, /w-\[min\(20rem,calc\(100vw-32px\)\)\]/)
+  assert.doesNotMatch(pair, /\\u6570\\u503c\\u987a\\u5e8f|primaryLabel|counterpartLabel/)
+  assert.deepEqual(Array.from(pair.matchAll(/\{ label: [^,]+, metric: "([^"]+)" \}/g), (match) => match[1]), ["first", "duration", "speed"])
+  assert.doesNotMatch(pair, /metric: "time"|metric: "model"|metric: "tokens"/)
+  assert.match(pair, /grid-cols-3/)
+  assert.match(pair, /grid grid-rows-2 gap-0\.5/)
+  assert.match(pair, /RecentCallValue sample=\{primary\} metric=\{row\.metric\} \/><RecentCallValue sample=\{counterpart\} metric=\{row\.metric\}/)
+  assert.doesNotMatch(pair, /grid-cols-\[68px_1fr_1fr\]/)
+})
+
+test("recent-call fallback keeps three core metrics in two rows", () => {
+  const page = readFileSync(new URL("../components/monitor/latency-stability-lane.tsx", import.meta.url), "utf8")
+  const tooltip = page.slice(page.indexOf("function RecentSampleTooltip"), page.indexOf("function bucketForSample"))
+
+  assert.match(tooltip, /const hasComparison = relayPairs\.length > 0 \|\| channelPairs\.length > 0/)
+  assert.match(tooltip, /hasComparison \? "w-\[min\(20rem,calc\(100vw-32px\)\)\]" : "w-fit max-w-\[calc\(100vw-32px\)\]"/)
+  assert.match(tooltip, /grid grid-cols-3 gap-px overflow-hidden/)
+  assert.match(tooltip, /block font-sans text-\[10px\] text-muted-foreground/)
+  assert.match(tooltip, /mt-1 block whitespace-nowrap font-semibold leading-4/)
+  assert.doesNotMatch(tooltip, /totalTokens\(sample\)/)
+})
+
+test("recent calls remain clickable when they are outside the active time buckets", () => {
+  const page = readFileSync(new URL("../components/monitor/latency-stability-lane.tsx", import.meta.url), "utf8")
+  const cell = page.slice(page.indexOf("function RecentSampleCell"), page.indexOf("interface RelayCompareConfig"))
+  const lane = page.slice(page.indexOf("export function LatencyStabilityLane"))
+
+  assert.match(cell, /onOpen: \(sample: LatencyDetailSample, bucket: LatencyBucket \| null\) => void/)
+  assert.match(cell, /onClick=\{\(\) => onOpen\(sample, bucket\)\}/)
+  assert.doesNotMatch(cell, /if \(bucket\) onOpen/)
+  assert.match(page, /function recentSampleBucket\(sample: LatencyDetailSample\)/)
+  assert.match(lane, /function openRecentSample\(sample: LatencyDetailSample, bucket: LatencyBucket \| null\)/)
+  assert.match(lane, /if \(bucket\) \{[\s\S]*void openBucket\(bucket\)[\s\S]*return[\s\S]*\}/)
+  assert.match(lane, /setSelected\(recentSampleBucket\(sample\)\)/)
+  assert.match(lane, /setSamples\(\[sample\]\)/)
+})
+
+test("call detail percentile values use two fixed rows", () => {
+  const page = readFileSync(new URL("../components/monitor/latency-stability-lane.tsx", import.meta.url), "utf8")
+  const detailValue = page.slice(page.indexOf("function DetailPercentileValue"), page.indexOf("function InlineLatencyDetails"))
+
+  assert.match(detailValue, /grid grid-rows-2/)
+  assert.match(detailValue, /grid-cols-\[auto_auto\]/)
+  assert.match(detailValue, /justify-start/)
+  assert.doesNotMatch(detailValue, /justify-between/)
+  assert.match(detailValue, />P50</)
+  assert.match(detailValue, />P95</)
+  assert.match(page, /<DetailPercentileValue p50=\{selected\.first_token_p50_ms\} p95=\{selected\.first_token_p95_ms\} format=\{formatLatency\} \/>/)
+  assert.match(page, /<DetailPercentileValue p50=\{selected\.duration_p50_ms\} p95=\{selected\.duration_p95_ms\} format=\{formatLatency\} \/>/)
+  assert.match(page, /<DetailPercentileValue p50=\{selected\.output_token_speed_p50\} p95=\{selected\.output_token_speed_p95\} format=\{formatOutputTokenSpeed\} \/>/)
+})
+
+test("call detail metric panel aligns with the detail list width", () => {
+  const page = readFileSync(new URL("../components/monitor/latency-stability-lane.tsx", import.meta.url), "utf8")
+  const dialog = page.slice(page.indexOf("<Dialog open="), page.indexOf("</Dialog>"))
+
+  assert.match(dialog, /mx-3 mt-3 grid grid-cols-2/)
+  assert.match(dialog, /sm:grid-cols-\[104px_repeat\(3,minmax\(0,1fr\)\)\]/)
+  assert.match(dialog, /overflow-hidden rounded-lg border border-border/)
+  assert.doesNotMatch(dialog, /mx-auto|sm:w-fit|w-\[calc\(100%-24px\)\]/)
+  assert.doesNotMatch(dialog, /grid grid-cols-2 gap-px border-b border-border bg-border sm:grid-cols-4/)
 })

@@ -20,6 +20,7 @@ func registerRelayStations(g *gin.RouterGroup, d *Deps) {
 	gp.GET("", func(c *gin.Context) { listRelayStations(c, d) })
 	gp.POST("", func(c *gin.Context) { createRelayStation(c, d) })
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllRelayStations(c, d) })
+	gp.GET("/latency-trends", func(c *gin.Context) { relayStationLatencyTrends(c, d) })
 	gp.GET("/:id", func(c *gin.Context) { relayStationOverview(c, d) })
 	gp.GET("/:id/usage", func(c *gin.Context) { relayStationUsage(c, d) })
 	gp.GET("/:id/usage/daily", func(c *gin.Context) { relayStationDailyConsumption(c, d) })
@@ -1267,6 +1268,35 @@ func relayStationAccountLatencySamples(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": samples})
+}
+
+func relayStationLatencyTrends(c *gin.Context, d *Deps) {
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "60"))
+	if limit <= 0 || limit > 100 {
+		limit = 60
+	}
+	stations, err := d.RelayStations.List()
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	out := make([]gin.H, 0)
+	for _, station := range stations {
+		series, err := d.Relay.RecentAccountLatencySamples(station.ID, limit)
+		if err != nil {
+			fail(c, http.StatusInternalServerError, err)
+			return
+		}
+		accountIDs := make([]int64, 0, len(series))
+		for accountID := range series {
+			accountIDs = append(accountIDs, accountID)
+		}
+		sort.Slice(accountIDs, func(i, j int) bool { return accountIDs[i] < accountIDs[j] })
+		for _, accountID := range accountIDs {
+			out = append(out, gin.H{"station_id": station.ID, "account_id": accountID, "samples": series[accountID]})
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 func relayStationDailyConsumption(c *gin.Context, d *Deps) {

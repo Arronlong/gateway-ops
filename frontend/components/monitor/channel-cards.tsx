@@ -51,7 +51,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useConfirm } from "@/components/ui/confirm-dialog"
-import { useChannels, useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelLatencyTrends, useChannelMetrics, useChannelModelCatalog, useChannelRates, useChannelRelayAssociations } from "@/lib/queries"
+import { useChannels, useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelLatencyTrends, useChannelMetrics, useChannelModelCatalog, useChannelRates, useChannelRelayAssociations, useRelayLatencyTrends } from "@/lib/queries"
 import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { channelTypeLabel, money, relativeTime } from "@/lib/format"
@@ -59,11 +59,11 @@ import { cn } from "@/lib/utils"
 import { syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
 import type { Channel, ChannelAccount, ChannelType, ChannelUsageSample, LatencyBucketGranularity, RateBoundAccount, RateSnapshot, RelayUsageRange, SystemSettings } from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
-import { linkedStationsByChannel as buildLinkedStationsByChannel, relayComparisonsByChannel } from "@/lib/channel-relay-association"
+import { linkedStationsByChannel as buildLinkedStationsByChannel, relayAccountComparisonKey, relayComparisonsByChannel } from "@/lib/channel-relay-association"
 import { RateChangeDot, RateTooltipBody } from "@/components/monitor/rate-change"
 import { LatencyStabilityLane } from "@/components/monitor/latency-stability-lane"
 import { ChannelConsumptionTrend } from "@/components/monitor/channel-consumption-trend"
-import { latencyHealthScore } from "@/lib/latency"
+import { latencyHealthScore, outputTokenSpeed, p50, p95 } from "@/lib/latency"
 import { channelSectionVisible, type ChannelSection } from "@/lib/system-settings"
 import { channelMatchesSearch } from "@/lib/channel-search"
 
@@ -73,7 +73,7 @@ type ManagementModeFilter = "auto" | "manual" | "all"
 type AccountCountFilter = "multi" | "single" | "all"
 type ChannelTypeFilter = "all" | ChannelType
 type AssociationFilter = "all" | "unlinked" | `station:${number}`
-type ChannelSortKey = "score" | "ratio_change" | "recent_call" | "updated" | "balance" | "consumption" | "usage_cost" | "name" | "account_count" | "status"
+type ChannelSortKey = "score" | "ratio_change" | "recent_call" | "updated" | "output_speed_p50" | "output_speed_p95" | "first_latency_p50" | "first_latency_p95" | "duration_latency_p50" | "duration_latency_p95" | "balance" | "consumption" | "usage_cost" | "name" | "account_count" | "status"
 type SortDirection = "asc" | "desc"
 type ChannelViewMode = "gallery" | "list"
 type ChannelColumnKey = "score" | "type" | "status" | "management" | "accounts" | "balance" | "consumption" | "usage_cost" | "recent" | "stability" | "consumption_trend" | "updated" | "remark"
@@ -86,7 +86,7 @@ const channelColumnDefinitions: ChannelColumnDefinition[] = [
   { key: "management", label: "管理方式", template: "104px", minWidth: 104 },
   { key: "accounts", label: "账号", template: "minmax(160px, .8fr)", minWidth: 160 },
   { key: "balance", label: "余额", template: "132px", minWidth: 132 },
-  { key: "consumption", label: "区间消耗", template: "132px", minWidth: 132 },
+  { key: "consumption", label: "区间余额消耗", template: "132px", minWidth: 132 },
   { key: "usage_cost", label: "区间调用消耗", template: "148px", minWidth: 148 },
   { key: "recent", label: "最近调用", template: "220px", minWidth: 220 },
   { key: "stability", label: "时间稳定性", template: "260px", minWidth: 260 },
@@ -157,10 +157,16 @@ function channelListGridStyle(visibleColumns: Set<ChannelColumnKey>): CSSPropert
 const channelSortOptions: Array<{ value: ChannelSortKey; label: string }> = [
   { value: "score", label: "综合评分" },
   { value: "ratio_change", label: "最近倍率变动" },
-  { value: "recent_call", label: "最近调用" },
-  { value: "updated", label: "上次更新" },
+  { value: "recent_call", label: "最近调用时间" },
+  { value: "updated", label: "上次更新时间" },
+  { value: "output_speed_p50", label: "Token 速度 P50" },
+  { value: "output_speed_p95", label: "Token 速度 P95" },
+  { value: "first_latency_p50", label: "首字耗时 P50" },
+  { value: "first_latency_p95", label: "首字耗时 P95" },
+  { value: "duration_latency_p50", label: "总耗时 P50" },
+  { value: "duration_latency_p95", label: "总耗时 P95" },
   { value: "balance", label: "余额" },
-  { value: "consumption", label: "区间消耗" },
+  { value: "consumption", label: "区间余额消耗" },
   { value: "usage_cost", label: "区间调用消耗" },
   { value: "name", label: "渠道名称" },
   { value: "account_count", label: "账号数量" },
@@ -189,7 +195,7 @@ function ActiveFilterSubTrigger({ label, value }: { label: string; value?: strin
 }
 
 function defaultSortDirection(key: ChannelSortKey): SortDirection {
-  return key === "name" ? "asc" : "desc"
+  return key === "name" || key.startsWith("first_latency") || key.startsWith("duration_latency") ? "asc" : "desc"
 }
 
 function statusOf(c: Channel, balance?: number | null): Status {
@@ -741,9 +747,11 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
   const usageRangeLabel = usageRanges.find((item) => item.value === usageRange)?.label ?? usageRange
   const metrics = useChannelMetrics(usageRange)
   const displayBucketCount = viewMode === "list" ? 30 : 60
+  const recentVisible = channelSectionVisible(uiSettings, "recent") && (viewMode === "gallery" || visibleColumns.has("recent"))
   const stabilityVisible = channelSectionVisible(uiSettings, "stability") && (viewMode === "gallery" || visibleColumns.has("stability"))
   const consumptionVisible = channelSectionVisible(uiSettings, "consumption_trend") && (viewMode === "gallery" || visibleColumns.has("consumption_trend"))
   const latencyTrends = useChannelLatencyTrends(60, true)
+  const relayLatencyTrends = useRelayLatencyTrends(60, recentVisible)
   const scoreLatencyBuckets = useChannelLatencyBuckets(usageRange, "auto", 60, true)
   const listAutoLatencyBuckets = useChannelLatencyBuckets(usageRange, "auto", 30, viewMode === "list" && latencyGranularity === "auto" && stabilityVisible)
   const fixedLatencyBuckets = useChannelLatencyBuckets(usageRange, latencyGranularity, displayBucketCount, latencyGranularity !== "auto" && stabilityVisible)
@@ -751,6 +759,7 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
   const consumptionBuckets = useChannelConsumptionBuckets(usageRange, latencyGranularity, displayBucketCount, consumptionVisible)
   const metricByChannel = useMemo(() => new Map((metrics.data ?? []).map((item) => [item.channel_id, item])), [metrics.data])
   const latencyByChannel = useMemo(() => new Map((latencyTrends.data ?? []).map((item) => [item.channel_id, item.samples])), [latencyTrends.data])
+  const relayRecentSamplesByAccount = useMemo(() => new Map((relayLatencyTrends.data ?? []).map((item) => [relayAccountComparisonKey(item.station_id, item.account_id), item.samples])), [relayLatencyTrends.data])
   const latencyBucketsByChannel = useMemo(() => new Map((latencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [latencyBuckets.data])
   const scoreLatencyBucketsByChannel = useMemo(() => new Map((scoreLatencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [scoreLatencyBuckets.data])
   const consumptionBucketsByChannel = useMemo(() => new Map((consumptionBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [consumptionBuckets.data])
@@ -773,6 +782,23 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
     }
     return latest
   }, [latencyTrends.data])
+  const latencySortMetricsByChannel = useMemo(() => {
+    const metrics = new Map<number, { outputSpeedP50: number | null; outputSpeedP95: number | null; firstLatencyP50: number | null; firstLatencyP95: number | null; durationP50: number | null; durationP95: number | null }>()
+    for (const [channelID, samples] of latencyByChannel) {
+      const speeds = samples.map((sample) => outputTokenSpeed(sample.output_tokens, sample.duration_ms))
+      const firstLatencies = samples.map((sample) => sample.first_token_ms)
+      const durations = samples.map((sample) => sample.duration_ms)
+      metrics.set(channelID, {
+        outputSpeedP50: p50(speeds),
+        outputSpeedP95: p95(speeds),
+        firstLatencyP50: p50(firstLatencies),
+        firstLatencyP95: p95(firstLatencies),
+        durationP50: p50(durations),
+        durationP95: p95(durations),
+      })
+    }
+    return metrics
+  }, [latencyByChannel])
   const linkedStationsByChannel = useMemo(() => buildLinkedStationsByChannel(associations.data), [associations.data])
   const associatedModelsByChannel = useMemo(() => new Map((modelCatalog.data ?? []).map((item) => [item.channel_id, item.models])), [modelCatalog.data])
   const filteredChannels = useMemo(() => {
@@ -820,6 +846,24 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
         case "updated":
           result = compareNumber(timestamp(left.last_balance_at ?? left.updated_at), timestamp(right.last_balance_at ?? right.updated_at))
           break
+        case "output_speed_p50":
+          result = compareNumber(latencySortMetricsByChannel.get(left.id)?.outputSpeedP50 ?? null, latencySortMetricsByChannel.get(right.id)?.outputSpeedP50 ?? null)
+          break
+        case "output_speed_p95":
+          result = compareNumber(latencySortMetricsByChannel.get(left.id)?.outputSpeedP95 ?? null, latencySortMetricsByChannel.get(right.id)?.outputSpeedP95 ?? null)
+          break
+        case "first_latency_p50":
+          result = compareNumber(latencySortMetricsByChannel.get(left.id)?.firstLatencyP50 ?? null, latencySortMetricsByChannel.get(right.id)?.firstLatencyP50 ?? null)
+          break
+        case "first_latency_p95":
+          result = compareNumber(latencySortMetricsByChannel.get(left.id)?.firstLatencyP95 ?? null, latencySortMetricsByChannel.get(right.id)?.firstLatencyP95 ?? null)
+          break
+        case "duration_latency_p50":
+          result = compareNumber(latencySortMetricsByChannel.get(left.id)?.durationP50 ?? null, latencySortMetricsByChannel.get(right.id)?.durationP50 ?? null)
+          break
+        case "duration_latency_p95":
+          result = compareNumber(latencySortMetricsByChannel.get(left.id)?.durationP95 ?? null, latencySortMetricsByChannel.get(right.id)?.durationP95 ?? null)
+          break
         case "balance":
           result = compareNumber(currentBalance(left), currentBalance(right))
           break
@@ -845,7 +889,7 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
       }
       return result || left.id - right.id
     })
-  }, [accountCount, associatedModelsByChannel, associationFilter, channelType, channels, healthScoreByChannel, latestCallByChannel, linkedStationsByChannel, managementMode, metricByChannel, monitorStatus, searchQuery, sortDirection, sortKey])
+  }, [accountCount, associatedModelsByChannel, associationFilter, channelType, channels, healthScoreByChannel, latestCallByChannel, latencySortMetricsByChannel, linkedStationsByChannel, managementMode, metricByChannel, monitorStatus, searchQuery, sortDirection, sortKey])
   const refresh = useTriggerRefresh()
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [editing, setEditing] = useState<Channel | null>(null)
@@ -1102,8 +1146,8 @@ actions={<>
               <DropdownMenuSeparator />
               <DropdownMenuLabel className="text-xs text-muted-foreground">排序方向</DropdownMenuLabel>
               <DropdownMenuRadioGroup value={sortDirection} onValueChange={(value) => setSortDirection(value as SortDirection)}>
-                <DropdownMenuRadioItem value="desc"><ArrowDown className="size-3.5" />降序（高 → 低 / 新 → 旧）</DropdownMenuRadioItem>
-                <DropdownMenuRadioItem value="asc"><ArrowUp className="size-3.5" />升序（低 → 高 / 旧 → 新）</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="desc"><ArrowDown className="size-3.5" />降序（数值高 → 低 / 时间新 → 旧）</DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="asc"><ArrowUp className="size-3.5" />升序（数值低 → 高 / 时间旧 → 新）</DropdownMenuRadioItem>
               </DropdownMenuRadioGroup>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -1242,7 +1286,7 @@ actions={<>
                   <Row label="管理">{c.balance_mode === "manual" ? "手动余额" : "自动读取"}</Row>
                   {c.balance_mode !== "manual" ? <Row label="凭据">{c.credential_mode === "token" ? "Token" : "账号密码"}</Row> : null}
 				  <Row label="余额"><span className={cn("font-mono text-base font-bold tabular-nums", balanceTone({ ...c, last_balance: currentBalance }))}>{metrics.loading && c.balance_mode === "manual" ? "读取中…" : c.balance_mode === "auto" ? <AccountBalance accounts={accounts} total={currentBalance} /> : money(currentBalance)}</span></Row>
-                  <Row label="区间消耗"><span className="font-mono font-bold tabular-nums text-warning" title={`${usageRangeLabel}余额下降累计，充值不计入`}>{metrics.loading && !metric ? "读取中…" : money(metric?.consumption_amount)}</span></Row>
+                  <Row label="区间余额消耗"><span className="font-mono font-bold tabular-nums text-warning" title={`${usageRangeLabel}余额下降累计，充值不计入`}>{metrics.loading && !metric ? "读取中…" : money(metric?.consumption_amount)}</span></Row>
                   <Row label="累计充值"><span className="font-mono tabular-nums">{metrics.loading && !metric ? "读取中…" : cny(metric?.cumulative_recharge_amount)}</span></Row>
                   <Row label="区间调用消耗"><span className="font-mono tabular-nums" title={metric ? `${usageRangeLabel} · 渠道自身 usage/log · ${metric.usage_request_count} 次请求` : metrics.error ?? ""}>{metrics.loading && !metric ? "读取中…" : charge(metric?.usage_cost_amount)}</span></Row>
                   <Row label="阈值">{c.balance_threshold > 0 ? money(c.balance_threshold) : "未设置"}</Row>
@@ -1271,6 +1315,7 @@ actions={<>
                   layout="fill"
                   granularity={latencyGranularity}
                   relayLinks={relayLinksByChannel.get(c.id) ?? []}
+                  relayRecentSamplesByAccount={relayRecentSamplesByAccount}
                   range={usageRange}
                   bucketCount={displayBucketCount}
                   emptyLabel={`${usageRangeLabel}暂无调用数据`}
@@ -1386,7 +1431,7 @@ actions={<>
             {visibleColumns.has("management") ? <span>管理方式</span> : null}
             {visibleColumns.has("accounts") ? <span>账号</span> : null}
             {visibleColumns.has("balance") ? <span>余额</span> : null}
-            {visibleColumns.has("consumption") ? <span>区间消耗</span> : null}
+            {visibleColumns.has("consumption") ? <span>区间余额消耗</span> : null}
             {visibleColumns.has("usage_cost") ? <span>区间调用消耗</span> : null}
             {visibleColumns.has("recent") ? <span>最近调用</span> : null}
             {visibleColumns.has("stability") ? <span>时间稳定性</span> : null}
@@ -1422,9 +1467,9 @@ actions={<>
               {visibleColumns.has("management") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">管理方式</span><span className={cn("inline-flex rounded px-2 py-1 text-[11px] font-medium ring-1 ring-inset", c.balance_mode === "manual" ? "bg-amber-400/15 text-amber-700 ring-amber-500/30 dark:text-amber-400" : "bg-sky-500/10 text-sky-700 ring-sky-500/20 dark:text-sky-400")}>{c.balance_mode === "manual" ? "手动管理" : "自动读取"}</span></div> : null}
               {visibleColumns.has("accounts") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">账号</p>{c.balance_mode === "manual" ? <span className="text-xs text-muted-foreground">手动渠道</span> : <div className="min-w-0 text-xs"><AccountPreview accounts={accounts} /><p className="mt-1 text-[10px] text-muted-foreground">{accounts.length} 个账号</p></div>}</div> : null}
               {visibleColumns.has("balance") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">余额</span><span className={cn("font-mono text-sm font-semibold tabular-nums", balanceTone({ ...c, last_balance: currentBalance }))}>{metrics.loading && c.balance_mode === "manual" ? "读取中…" : c.balance_mode === "auto" ? <AccountBalance accounts={accounts} total={currentBalance} /> : money(currentBalance)}</span></div> : null}
-              {visibleColumns.has("consumption") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">区间消耗</span><span className="font-mono text-sm font-semibold tabular-nums text-warning">{metrics.loading && !metric ? "读取中…" : money(metric?.consumption_amount)}</span></div> : null}
+              {visibleColumns.has("consumption") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">区间余额消耗</span><span className="font-mono text-sm font-semibold tabular-nums text-warning">{metrics.loading && !metric ? "读取中…" : money(metric?.consumption_amount)}</span></div> : null}
               {visibleColumns.has("usage_cost") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">区间调用消耗</span><span className="font-mono text-xs font-semibold tabular-nums" title={metric ? `渠道自身 usage/log · ${metric.usage_request_count} 次请求` : metrics.error ?? ""}>{metrics.loading && !metric ? "读取中…" : charge(metric?.usage_cost_amount)}</span></div> : null}
-              {channelSectionVisible(uiSettings, "recent") && visibleColumns.has("recent") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">最近调用</p><LatencyStabilityLane buckets={latencyBucketsByChannel.get(c.id) ?? []} recentSamples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} loading={latencyBuckets.loading} layout="fill" compact granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无调用数据`} loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /><RecentLatencyTitle samples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} compact /></div> : null}
+              {channelSectionVisible(uiSettings, "recent") && visibleColumns.has("recent") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">最近调用</p><LatencyStabilityLane buckets={latencyBucketsByChannel.get(c.id) ?? []} recentSamples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} loading={latencyBuckets.loading} layout="fill" compact granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} relayRecentSamplesByAccount={relayRecentSamplesByAccount} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无调用数据`} loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /><RecentLatencyTitle samples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} compact /></div> : null}
               {channelSectionVisible(uiSettings, "stability") && visibleColumns.has("stability") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">时间稳定性</p><LatencyStabilityLane buckets={latencyBucketsByChannel.get(c.id) ?? []} loading={latencyBuckets.loading} layout="fill" compact granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无调用数据`} loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /></div> : null}
               {channelSectionVisible(uiSettings, "consumption_trend") && visibleColumns.has("consumption_trend") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">调用消耗趋势</p><ChannelConsumptionTrend buckets={consumptionBucketsByChannel.get(c.id) ?? []} loading={consumptionBuckets.loading} granularity={latencyGranularity} compact relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无消费数据`} /></div> : null}
               {visibleColumns.has("updated") ? <div className="flex items-center justify-between gap-2 text-xs lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">上次更新</span><span className="text-muted-foreground" title={c.last_balance_at ?? c.updated_at}>{relativeTime(c.last_balance_at ?? c.updated_at)}</span></div> : null}

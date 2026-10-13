@@ -93,7 +93,7 @@ test("relay comparison aggregation keeps only linked relay accounts", () => {
   })
 
   assert.deepEqual(result.get(10), [
-    { stationID: 2, stationName: "站点 B", accounts: [{ externalID: 7, name: "备用号" }] },
+    { stationID: 2, stationName: "站点 B", accounts: [{ externalID: 7, name: "备用号", channelAccountID: 100 }] },
   ])
   assert.equal(result.get(11), undefined)
 })
@@ -115,7 +115,7 @@ test("relay comparison aggregation falls back to external id when name missing",
   })
 
   assert.deepEqual(result.get(20), [
-    { stationID: 3, stationName: "站点 C", accounts: [{ externalID: 91, name: "账号 91" }] },
+    { stationID: 3, stationName: "站点 C", accounts: [{ externalID: 91, name: "账号 91", channelAccountID: 200 }] },
   ])
 })
 
@@ -172,8 +172,8 @@ test("channel comparison aggregation reverses linked associations by relay accou
   ])
 
   assert.deepEqual(result.get(relayAccountComparisonKey(2, 7)), [
-    { channelID: 10, channelName: "主渠道", accountNames: ["primary@example.com", "secondary@example.com"] },
-    { channelID: 11, channelName: "备用渠道", accountNames: ["other@example.com"] },
+    { channelID: 10, channelName: "主渠道", accountIDs: [100, 101], accountNames: ["primary@example.com", "secondary@example.com"] },
+    { channelID: 11, channelName: "备用渠道", accountIDs: [110], accountNames: ["other@example.com"] },
   ])
 })
 
@@ -204,9 +204,9 @@ test("channel comparison aggregation falls back to channel id and isolates stati
   }, [])
 
   assert.deepEqual(result.get(relayAccountComparisonKey(3, 91)), [
-    { channelID: 20, channelName: "渠道 20", accountNames: ["channel@example.com"] },
+    { channelID: 20, channelName: "渠道 20", accountIDs: [200], accountNames: ["channel@example.com"] },
   ])
   assert.deepEqual(result.get(relayAccountComparisonKey(4, 91)), [
-    { channelID: 20, channelName: "渠道 20", accountNames: ["channel@example.com"] },
+    { channelID: 20, channelName: "渠道 20", accountIDs: [200], accountNames: ["channel@example.com"] },
   ])
 })

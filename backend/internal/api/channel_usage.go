@@ -10,14 +10,16 @@ import (
 )
 
 type channelLatencyBucket struct {
-	Start           time.Time `json:"start"`
-	End             time.Time `json:"end"`
-	FirstTokenP50MS *int64    `json:"first_token_p50_ms"`
-	FirstTokenP95MS *int64    `json:"first_token_p95_ms"`
-	DurationP50MS   *int64    `json:"duration_p50_ms"`
-	DurationP95MS   *int64    `json:"duration_p95_ms"`
-	SuccessRate     *float64  `json:"success_rate"`
-	RequestCount    int       `json:"request_count"`
+	Start               time.Time `json:"start"`
+	End                 time.Time `json:"end"`
+	FirstTokenP50MS     *int64    `json:"first_token_p50_ms"`
+	FirstTokenP95MS     *int64    `json:"first_token_p95_ms"`
+	DurationP50MS       *int64    `json:"duration_p50_ms"`
+	DurationP95MS       *int64    `json:"duration_p95_ms"`
+	OutputTokenSpeedP50 *float64  `json:"output_token_speed_p50"`
+	OutputTokenSpeedP95 *float64  `json:"output_token_speed_p95"`
+	SuccessRate         *float64  `json:"success_rate"`
+	RequestCount        int       `json:"request_count"`
 }
 
 type channelConsumptionBucket struct {
@@ -69,6 +71,7 @@ func buildChannelLatencyBuckets(events []storage.ChannelUsageEvent, since, until
 	type values struct {
 		first        []int64
 		duration     []int64
+		speeds       []float64
 		knownSuccess int
 		knownCount   int
 		requests     int
@@ -86,6 +89,11 @@ func buildChannelLatencyBuckets(events []storage.ChannelUsageEvent, since, until
 		if event.DurationMS != nil {
 			grouped[index].duration = append(grouped[index].duration, *event.DurationMS)
 		}
+		if event.DurationMS != nil {
+			if speed, ok := channelOutputTokenSpeed(event.OutputTokens, *event.DurationMS); ok {
+				grouped[index].speeds = append(grouped[index].speeds, speed)
+			}
+		}
 		if event.SuccessKnown {
 			grouped[index].knownCount++
 			if event.Success {
@@ -100,6 +108,8 @@ func buildChannelLatencyBuckets(events []storage.ChannelUsageEvent, since, until
 		bucket.FirstTokenP95MS = percentilePtr(grouped[i].first, 0.95)
 		bucket.DurationP50MS = percentilePtr(grouped[i].duration, 0.50)
 		bucket.DurationP95MS = percentilePtr(grouped[i].duration, 0.95)
+		bucket.OutputTokenSpeedP50 = percentileFloatPtr(grouped[i].speeds, 0.50)
+		bucket.OutputTokenSpeedP95 = percentileFloatPtr(grouped[i].speeds, 0.95)
 		if grouped[i].knownCount > 0 {
 			value := float64(grouped[i].knownSuccess) / float64(grouped[i].knownCount)
 			bucket.SuccessRate = &value
@@ -107,6 +117,31 @@ func buildChannelLatencyBuckets(events []storage.ChannelUsageEvent, since, until
 		out[i] = bucket
 	}
 	return out
+}
+
+func channelOutputTokenSpeed(outputTokens, durationMS int64) (float64, bool) {
+	if outputTokens <= 0 || durationMS <= 0 {
+		return 0, false
+	}
+	return float64(outputTokens) * 1000 / float64(durationMS), true
+}
+
+func percentileFloatPtr(values []float64, percentile float64) *float64 {
+	if len(values) == 0 {
+		return nil
+	}
+	ordered := append([]float64(nil), values...)
+	sort.Float64s(ordered)
+	if len(ordered) == 1 {
+		value := ordered[0]
+		return &value
+	}
+	position := percentile * float64(len(ordered)-1)
+	lower := int(math.Floor(position))
+	upper := int(math.Ceil(position))
+	weight := position - float64(lower)
+	value := ordered[lower]*(1-weight) + ordered[upper]*weight
+	return &value
 }
 
 func buildChannelConsumptionBuckets(events []storage.ChannelUsageEvent, since, until time.Time, spec relay.LatencyBucketSpec) []channelConsumptionBucket {

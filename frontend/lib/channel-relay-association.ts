@@ -26,6 +26,7 @@ export function linkedStationsByChannel(snapshot?: Pick<ChannelRelayAssociationS
 export interface RelayCompareAccount {
   externalID: number
   name: string
+  channelAccountID: number
 }
 
 export interface RelayCompareLink {
@@ -37,6 +38,7 @@ export interface RelayCompareLink {
 export interface ChannelCompareLink {
   channelID: number
   channelName: string
+  accountIDs: number[]
   accountNames: string[]
 }
 
@@ -70,6 +72,7 @@ export function relayComparisonsByChannel(snapshot?: Pick<ChannelRelayAssociatio
     entry.accounts.push({
       externalID: link.relay_account_external_id,
       name: link.relay_account_name?.trim() || "账号 " + link.relay_account_external_id,
+      channelAccountID: link.channel_account_id,
     })
   }
   for (const list of byChannel.values()) {
@@ -105,6 +108,7 @@ export function channelComparisonsByRelayAccount(
       entry = {
         channelID: link.channel_id,
         channelName: channelNames.get(link.channel_id)?.trim() || `渠道 ${link.channel_id}`,
+        accountIDs: [],
         accountNames: [],
       }
       channelsForAccount.set(link.channel_id, entry)
@@ -112,12 +116,16 @@ export function channelComparisonsByRelayAccount(
       byAccount.set(key, list)
     }
     const accountName = link.channel_account_username.trim() || `账号 ${link.channel_account_id}`
+    if (!entry.accountIDs.includes(link.channel_account_id)) entry.accountIDs.push(link.channel_account_id)
     if (!entry.accountNames.includes(accountName)) entry.accountNames.push(accountName)
   }
 
   for (const list of byAccount.values()) {
     list.sort((left, right) => left.channelID - right.channelID)
-    for (const entry of list) entry.accountNames.sort((left, right) => left.localeCompare(right, "zh-CN", { numeric: true }))
+    for (const entry of list) {
+      entry.accountIDs.sort((left, right) => left - right)
+      entry.accountNames.sort((left, right) => left.localeCompare(right, "zh-CN", { numeric: true }))
+    }
   }
   return byAccount
 }

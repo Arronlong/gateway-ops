@@ -718,6 +718,7 @@ export interface RelayLatencySample {
 }
 
 export interface ChannelUsageSample {
+  channel_account_id: number
   first_token_ms: number | null
   duration_ms: number | null
   success_known: boolean
@@ -735,6 +736,12 @@ export interface ChannelLatencyTrend {
   samples: ChannelUsageSample[]
 }
 
+export interface RelayLatencyTrend {
+  station_id: number
+  account_id: number
+  samples: RelayLatencySample[]
+}
+
 export interface LatencyBucket {
   start: string
   end: string
@@ -742,6 +749,8 @@ export interface LatencyBucket {
   first_token_p95_ms: number | null
   duration_p50_ms: number | null
   duration_p95_ms: number | null
+  output_token_speed_p50: number | null
+  output_token_speed_p95: number | null
   success_rate: number | null
   request_count: number
 }

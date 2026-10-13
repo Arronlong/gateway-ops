@@ -596,6 +596,7 @@ type ChannelUsageSyncState struct {
 func (ChannelUsageSyncState) TableName() string { return "channel_usage_sync_states" }
 
 type ChannelUsageSample struct {
+	ChannelAccountID    uint      `json:"channel_account_id"`
 	FirstTokenMS        *int64    `json:"first_token_ms"`
 	DurationMS          *int64    `json:"duration_ms"`
 	SuccessKnown        bool      `json:"success_known"`

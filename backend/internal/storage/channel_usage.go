@@ -149,6 +149,7 @@ func channelUsageSamples(events []ChannelUsageEvent) []ChannelUsageSample {
 	out := make([]ChannelUsageSample, 0, len(events))
 	for _, event := range events {
 		out = append(out, ChannelUsageSample{
+			ChannelAccountID:    event.ChannelAccountID,
 			FirstTokenMS:        event.FirstTokenMS,
 			DurationMS:          event.DurationMS,
 			SuccessKnown:        event.SuccessKnown,

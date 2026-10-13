@@ -5,9 +5,10 @@ import type { ReactNode } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, PublicGroupMonitorCall, RelayLatencySample, RelayUsageRange } from "@/lib/api-types"
-import type { ChannelCompareLink, RelayCompareLink } from "@/lib/channel-relay-association"
+import { relayAccountComparisonKey, type ChannelCompareLink, type RelayCompareLink } from "@/lib/channel-relay-association"
 import { ChannelLatencyComparisonTooltip, RelayLatencyComparisonTooltip } from "@/components/monitor/channel-relay-compare"
-import { formatLatency, latencyBucketGranularityLabel, latencyColor, latencyTone, latencyTooltipTextClass } from "@/lib/latency"
+import { formatLatency, formatOutputTokenSpeed, latencyBucketGranularityLabel, latencyColor, latencyTone, latencyTooltipTextClass, outputTokenSpeed } from "@/lib/latency"
+import { matchRelatedRecentCall } from "@/lib/recent-call-comparison"
 import { cn } from "@/lib/utils"
 
 function formatBucketTime(value: string) {
@@ -25,12 +26,14 @@ function formatSampleTime(value: string) {
 type LatencyDetailSample = RelayLatencySample | ChannelUsageSample | PublicGroupMonitorCall
 
 function totalTokens(sample: LatencyDetailSample) {
-  if ("success" in sample) return 0
+  const inputTokens = "input_tokens" in sample ? (sample.input_tokens ?? 0) : 0
+  const outputTokens = "output_tokens" in sample ? (sample.output_tokens ?? 0) : 0
+  const cacheReadTokens = "cache_read_tokens" in sample ? (sample.cache_read_tokens ?? 0) : 0
+  const cacheCreationTokens = "cache_creation_tokens" in sample ? (sample.cache_creation_tokens ?? 0) : 0
   const extraCreation = "cache_creation_5m_tokens" in sample
     ? (sample.cache_creation_5m_tokens ?? 0) + (sample.cache_creation_1h_tokens ?? 0)
     : 0
-  return (sample.input_tokens ?? 0) + (sample.output_tokens ?? 0) + (sample.cache_read_tokens ?? 0)
-    + (sample.cache_creation_tokens ?? 0) + extraCreation
+  return inputTokens + outputTokens + cacheReadTokens + cacheCreationTokens + extraCreation
 }
 
 function BucketTooltip({ bucket }: { bucket: LatencyBucket }) {
@@ -54,6 +57,9 @@ function BucketTooltip({ bucket }: { bucket: LatencyBucket }) {
         <span className="font-sans text-muted-foreground">总耗时</span>
         <span className={durationP50 ? latencyTooltipTextClass[durationP50] : "text-muted-foreground"}>{bucket.duration_p50_ms == null ? "未提供" : formatLatency(bucket.duration_p50_ms)}</span>
         <span className={durationP95 ? latencyTooltipTextClass[durationP95] : "text-muted-foreground"}>{bucket.duration_p95_ms == null ? "未提供" : formatLatency(bucket.duration_p95_ms)}</span>
+        <span className="font-sans text-muted-foreground">输出速度</span>
+        <span>{formatOutputTokenSpeed(bucket.output_token_speed_p50)}</span>
+        <span>{formatOutputTokenSpeed(bucket.output_token_speed_p95)}</span>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div className="rounded-md border border-border px-2 py-1.5">
@@ -94,34 +100,80 @@ function LatencyHoverContent({ bucket, relay, channel }: { bucket: LatencyBucket
   return <BucketTooltip bucket={bucket} />
 }
 
-function RecentSampleTooltip({ sample, bucket }: { sample: LatencyDetailSample; bucket: LatencyBucket | null }) {
-  const first = sample.first_token_ms == null ? null : latencyTone(sample.first_token_ms, "first")
-  const duration = sample.duration_ms == null ? null : latencyTone(sample.duration_ms, "duration")
-  const firstP50 = bucket?.first_token_p50_ms == null ? null : latencyTone(bucket.first_token_p50_ms, "first")
-  const firstP95 = bucket?.first_token_p95_ms == null ? null : latencyTone(bucket.first_token_p95_ms, "first")
-  const durationP50 = bucket?.duration_p50_ms == null ? null : latencyTone(bucket.duration_p50_ms, "duration")
-  const durationP95 = bucket?.duration_p95_ms == null ? null : latencyTone(bucket.duration_p95_ms, "duration")
+function RecentCallValue({ sample, metric }: { sample: LatencyDetailSample | null; metric: "first" | "duration" | "speed" }) {
+  if (!sample) return <span className="text-muted-foreground">-</span>
+  if (metric === "speed") return <span>{formatOutputTokenSpeed(outputTokenSpeed("output_tokens" in sample ? sample.output_tokens : null, sample.duration_ms))}</span>
+  const value = metric === "first" ? sample.first_token_ms : sample.duration_ms
+  const tone = value == null ? null : latencyTone(value, metric)
+  return <span className={tone ? latencyTooltipTextClass[tone] : "text-muted-foreground"}>{formatLatency(value)}</span>
+}
+
+function RecentValueOrder({ primaryLabel, counterpartLabel }: { primaryLabel: string; counterpartLabel: string }) {
   return (
-    <div className="w-80 space-y-2 p-1 text-xs">
-      <div>
-        <p className="font-semibold text-foreground">{formatSampleTime(sample.created_at)}</p>
-        <p className="mt-0.5 text-[10px] text-muted-foreground">{"当前调用延迟；同时对比所属时间段的 P50/P95"}</p>
+    <span className="flex shrink-0 items-center gap-1 rounded-md border border-border bg-card px-2 py-1 text-[10px] font-medium shadow-sm">
+      <span className="text-muted-foreground">{"\u6570\u503c\u987a\u5e8f"}</span>
+      <span className="rounded bg-blue-500/15 px-1.5 py-0.5 text-blue-700 dark:text-blue-300">{primaryLabel}</span>
+      <span className="text-muted-foreground">/</span>
+      <span className="rounded bg-slate-900 px-1.5 py-0.5 text-white dark:bg-slate-100 dark:text-slate-900">{counterpartLabel}</span>
+    </span>
+  )
+}
+
+function RecentCallPair({ title, subtitle, primary, counterpart }: {
+  title: string
+  subtitle: string
+  primary: LatencyDetailSample
+  counterpart: LatencyDetailSample | null
+}) {
+  const rows: { label: string; metric: "first" | "duration" | "speed" }[] = [
+    { label: "\u9996\u5b57", metric: "first" },
+    { label: "\u603b\u8017\u65f6", metric: "duration" },
+    { label: "Token \u901f\u5ea6", metric: "speed" },
+  ]
+  return (
+    <section className="mt-2 border-t border-border pt-2 first:mt-0 first:border-t-0 first:pt-0">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0"><p className="truncate text-[11px] font-semibold text-foreground" title={title}>{title}</p><p className="truncate text-[10px] text-muted-foreground" title={subtitle}>{subtitle}</p></div>
+        {!counterpart ? <span className="shrink-0 text-[9px] text-muted-foreground">{"\u672a\u5339\u914d\u5230\u5173\u8054\u8c03\u7528"}</span> : null}
       </div>
-      <div className="grid grid-cols-[72px_1fr_1fr_1fr] gap-x-2 gap-y-1 rounded-md bg-muted/60 p-2 font-mono tabular-nums">
-        <span />
-        <span className="font-sans text-[10px] text-muted-foreground">{"当前调用"}</span>
-        <span className="font-sans text-[10px] text-muted-foreground">P50</span>
-        <span className="font-sans text-[10px] text-muted-foreground">P95</span>
-        <span className="font-sans text-muted-foreground">{"首字"}</span>
-        <span className={first ? latencyTooltipTextClass[first] : "text-muted-foreground"}>{formatLatency(sample.first_token_ms)}</span>
-        <span className={firstP50 ? latencyTooltipTextClass[firstP50] : "text-muted-foreground"}>{bucket?.first_token_p50_ms == null ? "未提供" : formatLatency(bucket.first_token_p50_ms)}</span>
-        <span className={firstP95 ? latencyTooltipTextClass[firstP95] : "text-muted-foreground"}>{bucket?.first_token_p95_ms == null ? "未提供" : formatLatency(bucket.first_token_p95_ms)}</span>
-        <span className="font-sans text-muted-foreground">{"总耗时"}</span>
-        <span className={duration ? latencyTooltipTextClass[duration] : "text-muted-foreground"}>{formatLatency(sample.duration_ms)}</span>
-        <span className={durationP50 ? latencyTooltipTextClass[durationP50] : "text-muted-foreground"}>{bucket?.duration_p50_ms == null ? "未提供" : formatLatency(bucket.duration_p50_ms)}</span>
-        <span className={durationP95 ? latencyTooltipTextClass[durationP95] : "text-muted-foreground"}>{bucket?.duration_p95_ms == null ? "未提供" : formatLatency(bucket.duration_p95_ms)}</span>
+      <div className="mt-2 grid grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border font-mono text-xs tabular-nums">
+        {rows.map((row) => <div key={row.metric} className="min-w-0 bg-muted/45 px-2 py-2"><span className="block font-sans text-[10px] text-muted-foreground">{row.label}</span><span className="mt-1 grid grid-rows-2 gap-0.5 font-semibold leading-4"><RecentCallValue sample={primary} metric={row.metric} /><RecentCallValue sample={counterpart} metric={row.metric} /></span></div>)}
       </div>
-      {bucket ? <p className="text-[10px] text-muted-foreground">{"点击查看所属时间段的调用明细"}</p> : <p className="text-[10px] text-muted-foreground">{"当前调用没有匹配到时间桶"}</p>}
+    </section>
+  )
+}
+
+function RecentSampleTooltip({ sample, primarySamples, relay, channel }: { sample: LatencyDetailSample; primarySamples: LatencyDetailSample[]; relay: RelayCompareConfig; channel: ChannelCompareConfig }) {
+  const channelAccountID = "channel_account_id" in sample ? sample.channel_account_id : null
+  const relayPairs = relay.links.flatMap((link) => link.accounts
+    .filter((account) => channelAccountID == null || account.channelAccountID === channelAccountID)
+    .map((account) => {
+      const counterpartSamples = relay.recentSamplesByAccount.get(relayAccountComparisonKey(link.stationID, account.externalID)) ?? []
+      const scopedPrimary = channelAccountID == null ? primarySamples : primarySamples.filter((item) => "channel_account_id" in item && item.channel_account_id === channelAccountID)
+      return { key: `${link.stationID}:${account.externalID}`, title: link.stationName, subtitle: account.name, counterpart: matchRelatedRecentCall(sample, scopedPrimary, counterpartSamples) }
+    }))
+  const channelPairs = channel.links.map((link) => {
+    const counterpartSamples = (channel.recentSamplesByChannel.get(link.channelID) ?? []).filter((item) => link.accountIDs.includes(item.channel_account_id))
+    return { key: String(link.channelID), title: link.channelName, subtitle: link.accountNames.join("\u3001"), counterpart: matchRelatedRecentCall(sample, primarySamples, counterpartSamples) }
+  })
+  const valueOrder = relayPairs.length > 0
+    ? { primaryLabel: "\u6e20\u9053\u6570\u636e", counterpartLabel: "\u4e2d\u8f6c\u7ad9\u6570\u636e" }
+    : channelPairs.length > 0
+      ? { primaryLabel: "\u4e2d\u8f6c\u7ad9\u6570\u636e", counterpartLabel: "\u6e20\u9053\u6570\u636e" }
+      : null
+  const hasComparison = relayPairs.length > 0 || channelPairs.length > 0
+  return (
+    <div className={cn("space-y-2 p-1 text-xs", hasComparison ? "w-[min(20rem,calc(100vw-32px))]" : "w-fit max-w-[calc(100vw-32px)]")}>
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="font-semibold text-foreground">{formatSampleTime(sample.created_at)}</p>
+          <p className="mt-0.5 truncate text-[10px] text-muted-foreground">{hasComparison ? "\u5f53\u524d\u8c03\u7528\u4e0e\u5173\u8054\u5bf9\u8c61\u7684\u540c\u6279\u6b21\u8c03\u7528\u5bf9\u6bd4" : "\u5f53\u524d\u8c03\u7528\u6838\u5fc3\u6307\u6807"}</p>
+        </div>
+        {valueOrder ? <RecentValueOrder primaryLabel={valueOrder.primaryLabel} counterpartLabel={valueOrder.counterpartLabel} /> : null}
+      </div>
+      {relayPairs.map((pair) => <RecentCallPair key={pair.key} title={pair.title} subtitle={pair.subtitle} primary={sample} counterpart={pair.counterpart} />)}
+      {channelPairs.map((pair) => <RecentCallPair key={pair.key} title={pair.title} subtitle={pair.subtitle} primary={sample} counterpart={pair.counterpart} />)}
+      {!hasComparison ? <div className="grid grid-cols-3 gap-px overflow-hidden rounded-md border border-border bg-border font-mono text-xs tabular-nums"><div className="min-w-0 bg-muted/45 px-2 py-2"><span className="block font-sans text-[10px] text-muted-foreground">{"\u9996\u5b57"}</span><span className="mt-1 block whitespace-nowrap font-semibold leading-4"><RecentCallValue sample={sample} metric="first" /></span></div><div className="min-w-0 bg-muted/45 px-2 py-2"><span className="block font-sans text-[10px] text-muted-foreground">{"\u603b\u8017\u65f6"}</span><span className="mt-1 block whitespace-nowrap font-semibold leading-4"><RecentCallValue sample={sample} metric="duration" /></span></div><div className="min-w-0 bg-muted/45 px-2 py-2"><span className="block font-sans text-[10px] text-muted-foreground">{"Token \u901f\u5ea6"}</span><span className="mt-1 block whitespace-nowrap font-semibold leading-4"><RecentCallValue sample={sample} metric="speed" /></span></div></div> : null}
     </div>
   )
 }
@@ -136,11 +188,42 @@ function bucketForSample(buckets: LatencyBucket[], sample: LatencyDetailSample):
   }) ?? null
 }
 
-function RecentSampleCell({ sample, bucket, onOpen, compact }: {
+function recentSampleBucket(sample: LatencyDetailSample): LatencyBucket {
+  const timestamp = Date.parse(sample.created_at)
+  const start = Number.isFinite(timestamp) ? new Date(timestamp).toISOString() : sample.created_at
+  const end = Number.isFinite(timestamp) ? new Date(timestamp + 1).toISOString() : sample.created_at
+  const outputTokens = "output_tokens" in sample ? sample.output_tokens : null
+  let successRate: number | null = null
+  if ("success_known" in sample && sample.success_known) {
+    successRate = sample.success ? 1 : 0
+  } else if ("success" in sample) {
+    successRate = sample.success ? 1 : 0
+  } else if ("status_code" in sample && sample.status_code != null) {
+    successRate = sample.status_code === 0 || (sample.status_code >= 200 && sample.status_code < 400) ? 1 : 0
+  }
+  const speed = outputTokenSpeed(outputTokens, sample.duration_ms)
+  return {
+    start,
+    end,
+    first_token_p50_ms: sample.first_token_ms ?? null,
+    first_token_p95_ms: sample.first_token_ms ?? null,
+    duration_p50_ms: sample.duration_ms ?? null,
+    duration_p95_ms: sample.duration_ms ?? null,
+    output_token_speed_p50: speed,
+    output_token_speed_p95: speed,
+    success_rate: successRate,
+    request_count: 1,
+  }
+}
+
+function RecentSampleCell({ sample, bucket, onOpen, compact, primarySamples, relay, channel }: {
   sample: LatencyDetailSample
   bucket: LatencyBucket | null
-  onOpen: (bucket: LatencyBucket) => void
+  onOpen: (sample: LatencyDetailSample, bucket: LatencyBucket | null) => void
   compact: boolean
+  primarySamples: LatencyDetailSample[]
+  relay: RelayCompareConfig
+  channel: ChannelCompareConfig
 }) {
   const firstTone = sample.first_token_ms == null ? null : latencyTone(sample.first_token_ms, "first")
   const durationTone = sample.duration_ms == null ? null : latencyTone(sample.duration_ms, "duration")
@@ -150,10 +233,9 @@ function RecentSampleCell({ sample, bucket, onOpen, compact }: {
       <TooltipTrigger asChild>
         <button
           type="button"
-          aria-disabled={!bucket}
-          className={cn("block min-w-0 flex-1 overflow-hidden rounded-[2px] p-0 opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", compact ? "h-8" : "h-10", !bucket && "cursor-default")}
+          className={cn("block min-w-0 flex-1 cursor-pointer overflow-hidden rounded-[2px] p-0 opacity-90 transition-opacity hover:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", compact ? "h-8" : "h-10")}
           aria-label={formatSampleTime(sample.created_at) + ", 首字 " + formatLatency(sample.first_token_ms) + ", 总耗时 " + formatLatency(sample.duration_ms)}
-          onClick={() => { if (bucket) onOpen(bucket) }}
+          onClick={() => onOpen(sample, bucket)}
         >
           <span className="grid h-full w-full grid-cols-2 grid-rows-2 overflow-hidden rounded-[2px] bg-border" aria-hidden="true">
             {cells.map((tone, index) => <span key={index} style={{ backgroundColor: tone ? latencyColor[tone] : "var(--muted)" }} />)}
@@ -161,7 +243,7 @@ function RecentSampleCell({ sample, bucket, onOpen, compact }: {
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={8} className="border border-border bg-popover p-2 text-popover-foreground shadow-2xl ring-1 ring-black/5">
-        <RecentSampleTooltip sample={sample} bucket={bucket} />
+        <RecentSampleTooltip sample={sample} primarySamples={primarySamples} relay={relay} channel={channel} />
       </TooltipContent>
     </Tooltip>
   )
@@ -172,12 +254,14 @@ interface RelayCompareConfig {
   range: RelayUsageRange
   granularity: LatencyBucketGranularity
   bucketCount: number
+  recentSamplesByAccount: Map<string, RelayLatencySample[]>
 }
 
 interface ChannelCompareConfig {
   links: ChannelCompareLink[]
   bucketsByChannel: Map<number, LatencyBucket[]>
   relayAccountName: string
+  recentSamplesByChannel: Map<number, ChannelUsageSample[]>
 }
 
 function BucketCell({ bucket, onOpen, relay, channel }: { bucket: LatencyBucket; onOpen: (bucket: LatencyBucket) => void; relay: RelayCompareConfig; channel: ChannelCompareConfig }) {
@@ -209,6 +293,21 @@ function BucketCell({ bucket, onOpen, relay, channel }: { bucket: LatencyBucket;
   )
 }
 
+function DetailPercentileValue({ p50, p95, format }: {
+  p50: number | null
+  p95: number | null
+  format: (value: number | null | undefined) => string
+}) {
+  return (
+    <div className="mt-1 grid grid-rows-2 grid-cols-[auto_auto] items-baseline justify-start gap-x-2 gap-y-0.5 font-mono text-xs font-semibold tabular-nums">
+      <span className="font-sans text-[9px] font-normal text-muted-foreground">P50</span>
+      <span className="whitespace-nowrap">{format(p50)}</span>
+      <span className="font-sans text-[9px] font-normal text-muted-foreground">P95</span>
+      <span className="whitespace-nowrap">{format(p95)}</span>
+    </div>
+  )
+}
+
 function InlineLatencyDetails({ selected, samples, detailLoading, detailError, onClose }: {
   selected: LatencyBucket
   samples: LatencyDetailSample[]
@@ -225,10 +324,11 @@ function InlineLatencyDetails({ selected, samples, detailLoading, detailError, o
         </div>
         <button type="button" className="text-xs font-medium text-muted-foreground hover:text-foreground" onClick={onClose}>收起</button>
       </div>
-      <div className="grid grid-cols-3 gap-px border-b border-border bg-border">
+      <div className="grid grid-cols-2 gap-px border-b border-border bg-border sm:grid-cols-4">
         <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">成功率</p><p className="mt-1 font-mono text-sm font-semibold tabular-nums">{selected.success_rate == null ? "渠道未提供" : `${(selected.success_rate * 100).toFixed(selected.success_rate === 1 ? 0 : 1)}%`}</p></div>
-        <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">首字 P50 / P95</p><p className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatLatency(selected.first_token_p50_ms)} / {formatLatency(selected.first_token_p95_ms)}</p></div>
-        <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">总耗时 P50 / P95</p><p className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatLatency(selected.duration_p50_ms)} / {formatLatency(selected.duration_p95_ms)}</p></div>
+        <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">首字 P50 / P95</p><DetailPercentileValue p50={selected.first_token_p50_ms} p95={selected.first_token_p95_ms} format={formatLatency} /></div>
+        <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">总耗时 P50 / P95</p><DetailPercentileValue p50={selected.duration_p50_ms} p95={selected.duration_p95_ms} format={formatLatency} /></div>
+        <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">输出速度 P50 / P95</p><DetailPercentileValue p50={selected.output_token_speed_p50} p95={selected.output_token_speed_p95} format={formatOutputTokenSpeed} /></div>
       </div>
       <div className="max-h-[58vh] overflow-y-auto bg-muted/30 p-3">
         {detailLoading ? <div className="py-10 text-center text-sm text-muted-foreground">正在读取调用明细…</div> : detailError ? <div className="py-10 text-center text-sm text-danger">{detailError}</div> : samples.length === 0 ? <div className="py-10 text-center text-sm text-muted-foreground">该时间桶暂无可展示的调用明细</div> : (
@@ -280,6 +380,8 @@ export function LatencyStabilityLane({
   relayLinks = [],
   channelLinks = [],
   channelLatencyBucketsByChannel = new Map(),
+  relayRecentSamplesByAccount = new Map(),
+  channelRecentSamplesByChannel = new Map(),
   relayAccountName = "当前中转站账号",
   recentSamples,
   range = "today",
@@ -298,6 +400,8 @@ export function LatencyStabilityLane({
   relayLinks?: RelayCompareLink[]
   channelLinks?: ChannelCompareLink[]
   channelLatencyBucketsByChannel?: Map<number, LatencyBucket[]>
+  relayRecentSamplesByAccount?: Map<string, RelayLatencySample[]>
+  channelRecentSamplesByChannel?: Map<number, ChannelUsageSample[]>
   relayAccountName?: string
   /** 传入时保留原有的最近调用样本条带，仅将交互统计指向所属时间桶。 */
   recentSamples?: LatencyDetailSample[]
@@ -313,8 +417,8 @@ export function LatencyStabilityLane({
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState("")
   const laneRef = useRef<HTMLDivElement | null>(null)
-  const relayConfig: RelayCompareConfig = { links: relayLinks, range, granularity, bucketCount }
-  const channelConfig: ChannelCompareConfig = { links: channelLinks, bucketsByChannel: channelLatencyBucketsByChannel, relayAccountName }
+  const relayConfig: RelayCompareConfig = { links: relayLinks, range, granularity, bucketCount, recentSamplesByAccount: relayRecentSamplesByAccount }
+  const channelConfig: ChannelCompareConfig = { links: channelLinks, bucketsByChannel: channelLatencyBucketsByChannel, relayAccountName, recentSamplesByChannel: channelRecentSamplesByChannel }
   const isRecentMode = recentSamples != null
   const orderedRecentSamples = isRecentMode ? [...recentSamples].reverse() : []
 
@@ -344,6 +448,24 @@ export function LatencyStabilityLane({
     }
   }
 
+  function openRecentSample(sample: LatencyDetailSample, bucket: LatencyBucket | null) {
+    if (bucket) {
+      void openBucket(bucket)
+      return
+    }
+    const detailBucket = recentSampleBucket(sample)
+    if (detailMode === "inline" && selected?.start === detailBucket.start) {
+      setSelected(null)
+      setSamples([])
+      setDetailError("")
+      return
+    }
+    setSelected(recentSampleBucket(sample))
+    setSamples([sample])
+    setDetailError("")
+    setDetailLoading(false)
+  }
+
   if (loading && buckets.length === 0) {
     return <div className="flex h-7 items-center text-[10px] text-muted-foreground">{isRecentMode ? "最近调用延时读取中…" : "时间稳定性读取中…"}</div>
   }
@@ -367,7 +489,7 @@ export function LatencyStabilityLane({
               {isRecentMode
                 ? orderedRecentSamples.map((sample, index) => {
                     const bucket = bucketForSample(buckets, sample)
-                    return <RecentSampleCell key={sample.created_at + "-" + index} sample={sample} bucket={bucket} onOpen={(value) => void openBucket(value)} compact={compact} />
+                    return <RecentSampleCell key={sample.created_at + "-" + index} sample={sample} bucket={bucket} onOpen={openRecentSample} compact={compact} primarySamples={recentSamples ?? []} relay={relayConfig} channel={channelConfig} />
                   })
                 : buckets.map((bucket) => <div key={bucket.start} className={layout === "fill" ? "min-w-0 flex-1" : "w-2 shrink-0"}><BucketCell bucket={bucket} onOpen={(value) => void openBucket(value)} relay={relayConfig} channel={channelConfig} /></div>)}
             </div>
@@ -394,10 +516,11 @@ export function LatencyStabilityLane({
             </DialogDescription>
           </DialogHeader>
           {selected ? (
-            <div className="grid grid-cols-3 gap-px border-b border-border bg-border">
+            <div className="mx-3 mt-3 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-[104px_repeat(3,minmax(0,1fr))]">
               <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">成功率</p><p className="mt-1 font-mono text-sm font-semibold tabular-nums">{selected.success_rate == null ? "渠道未提供" : `${(selected.success_rate * 100).toFixed(selected.success_rate === 1 ? 0 : 1)}%`}</p></div>
-              <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">首字 P50 / P95</p><p className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatLatency(selected.first_token_p50_ms)} / {formatLatency(selected.first_token_p95_ms)}</p></div>
-              <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">总耗时 P50 / P95</p><p className="mt-1 font-mono text-sm font-semibold tabular-nums">{formatLatency(selected.duration_p50_ms)} / {formatLatency(selected.duration_p95_ms)}</p></div>
+              <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">首字 P50 / P95</p><DetailPercentileValue p50={selected.first_token_p50_ms} p95={selected.first_token_p95_ms} format={formatLatency} /></div>
+              <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">总耗时 P50 / P95</p><DetailPercentileValue p50={selected.duration_p50_ms} p95={selected.duration_p95_ms} format={formatLatency} /></div>
+              <div className="bg-card px-4 py-3"><p className="text-[10px] text-muted-foreground">输出速度 P50 / P95</p><DetailPercentileValue p50={selected.output_token_speed_p50} p95={selected.output_token_speed_p95} format={formatOutputTokenSpeed} /></div>
             </div>
           ) : null}
           <div className="max-h-[58vh] overflow-y-auto bg-muted/30 p-3">
@@ -406,6 +529,8 @@ export function LatencyStabilityLane({
                 {samples.map((sample, index) => {
                   const first = sample.first_token_ms == null ? null : latencyTone(sample.first_token_ms, "first")
                   const duration = sample.duration_ms == null ? null : latencyTone(sample.duration_ms, "duration")
+                  const outputTokens = "output_tokens" in sample ? sample.output_tokens : null
+                  const outputSpeed = outputTokenSpeed(outputTokens, sample.duration_ms)
                   const statusCode = "status_code" in sample ? sample.status_code : undefined
                   const requestType = "request_type" in sample ? sample.request_type : undefined
                   const userEmail = "user_email" in sample ? sample.user_email : undefined
@@ -432,6 +557,7 @@ export function LatencyStabilityLane({
                       <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 rounded-md bg-muted/50 px-2.5 py-2 font-mono text-xs font-semibold tabular-nums">
                         <span className={first ? latencyTooltipTextClass[first] : "text-muted-foreground"}>首字 {sample.first_token_ms == null ? "渠道未提供" : formatLatency(sample.first_token_ms)}</span>
                         <span className={duration ? latencyTooltipTextClass[duration] : "text-muted-foreground"}>总耗时 {sample.duration_ms == null ? "渠道未提供" : formatLatency(sample.duration_ms)}</span>
+                        <span>输出速度 {formatOutputTokenSpeed(outputSpeed)}</span>
                         <span className="text-muted-foreground">Token {totalTokens(sample).toLocaleString("zh-CN")}</span>
                       </div>
                     </div>

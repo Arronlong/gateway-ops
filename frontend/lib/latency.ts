@@ -140,6 +140,32 @@ export function formatLatency(value: number | null | undefined) {
   return `${minutes}分 ${String(Math.round(seconds % 60)).padStart(2, "0")}秒`
 }
 
+export function outputTokenSpeed(outputTokens: number | null | undefined, durationMS: number | null | undefined) {
+  if (outputTokens == null || durationMS == null || outputTokens <= 0 || durationMS <= 0) return null
+  return outputTokens * 1000 / durationMS
+}
+
+export function percentile(values: Array<number | null | undefined>, rank: number) {
+  if (!Number.isFinite(rank) || rank < 0 || rank > 1) return null
+  const sorted = values.filter((value): value is number => value != null && Number.isFinite(value) && value >= 0).sort((left, right) => left - right)
+  if (sorted.length === 0) return null
+  const position = rank * (sorted.length - 1)
+  const lower = Math.floor(position)
+  const upper = Math.ceil(position)
+  if (lower === upper) return sorted[lower]
+  const weight = position - lower
+  return sorted[lower] * (1 - weight) + sorted[upper] * weight
+}
+
+export function p50(values: Array<number | null | undefined>) { return percentile(values, 0.5) }
+
+export function p95(values: Array<number | null | undefined>) { return percentile(values, 0.95) }
+
+export function formatOutputTokenSpeed(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value) || value < 0) return "未提供"
+  return `${Number(value.toFixed(1)).toLocaleString("zh-CN")} tok/s`
+}
+
 export const latencyBucketGranularityOptions: Array<{ value: LatencyBucketGranularity; label: string }> = [
   { value: "auto", label: "自动" },
   { value: "5", label: "5 分钟" },
