@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import { useMemo } from "react"
 import type { RelayUsageRange } from "@/lib/api-types"
 
-export function MultiplierChanges({ range = "today", source = "dashboard" }: { range?: RelayUsageRange; source?: "dashboard" | "channels" }) {
+export function MultiplierChanges({ range = "today", source = "dashboard", className }: { range?: RelayUsageRange; source?: "dashboard" | "channels"; className?: string }) {
   const dashboardSummary = useDashboardSummary(range, source === "dashboard")
   const channelSummary = useChannelSummary(range, source === "channels")
   const channels = useChannels()
@@ -28,7 +28,7 @@ export function MultiplierChanges({ range = "today", source = "dashboard" }: { r
   if (systemSettings.data?.channels_show_rate_changes !== true) return null
 
   return (
-    <Card className="h-[clamp(18rem,60dvh,25rem)] min-h-0 gap-0 overflow-hidden border border-border py-0 shadow-none">
+    <Card className={cn("h-[clamp(18rem,60dvh,25rem)] min-h-0 gap-0 overflow-hidden border border-border py-0 shadow-none", className)}>
 <ListPanelHeader
         title={<CardTitle className="text-sm font-semibold">{"最近倍率变动"}</CardTitle>}
         description={<p className="mt-1 text-xs text-muted-foreground">{"所选时间范围内最近 20 条"}</p>}

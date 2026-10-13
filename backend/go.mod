@@ -7,6 +7,7 @@ require (
 	github.com/go-resty/resty/v2 v2.16.2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/spf13/viper v1.19.0
+	golang.org/x/mod v0.21.0
 	gorm.io/driver/postgres v1.5.11
 	gorm.io/gorm v1.25.12
 )

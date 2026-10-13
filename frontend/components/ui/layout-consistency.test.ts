@@ -66,3 +66,13 @@ test("\u5efa\u8bae\u7c7b\u64cd\u4f5c\u5165\u53e3\u4fdd\u6301\u4e0d\u53d8", () =>
   const ledgerHeader = costs.slice(costs.indexOf("<ListPanelHeader", costs.indexOf("<ListPanelHeader") + 1), costs.indexOf("</ListPanelHeader>"))
   assert.doesNotMatch(ledgerHeader, /\u8bb0\u4e00\u7b14/)
 })
+
+test("\u9996\u9875\u500d\u7387\u53d8\u52a8\u9690\u85cf\u65f6\u6e20\u9053\u4f59\u989d\u8d8b\u52bf\u94fa\u6ee1\u6574\u884c", () => {
+  const page = read("../../app/page.tsx")
+  const multiplier = read("../monitor/multiplier-changes.tsx")
+  assert.match(page, /lg:only:col-span-5/)
+  assert.match(page, /<MultiplierChanges[^>]*className="lg:col-span-2"/)
+  assert.doesNotMatch(page, /<div className="lg:col-span-2"><MultiplierChanges/)
+  assert.match(multiplier, /className\?: string/)
+  assert.match(multiplier, /cn\([^\n]*className/)
+})

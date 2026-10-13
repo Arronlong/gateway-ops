@@ -29,6 +29,9 @@ RUN pnpm build
 
 # ---------- Stage 2: 后端 ----------
 FROM golang:1.23-alpine AS go-builder
+ARG VERSION=1.0.1
+ARG REVISION=unknown
+ARG BUILD_TIME=unknown
 WORKDIR /src
 
 # 先 go.mod / go.sum 走缓存
@@ -44,7 +47,7 @@ COPY --from=frontend-builder /web/dist ./web/dist
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
         -trimpath \
-        -ldflags="-s -w" \
+        -ldflags="-s -w -X github.com/guliansheng/gateway-ops/internal/version.Version=${VERSION} -X github.com/guliansheng/gateway-ops/internal/version.Revision=${REVISION} -X github.com/guliansheng/gateway-ops/internal/version.BuildTime=${BUILD_TIME}" \
         -o /out/gateway-ops \
         ./cmd/server
 

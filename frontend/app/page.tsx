@@ -82,7 +82,10 @@ export default function Page() {
       <section aria-labelledby="channel-stats-heading" className="space-y-3">
         <h2 id="channel-stats-heading" className="flex items-center gap-2 border-l-2 border-brand pl-3 text-base font-bold text-foreground"><LayoutList className="size-4 text-brand" />{"渠道统计"}</h2>
         <KpiRow range={range} />
-        <div className="grid grid-cols-1 gap-3 lg:grid-cols-5"><div className="lg:col-span-3"><BalanceOverview range={range} /></div><div className="lg:col-span-2"><MultiplierChanges range={range} /></div></div>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-5">
+          <div className="lg:col-span-3 lg:only:col-span-5"><BalanceOverview range={range} /></div>
+          <MultiplierChanges range={range} className="lg:col-span-2" />
+        </div>
       </section>
 
       <section aria-labelledby="relay-stats-heading" className="space-y-3">

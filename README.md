@@ -198,7 +198,7 @@ PostgreSQL 数据保存在 `gatewayops-postgres-data` volume 中。不要在没�
 | `GATEWAYOPS_DATABASE_NAME` | `gatewayops` | 数据库名称 |
 | `GATEWAYOPS_POSTGRES_PORT` | `54329` | 宿主机数据库映射端口 |
 | `GATEWAYOPS_HTTP_PORT` | `8080` | 宿主机 Web 端口 |
-| `GATEWAYOPS_IMAGE_TAG` | `latest` | Docker Hub 镜像标签 |
+| `GATEWAYOPS_IMAGE_TAG` | `latest` | GHCR 镜像标签 |
 | `GATEWAYOPS_SERVER_MODE` | `release` | 后端运行模式 |
 | `GATEWAYOPS_LOG_LEVEL` | `info` | 日志等级 |
 | `APP_SECRET` | 无 | 敏感数据加密主密钥，必填 |
@@ -275,7 +275,43 @@ docker build -t gateway-ops:dev .
 - **连接器**：NewAPI 与 Sub2API 登录、鉴权、余额、倍率和管理 API 适配。
 - **构建**：前端构建、Go 编译、Alpine 运行时三阶段 Docker 构建。
 - **部署**：前端资源嵌入 Go 二进制，由单个应用容器同时提供页面与 API。
-- **镜像**：Docker Hub `guliansheng/gateway-ops`。
+- **镜像**：默认发布至 GHCR `ghcr.io/arronlong/gateway-ops`，可选同时发布至 Docker Hub。
+
+## 版本与发布
+
+正式版本从 `v1.0.0` 开始。合并代码后，创建并推送版本标签：
+
+```bash
+git tag -a v1.0.0 -m "GatewayOps v1.0.0"
+git push origin v1.0.0
+```
+
+`Publish GatewayOps` 工作流先运行后端及发布规则测试，默认仅发布 GHCR。GHCR 镜像地址为 `ghcr.io/<当前 GitHub 仓库>`（自动转为小写），本仓库为 `ghcr.io/arronlong/gateway-ops`；Fork 后默认发布至 Fork 所在仓库的 GHCR 地址。GHCR 使用工作流自动提供的 `GITHUB_TOKEN`，需允许工作流写入仓库内容和 Packages。
+
+在 GitHub 仓库的 `Settings → Secrets and variables → Actions` 中按需配置：
+
+| 配置 | 类型 | 用途 |
+| --- | --- | --- |
+| `DOCKERHUB_USERNAME` | Secret 或 Variable | Docker Hub 登录用户名；两处均设置时优先使用 Secret。 |
+| `DOCKERHUB_TOKEN` | Secret | 具有目标镜像仓库写入权限的 Docker Hub 访问令牌。 |
+| `DOCKERHUB_IMAGE` | Variable，可选 | 镜像地址，默认为 `<Docker Hub 用户名>/<GitHub 仓库名>`；组织仓库可指定为 `team/gateway-ops`。 |
+| `GHCR_IMAGE` | Variable，可选 | 覆盖默认 GHCR 镜像地址，例如 `ghcr.io/team/gateway-ops`。 |
+
+镜像地址不包含标签，标签由发布脚本统一生成。只有配齐 Docker Hub 用户名和 Token 才会登录并发布 Docker Hub；未配置或只配置其中一项时提示并跳过 Docker Hub，GHCR 正常发布。已启用 Docker Hub 但登录或推送失败时，工作流会报错。
+
+- 正式标签生成 `1.0.0` 和 `v1.0.0` 两种固定镜像标签，并在镜像准备好后创建 GitHub Release。
+- 只有语义化版本最高的已发布稳定版能推进已启用镜像仓库的 `latest`，旧版本重跑不会回退。
+- `v1.1.0-rc.1` 生成预发布镜像和预发布 Release，不推进 `latest`。
+- `main` 使用开发版号、完整提交号标签和 `edge`；只有当前 main 提交能推进 `edge`。
+- 已存在的固定镜像标签保留原摘要。不要移动或复用发布 Git 标签；修改发布内容应增加版本号。
+
+只有所有已启用仓库的镜像标签核验成功后才公开 Release。仅发布 GHCR 时不执行 Docker Hub 的登录、推送或版本标签核验。同时发布两个仓库时没有跨仓库原子事务；发布中断后可重跑工作流，固定标签保留原摘要。
+
+在系统设置的“版本与更新”中查看版本和检查更新。`GET /api/version` 返回版本、提交号、构建时间和发布渠道；`GET /api/version/check` 查询 GitHub 最新稳定 Release，开启认证时需要登录。正常结果缓存 5 分钟，失败结果缓存 1 分钟。GitHub 尚无 Release 或查询失败时不会显示“已是最新版”。命令行可用 `gateway-ops -version` 查看构建信息。
+
+生产环境建议使用 `GATEWAYOPS_IMAGE_TAG=1.0.1` 锁定版本，再执行 `docker compose pull app` 和 `docker compose up -d --no-build app`。如需回滚，同样指定原版本；涉及数据库变更时先确认备份和兼容性。
+
+独立文档站的适用应用版本记录在文档仓库的 `docs/release.json`，版本说明应与产品 Release 一起维护。
 
 ## License
 
