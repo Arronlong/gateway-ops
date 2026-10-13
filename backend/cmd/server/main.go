@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,6 +25,7 @@ import (
 	"github.com/guliansheng/gateway-ops/internal/relay"
 	"github.com/guliansheng/gateway-ops/internal/scheduler"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"github.com/guliansheng/gateway-ops/internal/version"
 	"github.com/guliansheng/gateway-ops/web"
 
 	// 注册 connector 实现。
@@ -33,7 +35,12 @@ import (
 
 func main() {
 	configPath := flag.String("config", "", "path to config.yaml (optional; env vars also supported)")
+	showVersion := flag.Bool("version", false, "print build version and exit")
 	flag.Parse()
+	if *showVersion {
+		_ = json.NewEncoder(os.Stdout).Encode(version.Current())
+		return
+	}
 
 	cfg, err := config.Load(*configPath)
 	if err != nil {
@@ -42,7 +49,8 @@ func main() {
 	}
 
 	log := logger.New(cfg.Log.Level, cfg.Log.Format)
-	log.Info("starting GatewayOps", "port", cfg.Server.Port, "mode", cfg.Server.Mode)
+	build := version.Current()
+	log.Info("starting GatewayOps", "port", cfg.Server.Port, "mode", cfg.Server.Mode, "version", build.Version, "revision", build.Revision)
 
 	cipher, err := crypto.NewCipher(cfg.Security.AppSecret)
 	if err != nil {

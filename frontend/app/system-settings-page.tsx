@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api"
 import type { SyncSettings, SystemSettings } from "@/lib/api-types"
 import { useSyncSettings, useSystemSettings } from "@/lib/queries"
 import { ConfigurationLoading } from "@/components/ui/configuration-loading"
+import { VersionCard } from "@/components/system/version-card"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { cn } from "@/lib/utils"
 
@@ -256,6 +257,8 @@ export default function SystemSettingsPage() {
           保存界面设置
         </Button>
       </header>
+
+      <VersionCard />
 
       <Card id="background-tasks" className="scroll-mt-4 gap-0 border border-border py-0 shadow-none">
         <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border px-4 py-3">

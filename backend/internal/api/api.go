@@ -18,30 +18,32 @@ import (
 	"github.com/guliansheng/gateway-ops/internal/relay"
 	"github.com/guliansheng/gateway-ops/internal/scheduler"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"github.com/guliansheng/gateway-ops/internal/version"
 	"gorm.io/gorm"
 )
 
 // Deps 把所有 handler 需要的依赖打包传入。
 type Deps struct {
-	DB            *gorm.DB
-	Cipher        *crypto.Cipher
-	Auth          *auth.Service
-	Channels      *storage.Channels
-	ChannelUsage  *storage.ChannelUsage
-	Sessions      *storage.AuthSessions
-	Captchas      *storage.Captchas
-	Notifies      *storage.Notifications
-	Rates         *storage.Rates
-	MonLogs       *storage.MonitorLogs
-	ChannelSvc    *channel.Service
-	Monitor       *monitor.Service
-	Relay         *relay.Service
-	RelayStations *storage.RelayStations
-	Operations    *storage.Operations
-	Settings      *storage.Settings
-	Scheduler     *scheduler.Scheduler
-	Dispatcher    *notify.Dispatcher
-	Log           *slog.Logger
+	DB             *gorm.DB
+	Cipher         *crypto.Cipher
+	Auth           *auth.Service
+	Channels       *storage.Channels
+	ChannelUsage   *storage.ChannelUsage
+	Sessions       *storage.AuthSessions
+	Captchas       *storage.Captchas
+	Notifies       *storage.Notifications
+	Rates          *storage.Rates
+	MonLogs        *storage.MonitorLogs
+	ChannelSvc     *channel.Service
+	Monitor        *monitor.Service
+	Relay          *relay.Service
+	RelayStations  *storage.RelayStations
+	Operations     *storage.Operations
+	Settings       *storage.Settings
+	Scheduler      *scheduler.Scheduler
+	Dispatcher     *notify.Dispatcher
+	Log            *slog.Logger
+	VersionChecker *version.Checker
 
 	// Frontend 可选：传入嵌入的前端 dist 文件系统。nil 表示不挂载（本地开发用 vite dev server）。
 	Frontend fs.FS
@@ -72,9 +74,7 @@ func Register(r *gin.Engine, d *Deps) {
 		api.Use(d.Auth.Middleware())
 	}
 	{
-		api.GET("/version", func(c *gin.Context) {
-			c.JSON(http.StatusOK, gin.H{"name": "GatewayOps", "version": "0.1.0-dev"})
-		})
+		registerVersion(api, d.VersionChecker)
 
 		registerAuth(api, d)
 		registerChannels(api, d)

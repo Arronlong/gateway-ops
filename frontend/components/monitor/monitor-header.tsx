@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth-context"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { useChannels, useSystemSettings } from "@/lib/queries"
 import { relativeTime } from "@/lib/format"
+import { GITHUB_REPOSITORY_URL } from "@/lib/version"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -206,7 +207,7 @@ export function MonitorHeader() {
               <DropdownMenuItem className="min-h-11 sm:hidden" onSelect={() => setTheme(theme === "dark" ? "light" : "dark")}>
                 {mounted && theme === "dark" ? <Moon /> : <Sun />}{mounted && theme === "dark" ? "切换浅色模式" : "切换深色模式"}
               </DropdownMenuItem>
-              <DropdownMenuItem asChild className="min-h-11 sm:hidden"><a href="https://github.com/guliansheng/gateway-ops" target="_blank" rel="noopener noreferrer"><Github />{"GitHub 仓库"}</a></DropdownMenuItem>
+              <DropdownMenuItem asChild className="min-h-11 sm:hidden"><a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer"><Github />{"GitHub 仓库"}</a></DropdownMenuItem>
               {authDisabled ? null : <DropdownMenuItem className="min-h-11 text-danger sm:hidden" onSelect={logout}><LogOut />{"退出登录"}</DropdownMenuItem>}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -263,7 +264,7 @@ export function MonitorHeader() {
                 aria-label="GitHub 仓库"
               >
                 <a
-                  href="https://github.com/guliansheng/gateway-ops"
+                  href={GITHUB_REPOSITORY_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
