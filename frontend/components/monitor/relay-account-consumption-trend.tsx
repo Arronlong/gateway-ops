@@ -1,11 +1,12 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useRef, useState, type ComponentProps } from "react"
 import { Line, LineChart, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts"
 import type { RelayAccountConsumptionBucket } from "@/lib/api-types"
 import type { ChannelCompareLink } from "@/lib/channel-relay-association"
 import { ChannelConsumptionComparisonTooltip } from "@/components/monitor/channel-relay-compare"
 import { money } from "@/lib/format"
+import { ViewportChart } from "@/components/monitor/viewport-chart"
 
 const TOOLTIP_HEIGHT = 96
 const TOOLTIP_GAP = 8
@@ -62,7 +63,13 @@ function ConsumptionTooltip({ active, payload, channelLinks, channelConsumptionB
   )
 }
 
-export function RelayAccountConsumptionTrend({ buckets, loading, compact = false, channelLinks = [], channelConsumptionBucketsByChannel = new Map(), relayAccountName = "当前中转站账号" }: {
+export function RelayAccountConsumptionTrend(props: ComponentProps<typeof RelayAccountConsumptionTrendContent>) {
+  return <ViewportChart placeholder={<div className={props.compact ? "h-12" : "h-14"} aria-label="滚动到此处加载消费图表" />}>
+    <RelayAccountConsumptionTrendContent {...props} />
+  </ViewportChart>
+}
+
+function RelayAccountConsumptionTrendContent({ buckets, loading, compact = false, channelLinks = [], channelConsumptionBucketsByChannel = new Map(), relayAccountName = "当前中转站账号" }: {
   buckets: RelayAccountConsumptionBucket[]
   loading?: boolean
   compact?: boolean

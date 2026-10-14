@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import type { ReactNode } from "react"
+import type { ComponentProps, ReactNode } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, PublicGroupMonitorCall, RelayLatencySample, RelayUsageRange } from "@/lib/api-types"
@@ -10,17 +10,15 @@ import { ChannelLatencyComparisonTooltip, RelayLatencyComparisonTooltip } from "
 import { formatLatency, formatOutputTokenSpeed, latencyBucketGranularityLabel, latencyColor, latencyTone, latencyTooltipTextClass, outputTokenSpeed } from "@/lib/latency"
 import { matchRelatedRecentCall } from "@/lib/recent-call-comparison"
 import { cn } from "@/lib/utils"
+import { formatMonitorTime } from "@/lib/monitor-time"
+import { ViewportChart } from "@/components/monitor/viewport-chart"
 
 function formatBucketTime(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false })
+  return formatMonitorTime(value)
 }
 
 function formatSampleTime(value: string) {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+  return formatMonitorTime(value, true)
 }
 
 type LatencyDetailSample = RelayLatencySample | ChannelUsageSample | PublicGroupMonitorCall
@@ -369,7 +367,13 @@ function InlineLatencyDetails({ selected, samples, detailLoading, detailError, o
   )
 }
 
-export function LatencyStabilityLane({
+export function LatencyStabilityLane(props: ComponentProps<typeof LatencyStabilityLaneContent>) {
+  return <ViewportChart placeholder={<div className={props.compact ? "h-8" : "h-24"} aria-label="滚动到此处加载延时图表" />}>
+    <LatencyStabilityLaneContent {...props} />
+  </ViewportChart>
+}
+
+function LatencyStabilityLaneContent({
   buckets,
   loading,
   loadSamples,
