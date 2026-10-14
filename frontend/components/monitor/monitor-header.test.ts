@@ -10,6 +10,7 @@ const source = ts.createSourceFile(
   true,
   ts.ScriptKind.TSX,
 )
+const documentationUrl = "https://gateway-ops.netlify.app/"
 
 function attribute(element: ts.JsxElement | ts.JsxSelfClosingElement, name: string) {
   const opening = ts.isJsxElement(element) ? element.openingElement : element
@@ -40,3 +41,41 @@ for (const href of ["/public/relay-monitor", "/public/service-status"]) {
     }
   })
 }
+
+test("desktop header exposes a compact documentation icon link", () => {
+  const links: ts.JsxElement[] = []
+  function visit(node: ts.Node) {
+    if (ts.isJsxElement(node) && node.openingElement.tagName.getText() === "a" && attribute(node, "href") === JSON.stringify(documentationUrl)) links.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  assert.equal(links.length, 2)
+
+  const desktopLink = links.find((link) => ts.isJsxElement(link.parent) && link.parent.openingElement.tagName.getText() === "Button")
+  assert.ok(desktopLink)
+  const button = desktopLink.parent
+  assert.ok(ts.isJsxElement(button))
+  assert.match(attribute(button, "className") ?? "", /hidden[^\n]*sm:inline-flex/)
+  assert.ok(attribute(button, "aria-label"))
+  assert.equal(attribute(desktopLink, "target"), '"_blank"')
+  assert.equal(attribute(desktopLink, "rel"), '"noopener noreferrer"')
+  assert.ok(desktopLink.children.some((child) => ts.isJsxSelfClosingElement(child) && child.tagName.getText() === "BookOpen"))
+})
+
+test("mobile menu keeps documentation reachable without adding a toolbar control", () => {
+  const links: ts.JsxElement[] = []
+  function visit(node: ts.Node) {
+    if (ts.isJsxElement(node) && node.openingElement.tagName.getText() === "a" && attribute(node, "href") === JSON.stringify(documentationUrl)) links.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+
+  const menuLink = links.find((link) => ts.isJsxElement(link.parent) && link.parent.openingElement.tagName.getText() === "DropdownMenuItem")
+  assert.ok(menuLink)
+  const menuItem = menuLink.parent
+  assert.ok(ts.isJsxElement(menuItem))
+  assert.match(attribute(menuItem, "className") ?? "", /sm:hidden/)
+  assert.equal(attribute(menuLink, "target"), '"_blank"')
+  assert.equal(attribute(menuLink, "rel"), '"noopener noreferrer"')
+  assert.ok(menuLink.children.some((child) => ts.isJsxSelfClosingElement(child) && child.tagName.getText() === "BookOpen"))
+})

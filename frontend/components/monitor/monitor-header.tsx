@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useTheme } from "next-themes"
-import { Activity, Bell, ChevronDown, ExternalLink, Github, Home, LayoutList, LogOut, RefreshCw, Server, Settings2, ShieldCheck, Sun, Moon, WalletCards, UsersRound } from "lucide-react"
+import { Activity, Bell, BookOpen, ChevronDown, ExternalLink, Github, Home, LayoutList, LogOut, RefreshCw, Server, Settings2, ShieldCheck, Sun, Moon, WalletCards, UsersRound } from "lucide-react"
 import { Link, NavLink, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import {
@@ -209,6 +209,7 @@ export function MonitorHeader() {
               </DropdownMenuItem>
               <DropdownMenuItem asChild className="min-h-11 sm:hidden"><a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer"><Github />{"GitHub 仓库"}</a></DropdownMenuItem>
               {authDisabled ? null : <DropdownMenuItem className="min-h-11 text-danger sm:hidden" onSelect={logout}><LogOut />{"退出登录"}</DropdownMenuItem>}
+              <DropdownMenuItem asChild className="min-h-11 sm:hidden"><a href="https://gateway-ops.netlify.app/" target="_blank" rel="noopener noreferrer"><BookOpen />{"\u4f7f\u7528\u6587\u6863"}</a></DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -274,6 +275,25 @@ export function MonitorHeader() {
             </TooltipTrigger>
             <TooltipContent side="bottom" className="text-xs">
               {"GitHub 仓库"}
+            </TooltipContent>
+          </Tooltip>
+
+          <Tooltip delayDuration={200}>
+            <TooltipTrigger asChild>
+              <Button
+                asChild
+                variant="outline"
+                size="icon"
+                className="hidden size-8 border-border bg-background text-foreground hover:bg-muted sm:inline-flex"
+                aria-label={"\u67e5\u770b\u6587\u6863"}
+              >
+                <a href="https://gateway-ops.netlify.app/" target="_blank" rel="noopener noreferrer">
+                  <BookOpen className="size-3.5" />
+                </a>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom" className="text-xs">
+              {"\u6587\u6863\u7ad9"}
             </TooltipContent>
           </Tooltip>
 
