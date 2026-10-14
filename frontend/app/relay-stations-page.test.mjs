@@ -178,12 +178,14 @@ test('\u9875\u9762\u5c55\u793a type \u4e14\u9690\u85cf\u5e76\u53d1\u6c60\u91cd\u
   assert.match(users, /\u9009\u62e9\u5f53\u524d\u9875\u666e\u901a\u7528\u6237/)
 })
 
-test('NewAPI \u5206\u7ec4\u4fdd\u7559\u7f16\u8f91\u4e0e\u5feb\u901f\u6d4b\u8bd5\uff0c\u7981\u7528\u540d\u79f0\u4e0e\u72b6\u6001', () => {
+test('NewAPI \u5206\u7ec4\u4fdd\u7559\u7f16\u8f91\u4e0e\u5feb\u901f\u6d4b\u8bd5\uff0c\u540d\u79f0\u53ea\u8bfb\u4e0e\u72b6\u6001\u5c55\u793a', () => {
   assert.equal(typeof page.GroupManagementRow, 'function')
   const group = { external_id: 1, name: 'default', description: '', rate_multiplier: 1, model_types: [], account_types: ['apikey'], status: 'active', monitor_enabled: true, is_exclusive: false, channels: [] }
   const html = renderToStaticMarkup(React.createElement(page.GroupManagementRow, { group, accounts: [], stationType: 'newapi', onUpdate() {}, onTest() {}, onDelete() {}, onDragStart() {}, onDragOver() {}, onDrop() {}, busy: false }))
-  assert.match(html, /<input[^>]*disabled=""[^>]*value="default"/)
-  assert.match(html, /aria-label="default\u505c\u7528"[^>]*disabled=""|disabled=""[^>]*aria-label="default\u505c\u7528"/)
+  const nameInput = html.match(/<input(?=[^>]*readonly="")(?=[^>]*value="default")[^>]*>/i)?.[0]
+  assert.ok(nameInput)
+  assert.doesNotMatch(nameInput, /disabled=/)
+  assert.doesNotMatch(html, /aria-label="default\u505c\u7528"/)
   assert.match(html, /\u5feb\u901f\u6d4b\u8bd5/)
   assert.match(html, /root/)
   assert.doesNotMatch(html, /aria-label="default\u5206\u7ec4\u63cf\u8ff0"[^>]*disabled=""/)

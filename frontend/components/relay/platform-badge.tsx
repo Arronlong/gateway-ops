@@ -27,6 +27,8 @@ export function PlatformBadge({ platform, compact = false }: { platform?: string
         ? { label: "Gemini", tone: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-800/70 dark:bg-blue-950/30 dark:text-blue-400" }
         : value === "grok"
           ? { label: "Grok", tone: "border-zinc-300 bg-zinc-100 text-zinc-800 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-100" }
-          : { label: platform?.trim() || "未知", tone: "border-border bg-muted text-muted-foreground" }
+          : value === "newapi"
+            ? { label: "NewAPI", tone: "border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-800/70 dark:bg-violet-950/30 dark:text-violet-400" }
+            : { label: platform?.trim() || "未知", tone: "border-border bg-muted text-muted-foreground" }
   return <span className={cn("inline-flex max-w-full items-center border font-medium", compact ? "gap-1 rounded px-1.5 py-0.5 text-[10px]" : "gap-1.5 rounded-full px-2.5 py-1 text-[11px]", meta.tone)} title={platform || "未知平台"}><PlatformIcon platform={value} compact={compact} /><span className="truncate">{meta.label}</span></span>
 }
