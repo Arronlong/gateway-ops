@@ -73,15 +73,31 @@ func syncAllRelayStations(c *gin.Context, d *Deps) {
 }
 
 type relayStationInput struct {
-	Name    string `json:"name"`
-	BaseURL string `json:"base_url"`
-	APIKey  string `json:"api_key"`
+	AuthMode    string `json:"auth_mode"`
+	Type        string `json:"type"`
+	Name        string `json:"name"`
+	BaseURL     string `json:"base_url"`
+	APIKey      string `json:"api_key"`
+	Username    string `json:"username"`
+	Password    string `json:"password"`
+	AdminToken  string `json:"admin_token"`
+	AdminCookie string `json:"admin_cookie"`
+	AdminUserID string `json:"admin_user_id"`
+	GatewayKey  string `json:"gateway_key"`
 }
 
 type relayStationUpdateInput struct {
+	AuthMode                  *string `json:"auth_mode"`
+	Type                      *string `json:"type"`
 	Name                      *string `json:"name"`
 	BaseURL                   *string `json:"base_url"`
 	APIKey                    *string `json:"api_key"`
+	Username                  *string `json:"username"`
+	Password                  *string `json:"password"`
+	AdminToken                *string `json:"admin_token"`
+	AdminCookie               *string `json:"admin_cookie"`
+	AdminUserID               *string `json:"admin_user_id"`
+	GatewayKey                *string `json:"gateway_key"`
 	AutoAdjustEnabled         *bool   `json:"auto_adjust_enabled"`
 	AutoAdjustNoProfitEnabled *bool   `json:"auto_adjust_no_profit_enabled"`
 	AutoPriorityEnabled       *bool   `json:"auto_priority_enabled"`
@@ -171,7 +187,9 @@ type relayUserDeleteInput struct {
 }
 
 type relayStationSummary struct {
+	relay.CredentialMetadata
 	ID                        uint       `json:"id"`
+	Type                      string     `json:"type"`
 	Name                      string     `json:"name"`
 	BaseURL                   string     `json:"base_url"`
 	APIKeyConfigured          bool       `json:"api_key_configured"`
@@ -352,7 +370,7 @@ func listRelayStations(c *gin.Context, d *Deps) {
 	}
 	out := make([]relayStationSummary, 0, len(list))
 	for _, station := range list {
-		out = append(out, stationSummary(&station))
+		out = append(out, stationSummaryWithCredentials(d, &station))
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
@@ -363,12 +381,12 @@ func createRelayStation(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	station, err := d.Relay.Create(relay.CreateInput{Name: in.Name, BaseURL: in.BaseURL, APIKey: in.APIKey})
+	station, err := d.Relay.Create(relay.CreateInput{AuthMode: in.AuthMode, Type: in.Type, Name: in.Name, BaseURL: in.BaseURL, APIKey: in.APIKey, Username: in.Username, Password: in.Password, AdminToken: in.AdminToken, AdminCookie: in.AdminCookie, AdminUserID: in.AdminUserID, GatewayKey: in.GatewayKey})
 	if err != nil {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": stationSummary(station)})
+	c.JSON(http.StatusOK, gin.H{"data": stationSummaryWithCredentials(d, station)})
 }
 
 func updateRelayStation(c *gin.Context, d *Deps) {
@@ -383,6 +401,8 @@ func updateRelayStation(c *gin.Context, d *Deps) {
 		return
 	}
 	station, err := d.Relay.Update(id, relay.UpdateInput{
+		AuthMode: in.AuthMode,
+		Type:     in.Type, Username: in.Username, Password: in.Password, AdminToken: in.AdminToken, AdminCookie: in.AdminCookie, AdminUserID: in.AdminUserID, GatewayKey: in.GatewayKey,
 		Name: in.Name, BaseURL: in.BaseURL, APIKey: in.APIKey,
 		AutoAdjustEnabled: in.AutoAdjustEnabled, AutoAdjustNoProfitEnabled: in.AutoAdjustNoProfitEnabled,
 		AutoPriorityEnabled: in.AutoPriorityEnabled, AutoPriorityRecallEnabled: in.AutoPriorityRecallEnabled,
@@ -392,7 +412,7 @@ func updateRelayStation(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": stationSummary(station)})
+	c.JSON(http.StatusOK, gin.H{"data": stationSummaryWithCredentials(d, station)})
 }
 
 func updateRelayGroup(c *gin.Context, d *Deps) {
@@ -1186,7 +1206,7 @@ func relayStationOverview(c *gin.Context, d *Deps) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": relayOverview{
-		Station: stationSummary(station), Groups: groupViews, Accounts: accountViews, Summary: summary,
+		Station: stationSummaryWithCredentials(d, station), Groups: groupViews, Accounts: accountViews, Summary: summary,
 		Adjustments: adjustmentViews, MonitorChannels: monitorOptions, SyncAvailable: station.APIKeyCipher != "",
 		Range: rangeName, UsageComplete: false, UsageFailedAccounts: 0,
 	}})
@@ -1636,12 +1656,26 @@ func relayAdjustmentGroupNames(ids []int64, groups []storage.RelayGroup) []strin
 
 func stationSummary(station *storage.RelayStation) relayStationSummary {
 	return relayStationSummary{
+		Type: func() string {
+			if station.Type == "newapi" {
+				return "newapi"
+			}
+			return "sub2api"
+		}(),
 		ID: station.ID, Name: station.Name, BaseURL: station.BaseURL, APIKeyConfigured: station.APIKeyCipher != "",
 		AutoAdjustEnabled: station.AutoAdjustEnabled, AutoAdjustNoProfitEnabled: station.AutoAdjustNoProfitEnabled,
 		AutoPriorityEnabled: station.AutoPriorityEnabled, AutoPriorityRecallEnabled: station.AutoPriorityRecallEnabled,
 		AutoPriorityRecallMinutes: station.AutoPriorityRecallMinutes,
 		LastSyncedAt:              station.LastSyncedAt, LastError: station.LastError,
 	}
+}
+
+func stationSummaryWithCredentials(d *Deps, station *storage.RelayStation) relayStationSummary {
+	summary := stationSummary(station)
+	if d.Relay != nil {
+		summary.CredentialMetadata = d.Relay.CredentialMetadata(station)
+	}
+	return summary
 }
 
 func groupOption(group storage.RelayGroup) relayGroupOption {

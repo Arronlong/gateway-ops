@@ -416,11 +416,12 @@ type OperationLedgerEntry struct {
 
 func (OperationLedgerEntry) TableName() string { return "operation_ledger_entries" }
 
-// RelayStation 是要分析的 Sub2API 中转站。管理员 API Key 仅以密文保存，
+// RelayStation 是要分析的 New API 或 Sub2API 中转站。管理凭据仅以密文保存，
 // 不会从 API 返回给前端。
 type RelayStation struct {
 	ID                        uint           `gorm:"primaryKey" json:"id"`
 	Name                      string         `gorm:"size:128;not null;uniqueIndex" json:"name"`
+	Type                      string         `gorm:"size:16;not null;default:sub2api;check:chk_relay_stations_type,type IN ('sub2api', 'newapi')" json:"type"`
 	BaseURL                   string         `gorm:"size:512;not null" json:"base_url"`
 	APIKeyCipher              string         `gorm:"type:text;not null" json:"-"`
 	AutoAdjustEnabled         bool           `gorm:"default:false" json:"auto_adjust_enabled"`

@@ -6,11 +6,11 @@
 
 **技术栈：** Go、GORM、PostgreSQL、React、TypeScript。
 
-- [ ] 在 `backend/internal/relay/newapi_admin_test.go` 编写失败测试，运行 `go test ./internal/relay` 确认功能缺失。
-- [ ] 扩展 `backend/internal/storage/model.go` 并增加 `backend/migrations/0005_newapi_relay_stations.sql`，兼容旧站点。
-- [ ] 实现 `backend/internal/relay/newapi_admin.go`：凭据、会话、管理接口、分页、字段映射。
-- [ ] 接入 `backend/internal/relay/service.go` 与 `risk.go`：配置、同步、账号分组、调度、测试、复制。
-- [ ] 扩展 `backend/internal/api/relay_stations.go` 与 `frontend/lib/api-types.ts`，隐藏敏感凭据。
-- [ ] 修改 `frontend/app/relay-stations-page.tsx`，增加站点类型、凭据模式、能力说明。
-- [ ] 更新 `README.md`，运行 `go test ./...`、前端 Node 测试、`pnpm exec tsc --noEmit` 和 `pnpm build`。
-- [ ] 审查差异，检查中文编码和 `git diff --check`，提交功能变更。
+- [x] 在 `backend/internal/relay/newapi_admin_test.go` 编写失败测试，运行 `go test ./internal/relay` 确认功能缺失。
+- [x] 扩展 `backend/internal/storage/model.go` 并增加 `backend/migrations/0005_newapi_relay_stations.sql`，兼容旧站点。
+- [x] 实现 `backend/internal/relay/newapi_admin.go`：凭据、会话、管理接口、分页、字段映射。
+- [x] 接入 `backend/internal/relay/service.go` 与 `risk.go`：配置、同步、账号分组、调度、测试、复制。
+- [x] 扩展 `backend/internal/api/relay_stations.go` 与 `frontend/lib/api-types.ts`，隐藏敏感凭据。
+- [x] 修改 `frontend/app/relay-stations-page.tsx`，增加站点类型、凭据模式、能力说明。
+- [x] 更新 `README.md`，运行 `go test ./...`、前端 Node 测试、`pnpm exec tsc --noEmit` 和 `pnpm build`。
+- [x] 审查差异，检查中文编码和 `git diff --check`，提交功能变更。

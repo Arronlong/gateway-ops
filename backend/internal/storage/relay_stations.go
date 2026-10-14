@@ -167,6 +167,11 @@ func (r *RelayStations) ReplaceSnapshot(
 				if previous, ok := previousGroupByExternalID[groups[i].ExternalID]; ok {
 					groups[i].ModelTypesJSON = previous.ModelTypesJSON
 					groups[i].MonitorEnabled = previous.MonitorEnabled
+					if groups[i].Platform == "newapi" {
+						groups[i].Description = previous.Description
+						groups[i].IsExclusive = previous.IsExclusive
+						groups[i].SortOrder = previous.SortOrder
+					}
 				}
 			}
 			if err := tx.Create(&groups).Error; err != nil {

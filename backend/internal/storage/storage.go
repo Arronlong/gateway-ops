@@ -65,6 +65,11 @@ func Open(cfg DBConfig) (*gorm.DB, error) {
 
 // AutoMigrate 启动时自动同步表结构。生产环境也提供 migrations/*.sql 作为对照。
 func AutoMigrate(db *gorm.DB) error {
+	if db.Migrator().HasTable(&RelayStation{}) && !db.Migrator().HasColumn(&RelayStation{}, "type") {
+		if err := db.Exec("ALTER TABLE relay_stations ADD COLUMN type VARCHAR(16) NOT NULL DEFAULT 'sub2api'").Error; err != nil {
+			return err
+		}
+	}
 	// Platform-level fallback bindings were removed in favor of account-level
 	// overrides. Drop the obsolete table even when upgrading an existing DB.
 	if err := db.Exec("DROP TABLE IF EXISTS relay_cost_fallbacks").Error; err != nil {

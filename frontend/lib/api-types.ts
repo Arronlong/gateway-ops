@@ -314,10 +314,32 @@ export interface BalanceTrendPoint {
   balance: number
 }
 
-export interface RelayStation {
-  id: number
+export type RelayStationType = "sub2api" | "newapi"
+export type RelayStationAuthMode = "password" | "access_token" | "cookie"
+
+export interface RelayStationPayload {
+  type: RelayStationType
   name: string
   base_url: string
+  auth_mode?: RelayStationAuthMode
+  api_key?: string
+  username?: string
+  password?: string
+  admin_token?: string
+  admin_cookie?: string
+  admin_user_id?: string
+  gateway_key?: string
+}
+
+export interface RelayStation {
+  id: number
+  type: RelayStationType
+  name: string
+  base_url: string
+  auth_mode?: RelayStationAuthMode
+  username?: string
+  admin_user_id?: string
+  gateway_key_configured: boolean
   api_key_configured: boolean
   auto_adjust_enabled: boolean
   auto_adjust_no_profit_enabled: boolean
@@ -854,6 +876,7 @@ export interface RelayGroupView {
   status?: string
   is_exclusive?: boolean
   require_oauth_only?: boolean
+  sort_order?: number
   account_types: string[]
   model_types: string[]
   rate_multiplier: number

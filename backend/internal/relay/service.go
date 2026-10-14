@@ -63,6 +63,9 @@ type Service struct {
 	accountModelsMu    sync.Mutex
 	accountModelsCache map[uint]accountModelCatalogCacheEntry
 	accountModelsGroup singleflight.Group
+	newAPIMu           sync.Mutex
+	newAPISessions     map[string]*newAPISessionEntry
+	newAPIOptionsMu    sync.Mutex
 }
 
 func NewService(stations *storage.RelayStations, cipher *crypto.Cipher, deps ...any) *Service {
@@ -90,9 +93,17 @@ func NewService(stations *storage.RelayStations, cipher *crypto.Cipher, deps ...
 }
 
 type CreateInput struct {
-	Name    string
-	BaseURL string
-	APIKey  string
+	AuthMode    string
+	Type        string
+	Name        string
+	BaseURL     string
+	APIKey      string
+	Username    string
+	Password    string
+	AdminToken  string
+	AdminCookie string
+	AdminUserID string
+	GatewayKey  string
 }
 
 var ErrInvalidBatchCloneInput = errors.New("批量新增账号参数无效")
@@ -137,9 +148,17 @@ type BatchCloneResultItem struct {
 }
 
 type UpdateInput struct {
+	AuthMode                  *string
+	Type                      *string
 	Name                      *string
 	BaseURL                   *string
 	APIKey                    *string
+	Username                  *string
+	Password                  *string
+	AdminToken                *string
+	AdminCookie               *string
+	AdminUserID               *string
+	GatewayKey                *string
 	AutoAdjustEnabled         *bool
 	AutoAdjustNoProfitEnabled *bool
 	AutoPriorityEnabled       *bool
@@ -281,15 +300,21 @@ func (s *Service) Create(in CreateInput) (*storage.RelayStation, error) {
 	if err != nil {
 		return nil, err
 	}
-	if name == "" || strings.TrimSpace(in.APIKey) == "" {
-		return nil, errors.New("名称和管理员 API Key 不能为空")
+	if name == "" {
+		return nil, errors.New("名称不能为空")
 	}
-	key, err := s.cipher.Encrypt(strings.TrimSpace(in.APIKey))
+	typeName := normalizeRelayStationType(in.Type)
+	credential := relayCredentialFromCreate(in, typeName)
+	encoded, err := encodeRelayCredential(typeName, credential)
+	if err != nil {
+		return nil, err
+	}
+	key, err := s.cipher.Encrypt(encoded)
 	if err != nil {
 		return nil, fmt.Errorf("encrypt admin API key: %w", err)
 	}
 	station := &storage.RelayStation{
-		Name: name, BaseURL: baseURL, APIKeyCipher: key,
+		Name: name, Type: typeName, BaseURL: baseURL, APIKeyCipher: key,
 	}
 	if err := s.stations.Create(station); err != nil {
 		return nil, err
@@ -309,6 +334,9 @@ func (s *Service) Update(id uint, in UpdateInput) (*storage.RelayStation, error)
 		}
 		station.Name = name
 	}
+	if in.Type != nil && normalizeRelayStationType(*in.Type) != normalizeRelayStationType(station.Type) {
+		return nil, errors.New("中转站类型创建后不可修改，请新建对应类型的中转站")
+	}
 	if in.BaseURL != nil {
 		baseURL, err := normalizeBaseURL(*in.BaseURL)
 		if err != nil {
@@ -316,8 +344,17 @@ func (s *Service) Update(id uint, in UpdateInput) (*storage.RelayStation, error)
 		}
 		station.BaseURL = baseURL
 	}
-	if in.APIKey != nil && strings.TrimSpace(*in.APIKey) != "" {
-		key, err := s.cipher.Encrypt(strings.TrimSpace(*in.APIKey))
+	if relayCredentialProvided(in) {
+		credential, err := s.decryptRelayCredential(station)
+		if err != nil {
+			return nil, err
+		}
+		credential = mergeRelayCredential(station.Type, credential, in)
+		encoded, err := encodeRelayCredential(station.Type, credential)
+		if err != nil {
+			return nil, err
+		}
+		key, err := s.cipher.Encrypt(encoded)
 		if err != nil {
 			return nil, fmt.Errorf("encrypt admin API key: %w", err)
 		}
@@ -473,7 +510,15 @@ func (s *Service) BatchCloneAccounts(ctx context.Context, stationID uint, in Bat
 				result.Results = append(result.Results, item)
 				continue
 			}
-			cloned, cloneErr := s.duplicateRemote(ctx, station.BaseURL, apiKey, source.ID, idempotencyKey)
+			var cloned *remoteAccount
+			var cloneErr error
+			credential, isNewAPI := decodeNewAPICredential(apiKey)
+			if isNewAPI {
+				requested.Name = name
+				cloned, cloneErr = s.newAPICloneAccount(ctx, station.BaseURL, credential, source.ID, requested)
+			} else {
+				cloned, cloneErr = s.duplicateRemote(ctx, station.BaseURL, apiKey, source.ID, idempotencyKey)
+			}
 			if cloneErr != nil {
 				item.Error = sanitizeBatchCloneError(cloneErr, requested.APIKey, apiKey)
 				result.Failed++
@@ -491,11 +536,13 @@ func (s *Service) BatchCloneAccounts(ctx context.Context, stationID uint, in Bat
 			}
 
 			body := batchCloneUpdateBody(&source, cloned, name, strings.TrimSpace(requested.APIKey), strings.TrimSpace(requested.BaseURL))
-			if err := s.put(ctx, fmt.Sprintf("%s/api/v1/admin/accounts/%d", station.BaseURL, item.ExternalID), apiKey, body); err != nil {
-				item.Error = sanitizeBatchCloneError(err, requested.APIKey, apiKey)
-				result.Failed++
-				result.Results = append(result.Results, item)
-				continue
+			if !isNewAPI {
+				if err := s.put(ctx, fmt.Sprintf("%s/api/v1/admin/accounts/%d", station.BaseURL, item.ExternalID), apiKey, body); err != nil {
+					item.Error = sanitizeBatchCloneError(err, requested.APIKey, apiKey)
+					result.Failed++
+					result.Results = append(result.Results, item)
+					continue
+				}
 			}
 			item.Success = true
 			if modelType := strings.ToLower(strings.TrimSpace(requested.ModelType)); modelType != "" {
@@ -730,9 +777,19 @@ func (s *Service) UpdateGroup(ctx context.Context, stationID uint, externalID in
 		return nil, err
 	}
 	previousModelTypesJSON := group.ModelTypesJSON
+	previousName, previousStatus := group.Name, group.Status
 	body, err := applyGroupUpdate(group, in)
 	if err != nil {
 		return nil, err
+	}
+	if normalizeRelayStationType(station.Type) == relayStationNewAPI {
+		if group.Name != previousName || group.Status != previousStatus {
+			return nil, errors.New("New API 分组名称和状态没有独立修改接口，请在原站完成关联迁移后同步")
+		}
+		// 描述、分组展示类型和监控配置由本地保存。
+		for _, field := range []string{"name", "status", "description", "is_exclusive"} {
+			delete(body, field)
+		}
 	}
 	if len(body) > 0 {
 		apiKey, err := s.cipher.Decrypt(station.APIKeyCipher)
@@ -780,8 +837,10 @@ func (s *Service) UpdateGroupSortOrders(ctx context.Context, stationID uint, upd
 	if err != nil {
 		return fmt.Errorf("decrypt admin API key: %w", err)
 	}
-	if err := s.put(ctx, station.BaseURL+"/api/v1/admin/groups/sort-order", apiKey, map[string]any{"updates": updates}); err != nil {
-		return fmt.Errorf("更新中转站分组排序失败: %w", err)
+	if normalizeRelayStationType(station.Type) != relayStationNewAPI {
+		if err := s.put(ctx, station.BaseURL+"/api/v1/admin/groups/sort-order", apiKey, map[string]any{"updates": updates}); err != nil {
+			return fmt.Errorf("更新中转站分组排序失败: %w", err)
+		}
 	}
 	return s.stations.UpdateGroupSortOrders(stationID, local)
 }
@@ -2475,7 +2534,7 @@ func (s *Service) Users(ctx context.Context, stationID uint, query UserListQuery
 	}
 	totalBalance := 0.0
 	for _, user := range allUsers {
-		if strings.EqualFold(strings.TrimSpace(user.Role), "admin") {
+		if strings.EqualFold(strings.TrimSpace(user.Role), "admin") || strings.EqualFold(strings.TrimSpace(user.Role), "root") {
 			continue
 		}
 		totalBalance += user.Balance
@@ -2690,10 +2749,15 @@ func filterUsersBySearch(users []remoteUser, search string) []remoteUser {
 
 func (s *Service) fetchUsers(ctx context.Context, baseURL, apiKey, search string) ([]remoteUser, error) {
 	users := make([]remoteUser, 0, 128)
+	credential, isNewAPI := decodeNewAPICredential(apiKey)
 	for pageNumber := 1; pageNumber <= 1000; pageNumber++ {
 		query := url.Values{}
 		query.Set("page", strconv.Itoa(pageNumber))
-		query.Set("page_size", "500")
+		pageSize := 500
+		if isNewAPI {
+			pageSize = 100
+		}
+		query.Set("page_size", strconv.Itoa(pageSize))
 		query.Set("sort_by", "id")
 		query.Set("sort_order", "asc")
 		if search != "" {
@@ -2703,7 +2767,11 @@ func (s *Service) fetchUsers(ctx context.Context, baseURL, apiKey, search string
 		endpoint := strings.TrimRight(baseURL, "/") + "/api/v1/admin/users?" + query.Encode()
 		var fetchErr error
 		for attempt := 0; attempt < 2; attempt++ {
-			fetchErr = s.get(ctx, endpoint, apiKey, &page)
+			if isNewAPI {
+				fetchErr = s.newAPIAdmin(ctx, http.MethodGet, endpoint, credential, nil, &page)
+			} else {
+				fetchErr = s.get(ctx, endpoint, apiKey, &page)
+			}
 			if fetchErr == nil {
 				break
 			}
@@ -2747,6 +2815,28 @@ func (s *Service) userUsage(ctx context.Context, stationID uint, baseURL, apiKey
 	s.usageMu.Unlock()
 
 	until := time.Now()
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		start := since
+		if start.IsZero() {
+			start = time.Unix(0, 0).UTC()
+		}
+		query := url.Values{"start_time": {start.Format(time.RFC3339)}, "end_time": {until.Format(time.RFC3339)}}
+		endpoint := strings.TrimRight(baseURL, "/") + "/api/v1/admin/dashboard/users-ranking?" + query.Encode()
+		var ranking remoteUserRanking
+		if err := s.newAPIAdmin(ctx, http.MethodGet, endpoint, credential, nil, &ranking); err != nil {
+			return usage, len(users)
+		}
+		wanted := make(map[int64]struct{}, len(users))
+		for _, user := range users {
+			wanted[user.ID] = struct{}{}
+		}
+		for _, item := range ranking.Ranking {
+			if _, ok := wanted[item.UserID]; ok {
+				usage[item.UserID] = UserUsageStats{TotalTokens: item.Tokens, UserCharge: item.ActualCost}
+			}
+		}
+		return usage, 0
+	}
 	remaining := userUsageCandidates(users, rangeName, since)
 	if rangeName != "24h" {
 		var ranking remoteUserRanking
@@ -2957,6 +3047,9 @@ func (s *Service) UpdateUserStatus(ctx context.Context, stationID uint, userID i
 		return fmt.Errorf("decrypt admin API key: %w", err)
 	}
 	endpoint := fmt.Sprintf("%s/api/v1/admin/users/%d", station.BaseURL, userID)
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		return s.newAPIAdmin(ctx, http.MethodPut, endpoint, credential, map[string]any{"status": status}, nil)
+	}
 	if err := s.put(ctx, endpoint, apiKey, map[string]any{"status": status}); err != nil {
 		return fmt.Errorf("更新中转站用户状态失败: %w", err)
 	}
@@ -2983,6 +3076,9 @@ func (s *Service) UpdateUserLimits(ctx context.Context, stationID uint, input Us
 	apiKey, err := s.cipher.Decrypt(station.APIKeyCipher)
 	if err != nil {
 		return 0, fmt.Errorf("decrypt admin API key: %w", err)
+	}
+	if _, ok := decodeNewAPICredential(apiKey); ok {
+		return 0, errors.New("New API 没有按用户设置并发数和 RPM 的管理接口")
 	}
 	body := map[string]any{"user_ids": input.UserIDs, "all": false}
 	if input.Concurrency != nil {
@@ -3027,6 +3123,31 @@ func (s *Service) DeleteUsers(ctx context.Context, stationID uint, userIDs []int
 		return UserDeleteResult{}, fmt.Errorf("decrypt admin API key: %w", err)
 	}
 	admins := make(map[int64]struct{})
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		users, err := s.fetchUsers(ctx, station.BaseURL, apiKey, "")
+		if err != nil {
+			return UserDeleteResult{}, fmt.Errorf("读取 New API 用户角色失败: %w", err)
+		}
+		for _, user := range users {
+			if strings.EqualFold(strings.TrimSpace(user.Role), "admin") || strings.EqualFold(strings.TrimSpace(user.Role), "root") {
+				admins[user.ID] = struct{}{}
+			}
+		}
+		result := UserDeleteResult{Failed: make([]int64, 0)}
+		for _, id := range unique {
+			if _, ok := admins[id]; ok {
+				result.SkippedAdmins++
+				continue
+			}
+			endpoint := fmt.Sprintf("%s/api/v1/admin/users/%d", strings.TrimRight(station.BaseURL, "/"), id)
+			if err := s.newAPIAdmin(ctx, http.MethodDelete, endpoint, credential, nil, nil); err != nil {
+				result.Failed = append(result.Failed, id)
+				continue
+			}
+			result.Affected++
+		}
+		return result, nil
+	}
 	for page := 1; page <= 1000; page++ {
 		var users remoteUserPage
 		endpoint := fmt.Sprintf("%s/api/v1/admin/users?page=%d&page_size=500&sort_by=id&sort_order=asc", strings.TrimRight(station.BaseURL, "/"), page)
@@ -3034,7 +3155,7 @@ func (s *Service) DeleteUsers(ctx context.Context, stationID uint, userIDs []int
 			return UserDeleteResult{}, fmt.Errorf("读取用户角色失败: %w", err)
 		}
 		for _, user := range users.Items {
-			if strings.EqualFold(strings.TrimSpace(user.Role), "admin") {
+			if strings.EqualFold(strings.TrimSpace(user.Role), "admin") || strings.EqualFold(strings.TrimSpace(user.Role), "root") {
 				admins[user.ID] = struct{}{}
 			}
 		}
@@ -3072,6 +3193,20 @@ func (s *Service) UserBalanceHistory(ctx context.Context, stationID uint, userID
 	if err != nil {
 		return UserBalanceHistory{}, fmt.Errorf("decrypt admin API key: %w", err)
 	}
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		var result UserBalanceHistory
+		endpoint := fmt.Sprintf("%s/api/v1/admin/users/%d/balance-history", strings.TrimRight(station.BaseURL, "/"), userID)
+		query := url.Values{}
+		query.Set("page", strconv.Itoa(page))
+		query.Set("page_size", strconv.Itoa(pageSize))
+		if strings.TrimSpace(kind) != "" {
+			query.Set("type", strings.TrimSpace(kind))
+		}
+		if err := s.newAPIAdmin(ctx, http.MethodGet, endpoint+"?"+query.Encode(), credential, nil, &result); err != nil {
+			return UserBalanceHistory{}, err
+		}
+		return result, nil
+	}
 	var user remoteUser
 	if err := s.get(ctx, fmt.Sprintf("%s/api/v1/admin/users/%d", station.BaseURL, userID), apiKey, &user); err != nil {
 		return UserBalanceHistory{}, err
@@ -3097,6 +3232,9 @@ func (s *Service) TestAccount(ctx context.Context, stationID uint, accountID int
 	apiKey, err := s.cipher.Decrypt(station.APIKeyCipher)
 	if err != nil {
 		return AccountTestResult{}, fmt.Errorf("decrypt admin API key: %w", err)
+	}
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		return s.newAPITestAccount(ctx, station.BaseURL, credential, accountID, modelID, mode)
 	}
 	endpoint := fmt.Sprintf("%s/api/v1/admin/accounts/%d/test", station.BaseURL, accountID)
 	var body io.Reader
@@ -3144,6 +3282,17 @@ type remoteGroupAPIKeyPage struct {
 }
 
 func (s *Service) GroupModels(ctx context.Context, stationID uint, groupID int64) ([]string, error) {
+	stored, err := s.stations.FindByID(stationID)
+	if err != nil {
+		return nil, err
+	}
+	if normalizeRelayStationType(stored.Type) == relayStationNewAPI {
+		credential, err := s.decryptRelayCredential(stored)
+		if err != nil {
+			return nil, err
+		}
+		return s.newAPIGroupModels(ctx, stored.BaseURL, credential, groupID)
+	}
 	station, gatewayKey, err := s.groupGatewayCredential(ctx, stationID, groupID)
 	if err != nil {
 		return nil, err
@@ -3215,6 +3364,10 @@ func (s *Service) groupGatewayCredential(ctx context.Context, stationID uint, gr
 	adminKey, err := s.cipher.Decrypt(station.APIKeyCipher)
 	if err != nil {
 		return nil, "", fmt.Errorf("decrypt admin API key: %w", err)
+	}
+	if credential, ok := decodeNewAPICredential(adminKey); ok {
+		key, err := s.newAPIGroupGatewayKey(ctx, station.BaseURL, credential, groupID)
+		return station, key, err
 	}
 	for page := 1; page <= 1000; page++ {
 		var keys remoteGroupAPIKeyPage
@@ -3354,10 +3507,12 @@ func gatewayResponseMessage(data []byte) string {
 	return message
 }
 
-func sanitizeGatewayMessage(message, credential string) string {
+func sanitizeGatewayMessage(message string, credentials ...string) string {
 	message = strings.TrimSpace(message)
-	if credential != "" {
-		message = strings.ReplaceAll(message, credential, "[已隐藏]")
+	for _, credential := range credentials {
+		if credential != "" {
+			message = strings.ReplaceAll(message, credential, "[已隐藏]")
+		}
 	}
 	if len(message) > 2000 {
 		message = message[:2000] + "..."
@@ -3525,16 +3680,24 @@ func (s *Service) syncSnapshot(ctx context.Context, stationID uint, probeRates b
 		return err
 	}
 	if probeRates {
-		if err := s.probeAPIKeyAccounts(ctx, station.BaseURL, apiKey, accounts); err != nil {
-			_ = s.stations.SetSyncError(station.ID, err.Error())
-			return err
-		}
-		// 探测会异步写回账号 extra/rate snapshot，必须重新读取账号列表。
-		if len(accounts) > 0 {
-			accounts, err = s.fetchAccounts(ctx, station.BaseURL, apiKey)
+		if credential, ok := decodeNewAPICredential(apiKey); ok {
+			accounts, err = s.newAPIProbeAccounts(ctx, station.BaseURL, credential, accounts)
 			if err != nil {
 				_ = s.stations.SetSyncError(station.ID, err.Error())
 				return err
+			}
+		} else {
+			if err := s.probeAPIKeyAccounts(ctx, station.BaseURL, apiKey, accounts); err != nil {
+				_ = s.stations.SetSyncError(station.ID, err.Error())
+				return err
+			}
+			// 探测会异步写回账号 extra/rate snapshot，必须重新读取账号列表。
+			if len(accounts) > 0 {
+				accounts, err = s.fetchAccounts(ctx, station.BaseURL, apiKey)
+				if err != nil {
+					_ = s.stations.SetSyncError(station.ID, err.Error())
+					return err
+				}
 			}
 		}
 	}
@@ -3665,15 +3828,23 @@ func (s *Service) SyncRates(ctx context.Context, stationID uint) error {
 		_ = s.stations.SetSyncError(station.ID, err.Error())
 		return err
 	}
-	if err := s.probeAPIKeyAccounts(ctx, station.BaseURL, apiKey, accounts); err != nil {
-		_ = s.stations.SetSyncError(station.ID, err.Error())
-		return err
-	}
-	if len(accounts) > 0 {
-		accounts, err = s.fetchAccounts(ctx, station.BaseURL, apiKey)
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		accounts, err = s.newAPIProbeAccounts(ctx, station.BaseURL, credential, accounts)
 		if err != nil {
 			_ = s.stations.SetSyncError(station.ID, err.Error())
 			return err
+		}
+	} else {
+		if err := s.probeAPIKeyAccounts(ctx, station.BaseURL, apiKey, accounts); err != nil {
+			_ = s.stations.SetSyncError(station.ID, err.Error())
+			return err
+		}
+		if len(accounts) > 0 {
+			accounts, err = s.fetchAccounts(ctx, station.BaseURL, apiKey)
+			if err != nil {
+				_ = s.stations.SetSyncError(station.ID, err.Error())
+				return err
+			}
 		}
 	}
 	now := time.Now().UTC()
@@ -3830,9 +4001,47 @@ func (s *Service) ProbeAccount(ctx context.Context, stationID uint, accountExter
 	if err != nil {
 		return fmt.Errorf("decrypt admin API key: %w", err)
 	}
-	if err := s.probeAPIKeyAccounts(ctx, station.BaseURL, apiKey, []remoteAccount{{
-		ID: accountExternalID, Type: "apikey",
-	}}); err != nil {
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		accounts, err := s.fetchAccounts(ctx, station.BaseURL, apiKey)
+		if err != nil {
+			return err
+		}
+		var source *remoteAccount
+		for index := range accounts {
+			if accounts[index].ID == accountExternalID {
+				source = &accounts[index]
+				break
+			}
+		}
+		if source == nil {
+			return errors.New("远端账号不存在或已被删除")
+		}
+		probed, err := s.newAPIProbeAccounts(ctx, station.BaseURL, credential, []remoteAccount{*source})
+		if err != nil {
+			return err
+		}
+		if len(probed) != 1 || probed[0].RateMultiplier == nil {
+			if len(probed) == 1 {
+				if probe, ok := probed[0].Extra["upstream_billing_probe"].(map[string]any); ok {
+					if message, ok := probe["error"].(string); ok && strings.TrimSpace(message) != "" {
+						return errors.New(message)
+					}
+				}
+			}
+			return errors.New("本次未探测到有效成本，已保留上一次成功结果")
+		}
+		_, observed := upstreamProbeCost(probed[0].Extra)
+		if err := s.stations.UpdateAccountProbe(stationID, accountExternalID, storage.RelayAccount{
+			Name: source.Name, BaseURL: source.Credentials.BaseURL, Identity: remoteAccountIdentity(*source),
+			Platform: source.Platform, Type: source.Type, Status: source.Status, AccountPlan: remoteAccountPlan(*source), ExpiresAt: remoteAccountExpiresAt(*source),
+			Schedulable: source.Schedulable, Concurrency: source.Concurrency, Priority: source.Priority,
+			RateMultiplier: probed[0].RateMultiplier, RateSource: "upstream_probe", RateObservedAt: observed, SyncedAt: time.Now().UTC(),
+		}); err != nil {
+			return err
+		}
+		return s.ReconcileManualChannelLinks()
+	}
+	if err := s.probeAPIKeyAccounts(ctx, station.BaseURL, apiKey, []remoteAccount{{ID: accountExternalID, Type: "apikey"}}); err != nil {
 		return err
 	}
 	accounts, err := s.fetchAccounts(ctx, station.BaseURL, apiKey)
@@ -3957,6 +4166,9 @@ func (s *Service) probeAPIKeyAccounts(ctx context.Context, baseURL, apiKey strin
 }
 
 func (s *Service) get(ctx context.Context, endpoint, apiKey string, out any) error {
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		return s.newAPIAdmin(ctx, http.MethodGet, endpoint, credential, nil, out)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return err
@@ -4001,6 +4213,9 @@ func (s *Service) getRetry(ctx context.Context, endpoint, apiKey string, out any
 }
 
 func (s *Service) put(ctx context.Context, endpoint, apiKey string, body any) error {
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		return s.newAPIAdmin(ctx, http.MethodPut, endpoint, credential, body, nil)
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err
@@ -4031,6 +4246,9 @@ func (s *Service) put(ctx context.Context, endpoint, apiKey string, body any) er
 }
 
 func (s *Service) deleteRemote(ctx context.Context, endpoint, apiKey string) error {
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		return s.newAPIAdmin(ctx, http.MethodDelete, endpoint, credential, nil, nil)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodDelete, endpoint, nil)
 	if err != nil {
 		return err
@@ -4078,6 +4296,9 @@ func (s *Service) deleteRemote(ctx context.Context, endpoint, apiKey string) err
 }
 
 func (s *Service) post(ctx context.Context, endpoint, apiKey string, body, out any) error {
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		return s.newAPIAdmin(ctx, http.MethodPost, endpoint, credential, body, out)
+	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return err

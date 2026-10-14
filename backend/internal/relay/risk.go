@@ -743,6 +743,9 @@ func (s *Service) setRuntimeSettingsBatch(ctx context.Context, stationID uint, a
 		return err
 	}
 	apiKey, decryptErr := s.cipher.Decrypt(station.APIKeyCipher)
+	if normalizeRelayStationType(station.Type) == relayStationNewAPI && (concurrency != nil || poolModeRetryCount != nil) {
+		return errors.New("New API 没有账号并发数和同账号重试次数的独立管理接口")
+	}
 	seen := make(map[int64]struct{}, len(accountExternalIDs))
 	failures := make([]string, 0)
 	for _, accountID := range accountExternalIDs {
@@ -788,7 +791,7 @@ func (s *Service) setRuntimeSettingsBatch(ctx context.Context, stationID uint, a
 			}
 			return s.stations.CreateAdjustmentLog(log)
 		}
-		if priority != nil && *priority == 1 && normalizedAccountType(account.Type) != "oauth" {
+		if priority != nil && *priority == 1 && normalizedAccountType(account.Type) != "oauth" && normalizeRelayStationType(station.Type) != relayStationNewAPI {
 			err := errors.New("优先级 1 仅保留给 OAuth 账号")
 			log.ErrorMessage = err.Error()
 			if logErr := writeLog(); logErr != nil {
