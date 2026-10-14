@@ -105,6 +105,18 @@ export function RelayStationFields({ form, station, onChange }: { form: StationF
     </>}
   </>
 }
+
+function RelayStationEditor({ station, busy, onSave, onCancel }: { station?: RelayStation; busy: boolean; onSave: (form: StationForm) => void; onCancel: () => void }) {
+  const [form, setForm] = useState<StationForm>(() => createRelayStationForm(station))
+
+  function submit(event: React.FormEvent) {
+    event.preventDefault()
+    onSave(form)
+  }
+
+  return <form onSubmit={submit} autoComplete="off" className="grid gap-3 border border-border bg-card p-4 md:grid-cols-2 xl:grid-cols-4"><RelayStationFields form={form} station={station} onChange={setForm} /><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>保存</Button><Button type="button" variant="outline" disabled={busy} onClick={onCancel}>取消</Button></div></form>
+}
+
 type RiskFilter = "all" | "adjustable" | "downgradable" | RelayAccountView["risk_state"]
 type BatchMode = "channel_group" | "manual" | "groups" | "concurrency" | "priority" | "retry_count" | "model_type"
 export function relayBatchModeForStation(type: RelayStationType, mode: BatchMode): BatchMode {
@@ -132,7 +144,6 @@ type BatchCloneFormGroup = { source_account_external_id: number; rows: BatchClon
 
 const batchCloneableAccountTypes = new Set(["apikey", "upstream", "bedrock", "service_account"])
 
-const emptyForm = createRelayStationForm()
 const usageRanges: { value: RelayUsageRange; label: string }[] = [
   { value: "today", label: "今天" },
   { value: "24h", label: "24 小时" },
@@ -1832,7 +1843,6 @@ export default function RelayStationsPage() {
   const recentUsage = useRelayRecentUsage(detailModule === "usage" && overviewReady ? selectedID : null, usageRange)
   const [historyUser, setHistoryUser] = useState<{ id: number; email: string; name: string } | null>(null)
   const userHistory = useRelayUserBalanceHistory(selectedID, historyUser?.id ?? null, 1)
-  const [form, setForm] = useState<StationForm>(emptyForm)
   const [editingID, setEditingID] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(false)
   const [batchCloneOpen, setBatchCloneOpen] = useState(false)
@@ -2054,11 +2064,11 @@ export default function RelayStationsPage() {
   }
 
   async function reload() { await Promise.all([stations.refetch(), overview.refetch(), usage.refetch(), recentUsage.refetch()]) }
-  function openCreate() { setEditingID(null); setForm(emptyForm); setShowForm(true) }
+  function openCreate() { setEditingID(null); setShowForm(true) }
   function openBatchClone() { if (cloneableAccounts.length === 0) { toast.info("当前没有支持克隆的账号"); return }; setBatchCloneResult(null); setBatchCloneOpen(true) }
   function closeBatchClone() { if (busy) return; setBatchCloneOpen(false); setBatchCloneResult(null) }
-  function openEdit() { if (selectedStation) { setEditingID(selectedStation.id); setForm(createRelayStationForm(selectedStation)); setShowForm(true) } }
-  async function saveStation(event: React.FormEvent) { event.preventDefault(); setBusy(true); try { const payload = buildRelayStationPayload(form, stations.data?.find((station) => station.id === editingID)); const station = await apiFetch<RelayStation>(editingID == null ? "/relay-stations" : `/relay-stations/${editingID}`, { method: editingID == null ? "POST" : "PUT", body: JSON.stringify(payload) }); setShowForm(false); setSelectedID(station.id); await reload(); toast.success(editingID == null ? "中转站已添加" : "中转站配置已更新") } catch (error) { toast.error(relayStationErrorMessage(form.type, "save", error instanceof Error ? error.message : "保存失败")) } finally { setBusy(false) } }
+  function openEdit() { if (selectedStation) { setEditingID(selectedStation.id); setShowForm(true) } }
+  async function saveStation(form: StationForm) { setBusy(true); try { const payload = buildRelayStationPayload(form, stations.data?.find((station) => station.id === editingID)); const station = await apiFetch<RelayStation>(editingID == null ? "/relay-stations" : `/relay-stations/${editingID}`, { method: editingID == null ? "POST" : "PUT", body: JSON.stringify(payload) }); setShowForm(false); setSelectedID(station.id); await reload(); toast.success(editingID == null ? "中转站已添加" : "中转站配置已更新") } catch (error) { toast.error(relayStationErrorMessage(form.type, "save", error instanceof Error ? error.message : "保存失败")) } finally { setBusy(false) } }
   async function sync() { if (!selectedID) return; setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}/sync`, { method: "POST" }); await reload(); toast.success(stationType === "newapi" ? "NewAPI 账号、分组与成本数据已同步" : "已实时探测 API Key 成本并刷新账号快照") } catch (error) { toast.error(relayStationErrorMessage(stationType, "sync", error instanceof Error ? error.message : "同步失败")); await reload() } finally { setBusy(false) } }
   async function syncAll() { setBusy(true); try { const result = await apiFetch<{ synced: number; failed: number }>("/relay-stations/sync-all", { method: "POST" }); await reload(); toast.success(`已同步 ${result.synced} 个中转站${result.failed ? `，${result.failed} 个失败` : ""}`) } catch (error) { toast.error(error instanceof Error ? error.message : "同步失败") } finally { setBusy(false) } }
   function changeUsageRange(nextRange: RelayUsageRange) {
@@ -2093,7 +2103,7 @@ export default function RelayStationsPage() {
 
   return <section className="space-y-4"><header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3"><div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><Server className="size-5 text-brand" />中转站管理</h1><p className="mt-1 text-xs text-muted-foreground">Sub2API 同步时自动探测上游倍率；New API 成本通过渠道关联或手工倍率配置。</p></div><div className="flex flex-wrap items-center gap-2"><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href="/settings#background-tasks" title="前往系统设置修改全部中转站的同步任务"><Settings2 className="size-3.5" />全局同步设置</a></Button><Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" onClick={openCreate}><Plus className="size-3.5" />添加中转站</Button>{stations.data?.length ? <Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy} onClick={() => void syncAll()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步全部</Button> : null}{selectedStation ? <><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/relay-monitor/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><Activity className="size-3.5" />分组监控</a></Button><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/model-pricing/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><CircleDollarSign className="size-3.5" />模型价格</a></Button><Button variant="outline" size="sm" className="h-11 sm:h-9" onClick={openEdit}>编辑</Button><Button size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy || !selectedStation.api_key_configured} onClick={() => void sync()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />实时同步</Button><Button variant="ghost" size="icon" className="size-11 sm:size-9" aria-label="删除中转站" disabled={busy} onClick={() => void remove()}><Trash2 className="size-4 text-danger" /></Button></> : null}</div></header>
 
-    {showForm ? <form onSubmit={saveStation} autoComplete="off" className="grid gap-3 border border-border bg-card p-4 md:grid-cols-2 xl:grid-cols-4"><RelayStationFields form={form} station={stations.data?.find((station) => station.id === editingID)} onChange={setForm} /><div className="flex items-end gap-2"><Button type="submit" disabled={busy}>保存</Button><Button type="button" variant="outline" onClick={() => setShowForm(false)}>取消</Button></div></form> : null}
+    {showForm ? <RelayStationEditor key={editingID ?? "new"} station={stations.data?.find((station) => station.id === editingID)} busy={busy} onSave={saveStation} onCancel={() => setShowForm(false)} /> : null}
 
     {stations.loading && !stations.data ? <div className="py-10 text-center text-sm text-muted-foreground">正在读取中转站配置...</div> : stations.data?.length ? <div><div className="mb-3 flex max-w-full items-center gap-2 overflow-x-auto border-b border-border pb-1 [scrollbar-width:thin]">{stations.data.map((station) => <button key={station.id} type="button" onClick={() => setSelectedID(station.id)} title={`${station.name} · ${station.base_url}`} className={cn("inline-flex shrink-0 cursor-pointer items-center gap-2 border-b-2 px-3 py-2 text-left text-sm transition-colors duration-200", selectedID === station.id ? "border-foreground font-medium text-foreground" : "border-transparent text-muted-foreground hover:border-border hover:text-foreground")}><span className="max-w-48 truncate">{station.name}</span><span data-station-type={station.type ?? "sub2api"} className="rounded border border-border px-1.5 py-0.5 text-[10px]">{station.type === "newapi" ? "NewAPI" : "Sub2API"}</span><span className={cn("size-1.5 rounded-full", station.last_error ? "bg-danger" : station.api_key_configured ? "bg-success" : "bg-warning")} /></button>)}</div><div className="min-w-0">{overview.loading && !currentOverview ? <div className="py-10 text-center text-sm text-muted-foreground">正在读取账号快照...</div> : currentOverview ? <div className="space-y-3">{overview.error ? <Alert variant="destructive"><CircleAlert /><AlertTitle>刷新失败，正在显示上次数据</AlertTitle><AlertDescription>{overview.error}</AlertDescription></Alert> : null}{currentOverview.station.last_error ? <Alert variant="destructive"><CircleAlert /><AlertTitle>最近同步失败</AlertTitle><AlertDescription>{currentOverview.station.last_error}</AlertDescription></Alert> : null}{!currentOverview.station.last_synced_at ? <Alert><CircleAlert /><AlertTitle>还没有账号快照</AlertTitle><AlertDescription>实时同步后将读取远端账号、成本倍率与分组关联。</AlertDescription></Alert> : null}<RiskSummary overview={currentOverview} /><RelayDailyConsumptionTrend data={dailyConsumption.data ?? []} loading={dailyConsumption.loading} />
 
