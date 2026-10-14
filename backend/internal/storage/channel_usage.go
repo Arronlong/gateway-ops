@@ -54,7 +54,7 @@ func (r *ChannelUsage) Upsert(events []ChannelUsageEvent) error {
 		Columns: []clause.Column{{Name: "channel_id"}, {Name: "channel_account_id"}, {Name: "source"}, {Name: "remote_usage_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
 			"request_id", "model", "first_token_ms", "duration_ms", "success_known", "success",
-			"input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
+			"cache_known", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
 			"actual_cost", "total_cost", "occurred_at", "synced_at",
 		}),
 	}).CreateInBatches(events, 200).Error
@@ -149,6 +149,7 @@ func channelUsageSamples(events []ChannelUsageEvent) []ChannelUsageSample {
 	out := make([]ChannelUsageSample, 0, len(events))
 	for _, event := range events {
 		out = append(out, ChannelUsageSample{
+			CacheKnown:          event.CacheKnown || event.CacheReadTokens > 0,
 			ChannelAccountID:    event.ChannelAccountID,
 			FirstTokenMS:        event.FirstTokenMS,
 			DurationMS:          event.DurationMS,

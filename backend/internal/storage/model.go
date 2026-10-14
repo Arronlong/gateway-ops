@@ -562,6 +562,7 @@ func (RelayAccount) TableName() string { return "relay_accounts" }
 // RelayUsageEvent: channel monitoring must never infer requests from a relay
 // station, even when an explicit account association exists.
 type ChannelUsageEvent struct {
+	CacheKnown          bool      `gorm:"not null;default:false" json:"cache_known"`
 	ID                  uint      `gorm:"primaryKey" json:"id"`
 	ChannelID           uint      `gorm:"not null;uniqueIndex:idx_channel_usage_remote,priority:1;index:idx_channel_usage_channel_time,priority:1" json:"channel_id"`
 	ChannelAccountID    uint      `gorm:"not null;uniqueIndex:idx_channel_usage_remote,priority:2;index" json:"channel_account_id"`
@@ -596,6 +597,7 @@ type ChannelUsageSyncState struct {
 func (ChannelUsageSyncState) TableName() string { return "channel_usage_sync_states" }
 
 type ChannelUsageSample struct {
+	CacheKnown          bool      `json:"cache_known"`
 	ChannelAccountID    uint      `json:"channel_account_id"`
 	FirstTokenMS        *int64    `json:"first_token_ms"`
 	DurationMS          *int64    `json:"duration_ms"`
@@ -612,6 +614,7 @@ type ChannelUsageSample struct {
 // RelayUsageEvent is the durable local copy of a Sub2API relay-station usage row.
 // It remains relay-only and is never a channel-monitoring source.
 type RelayUsageEvent struct {
+	CacheKnown            bool      `gorm:"not null;default:false" json:"cache_known"`
 	ID                    uint      `gorm:"primaryKey" json:"id"`
 	RelayStationID        uint      `gorm:"not null;uniqueIndex:idx_relay_usage_remote;index:idx_relay_usage_station_time,priority:1" json:"relay_station_id"`
 	RemoteUsageID         int64     `gorm:"not null;uniqueIndex:idx_relay_usage_remote" json:"remote_usage_id"`
@@ -652,6 +655,7 @@ func (RelayUsageSyncState) TableName() string { return "relay_usage_sync_states"
 // RelayLatencySample is the small, stable subset of a Sub2API usage row that
 // is useful for the account health table.
 type RelayLatencySample struct {
+	CacheKnown             bool      `json:"cache_known"`
 	FirstTokenMS           int64     `json:"first_token_ms"`
 	DurationMS             int64     `json:"duration_ms"`
 	StatusCode             int       `json:"status_code,omitempty"`

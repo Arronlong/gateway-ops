@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // RelayStations 管理中转站配置及其同步快照。
@@ -32,6 +33,13 @@ func (r *RelayStations) Create(station *RelayStation) error { return r.db.Create
 func (r *RelayStations) Update(station *RelayStation) error { return r.db.Save(station).Error }
 func (r *RelayStations) Delete(id uint) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		var station RelayStation
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", id).Find(&station).Error; err != nil {
+			return err
+		}
+		if station.ID == 0 {
+			return nil
+		}
 		if err := tx.Model(&OperationLedgerEntry{}).Where("relay_station_id = ?", id).Update("relay_station_id", nil).Error; err != nil {
 			return err
 		}
@@ -42,6 +50,9 @@ func (r *RelayStations) Delete(id uint) error {
 			return err
 		}
 		if err := tx.Where("relay_station_id = ?", id).Delete(&RelayAccountAdjustmentLog{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("relay_station_id = ?", id).Delete(&RelayTestRun{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("relay_station_id = ?", id).Delete(&RelayUsageEvent{}).Error; err != nil {

@@ -259,7 +259,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 			Model               string  `json:"model"`
 			InputTokens         int64   `json:"input_tokens"`
 			OutputTokens        int64   `json:"output_tokens"`
-			CacheReadTokens     int64   `json:"cache_read_tokens"`
+			CacheReadTokens     *int64  `json:"cache_read_tokens"`
 			CacheCreationTokens int64   `json:"cache_creation_tokens"`
 			TotalCost           float64 `json:"total_cost"`
 			ActualCost          float64 `json:"actual_cost"`
@@ -286,7 +286,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 			RemoteID: strconv.FormatInt(item.ID, 10), RequestID: item.RequestID, CreatedAt: createdAt,
 			Model: item.Model, FirstTokenMS: item.FirstTokenMS, DurationMS: item.DurationMS,
 			SuccessKnown: false, Success: true, InputTokens: item.InputTokens, OutputTokens: item.OutputTokens,
-			CacheReadTokens: item.CacheReadTokens, CacheCreationTokens: item.CacheCreationTokens,
+			CacheKnown: item.CacheReadTokens != nil, CacheReadTokens: cacheTokenValue(item.CacheReadTokens), CacheCreationTokens: item.CacheCreationTokens,
 			ActualCost: item.ActualCost, TotalCost: item.TotalCost,
 		})
 	}

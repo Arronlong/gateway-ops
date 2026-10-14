@@ -405,6 +405,7 @@ func latencySampleFromUsage(usage remoteUsage) (storage.RelayLatencySample, bool
 		return storage.RelayLatencySample{}, false
 	}
 	return storage.RelayLatencySample{
+		CacheKnown:            usage.CacheKnown || usage.CacheReadTokens > 0,
 		FirstTokenMS:          usage.FirstTokenMS,
 		DurationMS:            usage.DurationMS,
 		StatusCode:            usage.StatusCode,
@@ -468,6 +469,7 @@ func usageEventFromRemote(stationID uint, usage remoteUsage, syncedAt time.Time)
 		FirstTokenMS:          usage.FirstTokenMS,
 		DurationMS:            usage.DurationMS,
 		StatusCode:            usage.StatusCode,
+		CacheKnown:            usage.CacheKnown,
 		InputTokens:           usage.InputTokens,
 		OutputTokens:          usage.OutputTokens,
 		CacheReadTokens:       usage.CacheReadTokens,
@@ -492,6 +494,7 @@ func remoteUsageFromEvent(event storage.RelayUsageEvent) remoteUsage {
 		GroupName:             event.GroupName,
 		FirstTokenMS:          event.FirstTokenMS,
 		DurationMS:            event.DurationMS,
+		CacheKnown:            event.CacheKnown || event.CacheReadTokens > 0,
 		StatusCode:            event.StatusCode,
 		CreatedAt:             event.OccurredAt.UTC().Format(time.RFC3339Nano),
 		Model:                 event.Model,

@@ -207,7 +207,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 	req := c.http.R().SetContext(ctx).
 		SetQueryParam("p", strconv.Itoa(page)).
 		SetQueryParam("page_size", strconv.Itoa(pageSize)).
-		SetQueryParam("type", "2")
+		SetQueryParam("type", "0")
 	if len(session.Headers) > 0 {
 		req.SetHeaders(session.Headers)
 	}
@@ -243,6 +243,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 		Total    int `json:"total"`
 		Items    []struct {
 			ID               int    `json:"id"`
+			Type             int    `json:"type"`
 			CreatedAt        int64  `json:"created_at"`
 			ModelName        string `json:"model_name"`
 			Quota            int64  `json:"quota"`
@@ -260,14 +261,19 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 	if data.PageSize > 0 && data.Total > 0 {
 		pages = (data.Total + data.PageSize - 1) / data.PageSize
 	}
-	out := &connector.UsagePage{Total: int64(data.Total), Page: data.Page, PageSize: data.PageSize, Pages: pages}
+	out := &connector.UsagePage{RawCount: len(data.Items), Total: int64(data.Total), Page: data.Page, PageSize: data.PageSize, Pages: pages}
 	out.Records = make([]connector.UsageRecord, 0, len(data.Items))
 	for _, item := range data.Items {
+		if (item.Type != 0 && item.Type != 2 && item.Type != 5) || (item.Type == 0 && strings.TrimSpace(item.ModelName) == "") {
+			continue
+		}
 		durationMS := item.UseTime * 1000
+		cacheRead, cacheCreation, cacheKnown := cacheTokensFromOther(item.Other)
 		firstTokenMS := firstTokenMSFromOther(item.Other)
 		out.Records = append(out.Records, connector.UsageRecord{
 			RemoteID: strconv.Itoa(item.ID), RequestID: item.RequestID, CreatedAt: time.Unix(item.CreatedAt, 0),
-			Model: item.ModelName, FirstTokenMS: firstTokenMS, DurationMS: &durationMS, SuccessKnown: false, Success: true,
+			Model: item.ModelName, FirstTokenMS: firstTokenMS, DurationMS: &durationMS, SuccessKnown: item.Type == 2 || item.Type == 5, Success: item.Type != 5,
+			CacheKnown: cacheKnown, CacheReadTokens: cacheRead, CacheCreationTokens: cacheCreation,
 			InputTokens: item.PromptTokens, OutputTokens: item.CompletionTokens,
 			ActualCost: float64(item.Quota) / status.QuotaPerUnit, TotalCost: float64(item.Quota) / status.QuotaPerUnit,
 		})

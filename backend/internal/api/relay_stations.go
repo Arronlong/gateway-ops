@@ -17,6 +17,8 @@ import (
 
 func registerRelayStations(g *gin.RouterGroup, d *Deps) {
 	gp := g.Group("/relay-stations")
+	gp.GET("/test-runs/latest", func(c *gin.Context) { relayLatestTestRuns(c, d) })
+	gp.GET("/:id/test-runs", func(c *gin.Context) { relayStationTestRuns(c, d) })
 	gp.GET("", func(c *gin.Context) { listRelayStations(c, d) })
 	gp.POST("", func(c *gin.Context) { createRelayStation(c, d) })
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllRelayStations(c, d) })

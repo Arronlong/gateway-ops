@@ -36,6 +36,7 @@ import type {
   RelayUserRiskLevel,
   RelayUserBalanceHistory,
   RelayStation,
+  RelayTestRun,
   DashboardRange,
   RelayUsageRange,
   LatencyBucketGranularity,
@@ -309,6 +310,12 @@ export function useCaptchaConfigs() {
   return useApi<CaptchaConfig[]>("/captcha-configs")
 }
 
+export function useRelayTestRuns(stationID: number | null) {
+  return useApi<RelayTestRun[]>(stationID == null ? null : `/relay-stations/${stationID}/test-runs`)
+}
+export function useLatestRelayTestRuns() {
+  return useApi<RelayTestRun[]>("/relay-stations/test-runs/latest")
+}
 export function useRelayStations() {
   return useApi<RelayStation[]>("/relay-stations")
 }

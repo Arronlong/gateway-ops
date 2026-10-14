@@ -129,6 +129,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&ChannelUsageSyncState{},
 		&RelayUsageEvent{},
 		&RelayUsageSyncState{},
+		&RelayTestRun{},
 		&RelayAccountGroup{},
 		&RelayAccountCostOverride{},
 		&RelayAccountAdjustmentLog{},

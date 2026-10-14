@@ -548,6 +548,33 @@ export interface RelayGroupTestCallResult {
   output: string
 }
 
+export interface RelayTestCall {
+  index: number
+  success: boolean
+  status_code: number
+  duration_ms: number
+  output: string
+}
+export interface RelayTestRun {
+  id: number
+  relay_station_id: number
+  station_name: string
+  setup_error?: boolean
+  target_type: string
+  target_id: number
+  target_name: string
+  model: string
+  mode: string
+  requested: number
+  succeeded: number
+  failed: number
+  duration_ms: number
+  error: string
+  started_at: string
+  finished_at: string
+  results: RelayTestCall[]
+}
+
 export interface RelayGroupTestResult {
   model: string
   requested: number
@@ -697,6 +724,7 @@ export interface OperationLinkStation {
 }
 
 export interface RelayLatencySample {
+  cache_known?: boolean
   first_token_ms: number
   duration_ms: number
   status_code?: number
@@ -718,6 +746,7 @@ export interface RelayLatencySample {
 }
 
 export interface ChannelUsageSample {
+  cache_known?: boolean
   channel_account_id: number
   first_token_ms: number | null
   duration_ms: number | null
