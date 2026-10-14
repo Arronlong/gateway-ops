@@ -66,6 +66,10 @@ type Service struct {
 	newAPIMu           sync.Mutex
 	newAPISessions     map[string]*newAPISessionEntry
 	newAPIOptionsMu    sync.Mutex
+	reportMu           sync.Mutex
+	reportCache        map[string]reportCacheEntry
+	reportGroup        singleflight.Group
+	userReportRevision map[uint]uint64
 }
 
 func NewService(stations *storage.RelayStations, cipher *crypto.Cipher, deps ...any) *Service {
@@ -2254,6 +2258,19 @@ func (s *Service) RecentUsage(ctx context.Context, stationID uint, since, until 
 	if err != nil {
 		return nil, err
 	}
+	key := fmt.Sprintf("recent:%d:%x:%d:%d", stationID, sha256.Sum256([]byte(station.BaseURL+"\x00"+station.APIKeyCipher)), since.Unix()/60, until.Unix()/60)
+	value, err := s.cachedReport(ctx, key, 30*time.Second, func(loadCtx context.Context) (any, error) { return s.recentUsage(loadCtx, stationID, since, until) })
+	if err != nil {
+		return nil, err
+	}
+	return value.([]RecentUsageItem), nil
+}
+
+func (s *Service) recentUsage(ctx context.Context, stationID uint, since, until time.Time) ([]RecentUsageItem, error) {
+	station, err := s.stations.FindByID(stationID)
+	if err != nil {
+		return nil, err
+	}
 	apiKey, err := s.cipher.Decrypt(station.APIKeyCipher)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt admin API key: %w", err)
@@ -2506,6 +2523,23 @@ func formatIPLocation(countryCode, regionName, city string) string {
 // user columns server-side, but range usage and live concurrency require a
 // merged full-result sort before this service applies pagination.
 func (s *Service) Users(ctx context.Context, stationID uint, query UserListQuery) (UserManagementPage, error) {
+	station, err := s.stations.FindByID(stationID)
+	if err != nil {
+		return UserManagementPage{}, err
+	}
+	encoded, _ := json.Marshal(query)
+	s.reportMu.Lock()
+	revision := s.userReportRevision[stationID]
+	s.reportMu.Unlock()
+	key := fmt.Sprintf("users:%d:%d:%x:%s", stationID, revision, sha256.Sum256([]byte(station.BaseURL+"\x00"+station.APIKeyCipher)), encoded)
+	value, err := s.cachedReport(ctx, key, 15*time.Second, func(loadCtx context.Context) (any, error) { return s.users(loadCtx, stationID, query) })
+	if err != nil {
+		return UserManagementPage{}, err
+	}
+	return value.(UserManagementPage), nil
+}
+
+func (s *Service) users(ctx context.Context, stationID uint, query UserListQuery) (UserManagementPage, error) {
 	if query.Page < 1 {
 		query.Page = 1
 	}
@@ -3034,6 +3068,7 @@ func cmpTime(a, b time.Time) int {
 }
 
 func (s *Service) UpdateUserStatus(ctx context.Context, stationID uint, userID int64, status string) error {
+	defer s.invalidateUserReports(stationID)
 	status = strings.ToLower(strings.TrimSpace(status))
 	if userID <= 0 || (status != "active" && status != "disabled") {
 		return errors.New("用户状态参数无效")
@@ -3057,6 +3092,7 @@ func (s *Service) UpdateUserStatus(ctx context.Context, stationID uint, userID i
 }
 
 func (s *Service) UpdateUserLimits(ctx context.Context, stationID uint, input UserBatchLimitsInput) (int, error) {
+	defer s.invalidateUserReports(stationID)
 	if len(input.UserIDs) == 0 || len(input.UserIDs) > 500 {
 		return 0, errors.New("user_ids 必须包含 1 到 500 个用户")
 	}
@@ -3097,6 +3133,7 @@ func (s *Service) UpdateUserLimits(ctx context.Context, stationID uint, input Us
 // DeleteUsers soft-deletes remote users through the Sub2API admin endpoint.
 // Admin accounts are never sent to the remote API.
 func (s *Service) DeleteUsers(ctx context.Context, stationID uint, userIDs []int64) (UserDeleteResult, error) {
+	defer s.invalidateUserReports(stationID)
 	if len(userIDs) == 0 || len(userIDs) > 300 {
 		return UserDeleteResult{}, errors.New("user_ids 必须包含 1 到 300 个用户")
 	}

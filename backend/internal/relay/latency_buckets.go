@@ -753,6 +753,9 @@ func (s *Service) localAccountLatencySnapshots(stationID uint, accounts []remote
 }
 
 func (s *Service) fetchStationUsageItems(ctx context.Context, baseURL, apiKey string, since, until time.Time) ([]remoteUsage, error) {
+	if credential, ok := decodeNewAPICredential(apiKey); ok {
+		return s.newAPIStationUsageItems(ctx, baseURL, credential, since, until)
+	}
 	const pageSize = 200
 	var first remoteUsagePage
 	if err := s.get(ctx, stationUsageListEndpoint(baseURL, since, until, 1, pageSize), apiKey, &first); err != nil {

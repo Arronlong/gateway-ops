@@ -1006,11 +1006,16 @@ func (s *Service) newAPILogs(ctx context.Context, base string, c newAPICredentia
 		return remoteUsagePage{}, err
 	}
 	query := newAPIPageQuery(q)
+	for _, key := range []string{"username", "token_name", "group", "channel", "model_name", "request_id", "start_timestamp", "end_timestamp"} {
+		if value := q.Get(key); value != "" {
+			query.Set(key, value)
+		}
+	}
 	for _, mapping := range [][2]string{{"account_id", "channel"}, {"model", "model_name"}, {"start_date", "start_timestamp"}, {"end_date", "end_timestamp"}, {"start_time", "start_timestamp"}, {"end_time", "end_timestamp"}} {
 		from, to := mapping[0], mapping[1]
 		if value := q.Get(from); value != "" {
 			if strings.HasSuffix(to, "timestamp") {
-				if date, err := time.Parse(time.RFC3339, value); err == nil {
+				if date, err := time.Parse(time.RFC3339Nano, value); err == nil {
 					value = strconv.FormatInt(date.Unix(), 10)
 				} else if date, err := time.Parse("2006-01-02", value); err == nil {
 					if from == "end_date" {
@@ -1364,28 +1369,20 @@ func cloneURLValues(source url.Values) url.Values {
 func (s *Service) newAPIRanking(ctx context.Context, base string, c newAPICredential, q url.Values, out any) error {
 	result := remoteUserRanking{Ranking: []remoteUserRankingItem{}}
 	users := map[int64]remoteUserRankingItem{}
-	q.Set("page_size", "100")
-	q.Set("type", "2")
-	for pageNumber := 1; ; pageNumber++ {
-		q.Set("page", strconv.Itoa(pageNumber))
-		page, err := s.newAPILogs(ctx, base, c, q)
-		if err != nil {
-			return err
-		}
-		for _, item := range page.Items {
-			user := users[item.UserID]
-			user.UserID = item.UserID
-			user.ActualCost += item.ActualCost
-			user.Tokens += item.InputTokens + item.OutputTokens
-			user.Requests++
-			users[item.UserID] = user
-			result.TotalActualCost += item.ActualCost
-			result.TotalRequests++
-			result.TotalTokens += item.InputTokens + item.OutputTokens
-		}
-		if pageNumber >= page.Pages {
-			break
-		}
+	items, err := s.newAPILogSnapshot(ctx, base, c, q, "2")
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		user := users[item.UserID]
+		user.UserID = item.UserID
+		user.ActualCost += item.ActualCost
+		user.Tokens += item.InputTokens + item.OutputTokens
+		user.Requests++
+		users[item.UserID] = user
+		result.TotalActualCost += item.ActualCost
+		result.TotalRequests++
+		result.TotalTokens += item.InputTokens + item.OutputTokens
 	}
 	for _, user := range users {
 		result.Ranking = append(result.Ranking, user)

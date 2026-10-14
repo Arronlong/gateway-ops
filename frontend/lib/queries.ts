@@ -129,14 +129,24 @@ function useApi<T>(path: string | null, cancelOnNavigation = true, cacheTTL = CA
     error: null,
   })
   const [bump, setBump] = useState(0)
-  const bumpRef = useRef(0)
   const globalTick = useRefreshTick()
+  const [requestTick, setRequestTick] = useState(globalTick)
+  const requestPending = useRef(false)
+  const previousTick = useRef(globalTick)
+  const bumpRef = useRef(0)
   const refetchWaiters = useRef<Array<{ path: string; bump: number; resolve: () => void; reject: (error: unknown) => void }>>([])
 
   useEffect(() => () => {
     const waiters = refetchWaiters.current.splice(0)
     waiters.forEach(({ resolve }) => resolve())
   }, [])
+
+  useEffect(() => {
+    if (previousTick.current === globalTick) return
+    previousTick.current = globalTick
+    // 自动轮询只在当前读取完成后发起，避免长请求被每轮刷新取消而永远无法展示。
+    if (!requestPending.current) setRequestTick(globalTick)
+  }, [globalTick])
 
   useEffect(() => {
     const obsoleteWaiters = refetchWaiters.current.filter((waiter) => waiter.path !== path)
@@ -148,9 +158,10 @@ function useApi<T>(path: string | null, cancelOnNavigation = true, cacheTTL = CA
     }
     const requestBump = bump
     let cancelled = false
+    requestPending.current = true
     setState((previous) => {
       if (previous.path !== path) {
-        const cached = readCached<T>(cacheKey(path, globalTick, 0))
+        const cached = readCached<T>(cacheKey(path, requestTick, 0))
         return { path, data: cached, loading: cached === null, refreshing: true, error: null }
       }
       if (previous.data === null) {
@@ -158,10 +169,11 @@ function useApi<T>(path: string | null, cancelOnNavigation = true, cacheTTL = CA
       }
       return { ...previous, loading: false, refreshing: true, error: null }
     })
-    const request = fetchShared<T>(path, cacheKey(path, globalTick, bump), cancelOnNavigation, cacheTTL)
+    const request = fetchShared<T>(path, cacheKey(path, requestTick, bump), cancelOnNavigation, cacheTTL)
     request.promise
       .then((d) => {
         if (cancelled) return
+        requestPending.current = false
         scheduleQueryUpdate(() => {
           setState({ path, data: d, loading: false, refreshing: false, error: null })
         })
@@ -170,7 +182,9 @@ function useApi<T>(path: string | null, cancelOnNavigation = true, cacheTTL = CA
         waiters.forEach(({ resolve }) => resolve())
       })
       .catch((e: Error) => {
-        if (cancelled || e.name === "AbortError") return
+        if (cancelled) return
+        requestPending.current = false
+        if (e.name === "AbortError") return
         scheduleQueryUpdate(() => {
           setState((previous) => (
             previous.path === path
@@ -184,14 +198,15 @@ function useApi<T>(path: string | null, cancelOnNavigation = true, cacheTTL = CA
       })
     return () => {
       cancelled = true
+      requestPending.current = false
       request.release()
     }
-  }, [path, bump, globalTick, cancelOnNavigation])
+  }, [path, bump, requestTick, cancelOnNavigation])
 
   const current = state.path === path
     ? state
     : (() => {
-      const cached = path === null ? null : readCached<T>(cacheKey(path, globalTick, 0))
+      const cached = path === null ? null : readCached<T>(cacheKey(path, requestTick, 0))
       return { path, data: cached, loading: path !== null && cached === null, refreshing: path !== null, error: null }
     })()
 
