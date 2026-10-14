@@ -28,7 +28,7 @@ const queryMock = hookNames.map((name) => `export function ${name}() {
     : '${name}' === 'useRelayUserBalanceHistory' ? null
     : '${name}' === 'useChannelRelayAssociations' ? { stations: [], links: [] }
     : '${name}' === 'useRelayUsage' ? { accounts: [], range: 'today', complete: true, failed_accounts: 0 }
-    : '${name}' === 'useRelayUsers' ? { items: [], total: 0, total_balance: 0, page: 1, page_size: 20, pages: 1, complete: true }
+    : '${name}' === 'useRelayUsers' ? fixture.users ?? { items: [], total: 0, total_balance: 0, page: 1, page_size: 20, pages: 1, complete: true }
     : [];
   return { data, loading: false, refreshing: false, error: null, refetch: async () => {} };
 }`).join('\n')
@@ -52,6 +52,50 @@ test('\u521b\u5efa\u4ec5\u53d1\u9001\u6240\u9009\u9274\u6743\u5b57\u6bb5', () =>
   assert.deepEqual(json(page.buildRelayStationPayload(form({ auth_mode: 'access_token', admin_token: 'token', gateway_key: 'sk-key' }))), { type: 'newapi', auth_mode: 'access_token', name: 'NewAPI', base_url: 'https://relay.example', admin_token: 'token', admin_user_id: '1', gateway_key: 'sk-key' })
   assert.deepEqual(json(page.buildRelayStationPayload(form({ auth_mode: 'cookie', admin_cookie: 'session=secret' }))), { type: 'newapi', auth_mode: 'cookie', name: 'NewAPI', base_url: 'https://relay.example', admin_cookie: 'session=secret', admin_user_id: '1' })
   assert.deepEqual(json(page.buildRelayStationPayload(form({ type: 'sub2api', api_key: 'x-api-key' }))), { type: 'sub2api', name: 'NewAPI', base_url: 'https://relay.example', api_key: 'x-api-key' })
+})
+
+
+test('NewAPI \u7528\u6237\u7ba1\u7406\u590d\u7528\u7edf\u4e00\u6807\u9898\u6307\u6807\u548c\u5de5\u5177\u680f', () => {
+  const html = renderToStaticMarkup(React.createElement(page.NewAPIUserManagement, { stationID: 1, range: 'today' }))
+  for (const slot of ['list-panel-heading', 'list-panel-summary', 'list-panel-secondary-toolbar']) assert.match(html, new RegExp(`data-slot="${slot}"`))
+  assert.doesNotMatch(html, /NewAPI \u7528\u6237\u7ba1\u7406|<table/)
+  assert.match(html, /\u603b\u4f59\u989d/)
+  assert.match(html, /\u91cd\u7f6e/)
+  assert.match(html, /\u533a\u95f4\u6d88\u8d39/)
+  assert.doesNotMatch(html, /\u6bcf\u5206\u949f\u8bf7\u6c42\u6570|\u98ce\u9669\u5206\u6570|\u6ce8\u518c IP/)
+})
+
+test('NewAPI \u7528\u6237\u7ba1\u7406\u4fdd\u62a4 root \u4e0e\u7ba1\u7406\u5458', () => {
+  const user = { id: 1, username: 'root', email: 'root@example.test', role: 'root', balance: 12, usage: 2, usage_total_tokens: 100, status: 'active', created_at: '' }
+  context.__relayData.users = { items: [user, { ...user, id: 2, username: 'admin', email: 'admin@example.test', role: 'admin' }, { ...user, id: 3, username: 'alice', email: 'alice@example.test', role: 'user' }], total: 3, total_balance: 12, page: 1, page_size: 50, pages: 1, complete: true }
+  try {
+    const html = renderToStaticMarkup(React.createElement(page.NewAPIUserManagement, { stationID: 1, range: 'today' }))
+    for (const email of ['root@example.test', 'admin@example.test']) {
+      const checkbox = html.match(new RegExp(`<button(?=[^>]*role="checkbox")(?=[^>]*aria-label="[^"<>]*${email}")[^>]*>`))?.[0]
+      const status = html.match(new RegExp(`<button(?=[^>]*role="switch")(?=[^>]*aria-label="${email}[^"<>]*")[^>]*>`))?.[0]
+      assert.ok(checkbox)
+      assert.ok(status)
+      assert.match(checkbox, /disabled=/)
+      assert.match(status, /disabled=/)
+    }
+    assert.match(html, /100 Token/)
+    assert.match(html, /\u7528\u6237\u6263\u8d39/)
+  } finally { delete context.__relayData.users }
+})
+
+test('\u6700\u8fd1\u4f7f\u7528\u8bb0\u5f55\u5728\u65e0\u5e76\u53d1\u6570\u636e\u65f6\u4ecd\u663e\u793a\u5b8c\u6574\u6307\u6807\u533a', () => {
+  assert.equal(typeof page.RecentUsageTable, 'function')
+  const rows = [{ id: 1, user_id: 1, user_email: '', user_name: 'alice', group_id: 1, group_name: 'default', account_id: 1, account_name: 'channel', input_tokens: 100, output_tokens: 50, user_charge: 0.25 }, { id: 2, user_id: 2, user_email: '', user_name: 'bob', group_id: 1, group_name: 'default', account_id: 1, account_name: 'channel', input_tokens: 200, output_tokens: 50, user_charge: 0.5 }]
+  const props = { rows: rows.map(row => ({ request_type: "sync", model: "gpt-4", created_at: "2026-10-14T10:00:00Z", ip_address: "", ip_location: "", first_token_ms: 10, duration_ms: 100, original_cost: 0, cache_read_tokens: 0, cache_creation_tokens: 0, ...row })), loading: false, refreshing: false, error: null, range: 'today', onRefresh() {}, onUserClick() {}, groupNames: new Map(), accountNames: new Map(), accountURLs: new Map() }
+  const html = renderToStaticMarkup(React.createElement(page.RecentUsageTable, props))
+  assert.match(html, /data-slot="list-panel-summary"/)
+  for (const label of ['\u8bf7\u6c42\u6570', '\u603b Token', '\u7528\u6237\u6263\u8d39', '\u7cfb\u7edf\u5e76\u53d1', '\u4e0a\u6e38\u672a\u63d0\u4f9b']) assert.ok(html.includes(label))
+  assert.match(html, />400<\/p>/)
+  assert.match(html, />\$0\.750000<\/p>/)
+  const sub2api = renderToStaticMarkup(React.createElement(page.RecentUsageTable, { ...props, systemCapacity: { current: 3, total: 20 } }))
+  assert.match(sub2api, /3 \/ 20/)
+  assert.equal((html.match(/data-relay-metric=/g) ?? []).length, 4)
+  assert.equal((sub2api.match(/data-relay-metric=/g) ?? []).length, 4)
 })
 
 test('\u6458\u8981\u548c\u8bf7\u6c42\u7c7b\u578b\u5339\u914d NewAPI \u5951\u7ea6', () => {
@@ -185,7 +229,10 @@ test('NewAPI \u5206\u7ec4\u4fdd\u7559\u7f16\u8f91\u4e0e\u5feb\u901f\u6d4b\u8bd5\
   const nameInput = html.match(/<input(?=[^>]*readonly="")(?=[^>]*value="default")[^>]*>/i)?.[0]
   assert.ok(nameInput)
   assert.doesNotMatch(nameInput, /disabled=/)
-  assert.doesNotMatch(html, /aria-label="default\u505c\u7528"/)
+  const statusSwitch = html.match(/<button(?=[^>]*aria-label="default\u505c\u7528")[^>]*>/)?.[0]
+  assert.ok(statusSwitch)
+  assert.match(statusSwitch, /disabled=""/)
+  assert.match(statusSwitch, /disabled:opacity-100/)
   assert.match(html, /\u5feb\u901f\u6d4b\u8bd5/)
   assert.match(html, /root/)
   assert.doesNotMatch(html, /aria-label="default\u5206\u7ec4\u63cf\u8ff0"[^>]*disabled=""/)
