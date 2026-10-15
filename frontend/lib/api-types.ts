@@ -548,31 +548,38 @@ export interface RelayGroupTestCallResult {
   output: string
 }
 
-export interface RelayTestCall {
-  index: number
-  success: boolean
-  status_code: number
-  duration_ms: number
-  output: string
+export interface PelicanConfig {
+  id?: number
+  relay_station_id?: number
+  account_external_id?: number
+  enabled: boolean
+  model: string
+  prompt: string
+  reasoning_effort: string
+  parallel_count: number
+  cron_expression: string
+  next_run_at?: string
+  lease_until?: string | null
 }
-export interface RelayTestRun {
+export interface PelicanResult {
   id: number
   relay_station_id: number
-  station_name: string
-  setup_error?: boolean
-  target_type: string
-  target_id: number
-  target_name: string
+  account_external_id: number
+  account_name: string
   model: string
-  mode: string
-  requested: number
-  succeeded: number
-  failed: number
-  duration_ms: number
+  prompt?: string
+  reasoning_effort: string
+  trigger: string
+  status: "success" | "failed"
+  html?: string
   error: string
+  duration_ms: number
   started_at: string
   finished_at: string
-  results: RelayTestCall[]
+}
+export interface PelicanGallery {
+  configs: PelicanConfig[]
+  results: PelicanResult[]
 }
 
 export interface RelayGroupTestResult {

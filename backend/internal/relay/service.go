@@ -3090,7 +3090,7 @@ func (s *Service) UserBalanceHistory(ctx context.Context, stationID uint, userID
 	return result, nil
 }
 
-func (s *Service) testAccount(ctx context.Context, stationID uint, accountID int64, modelID, mode string) (AccountTestResult, error) {
+func (s *Service) TestAccount(ctx context.Context, stationID uint, accountID int64, modelID, mode string) (AccountTestResult, error) {
 	station, err := s.stations.FindByID(stationID)
 	if err != nil {
 		return AccountTestResult{}, err
@@ -3175,7 +3175,7 @@ func (s *Service) GroupModels(ctx context.Context, stationID uint, groupID int64
 	return models, nil
 }
 
-func (s *Service) testGroup(ctx context.Context, stationID uint, groupID int64, model string, count int) (GroupTestResult, error) {
+func (s *Service) TestGroup(ctx context.Context, stationID uint, groupID int64, model string, count int) (GroupTestResult, error) {
 	station, gatewayKey, err := s.groupGatewayCredential(ctx, stationID, groupID)
 	if err != nil {
 		return GroupTestResult{}, err

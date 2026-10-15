@@ -1,5 +1,7 @@
 # 缓存指标和测试历史实现计划
 
+更新说明（2026-10-15）：本文的缓存指标部分保留；链路测试历史部分已由账号鹈鹕测智替换，见 `2026-10-15-account-pelican` 设计与计划。以下旧测试历史描述仅作为过程记录，不代表当前实现。
+
 目标：在主线隔离工作树中完成两项功能并验证。按当前会话直接执行，不要求用户再次选择。
 
 - [x] 编写并运行 `frontend/lib/recent-request-metrics.test.ts`：验证一小时边界、最近 60 条、未知状态、未命中与无数据区别。运行 `node --experimental-strip-types --test lib/recent-request-metrics.test.ts`。

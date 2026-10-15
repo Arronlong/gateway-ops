@@ -52,7 +52,10 @@ func (r *RelayStations) Delete(id uint) error {
 		if err := tx.Where("relay_station_id = ?", id).Delete(&RelayAccountAdjustmentLog{}).Error; err != nil {
 			return err
 		}
-		if err := tx.Where("relay_station_id = ?", id).Delete(&RelayTestRun{}).Error; err != nil {
+		if err := tx.Where("relay_station_id = ?", id).Delete(&PelicanConfig{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Where("relay_station_id = ?", id).Delete(&PelicanResult{}).Error; err != nil {
 			return err
 		}
 		if err := tx.Where("relay_station_id = ?", id).Delete(&RelayUsageEvent{}).Error; err != nil {
