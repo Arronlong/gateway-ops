@@ -252,10 +252,6 @@ export default function SystemSettingsPage() {
             统一管理全局后台任务、界面显示和安全策略；站点或账号自身的策略仍在对应业务页面配置。
           </p>
         </div>
-        <Button size="sm" className="h-11 gap-1.5 sm:h-9" disabled={saving || query.loading} onClick={() => void save()}>
-          <Save className="size-3.5" />
-          保存界面设置
-        </Button>
       </header>
 
       <VersionCard />
@@ -328,7 +324,13 @@ export default function SystemSettingsPage() {
       </Card>
 
       <div className="pt-2">
-        <h2 className="text-sm font-semibold text-foreground">界面与页面</h2>
+        <div className="flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-foreground">界面与页面</h2>
+          <Button size="sm" className="h-11 shrink-0 gap-1.5 sm:h-9" disabled={saving || query.loading} onClick={() => void save()}>
+            <Save className="size-3.5" />
+            保存界面设置
+          </Button>
+        </div>
         <p className="mt-1 text-xs text-muted-foreground">控制导航入口和页面内容的显示方式；关闭父级只会暂时隐藏下级内容，不会清空原有选择。</p>
       </div>
 
