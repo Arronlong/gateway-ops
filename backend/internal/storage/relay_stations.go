@@ -669,6 +669,7 @@ func (r *RelayStations) UpdateAccountRates(stationID uint, updates []RelayAccoun
 				values["rate_multiplier"] = update.RateMultiplier
 				values["rate_source"] = update.RateSource
 				values["rate_observed_at"] = update.RateObservedAt
+				values["rate_polled_at"] = syncedAt
 			}
 			if err := tx.Model(&RelayAccount{}).
 				Where("relay_station_id = ? AND external_id = ?", stationID, update.ExternalID).

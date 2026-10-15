@@ -2944,9 +2944,16 @@ func cmpTime(a, b time.Time) int {
 }
 
 func (s *Service) UpdateUserStatus(ctx context.Context, stationID uint, userID int64, status string) error {
+	return s.stations.WithAlertMutationLock(ctx, func() error { return s.updateUserStatusManual(ctx, stationID, userID, status) })
+}
+
+func (s *Service) updateUserStatusManual(ctx context.Context, stationID uint, userID int64, status string) error {
 	status = strings.ToLower(strings.TrimSpace(status))
 	if userID <= 0 || (status != "active" && status != "disabled") {
 		return errors.New("用户状态参数无效")
+	}
+	if err := s.MarkAlertManualIntervention("relay_user", stationID, userID); err != nil {
+		return err
 	}
 	station, err := s.stations.FindByID(stationID)
 	if err != nil {

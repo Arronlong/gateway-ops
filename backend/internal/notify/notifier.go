@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/guliansheng/gateway-ops/internal/storage"
 )
@@ -19,12 +20,15 @@ import (
 //   - ChannelID = 来源上游 ID，0 表示系统消息或测试发送，跳过订阅过滤
 //   - ModelName = 仅 rate_changed 事件填写当前分组名
 type Message struct {
-	Event     storage.NotificationEvent
-	ChannelID uint
-	ModelName string
-	Subject   string
-	Body      string
-	Extra     map[string]any
+	AlertEventID  uint
+	AlertRuleID   uint
+	AlertCooldown time.Duration
+	Event         storage.NotificationEvent
+	ChannelID     uint
+	ModelName     string
+	Subject       string
+	Body          string
+	Extra         map[string]any
 }
 
 // Notifier 通知渠道抽象。

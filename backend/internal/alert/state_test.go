@@ -49,3 +49,21 @@ func TestUnknownDataDoesNotFireBusinessAlert(t *testing.T) {
 		t.Fatalf("unknown data must not fire an alert, got %+v", transition)
 	}
 }
+
+func TestUnknownKeepsActiveEventAndResetsCounters(t *testing.T) {
+	r := Transition(StateInput{Previous: AlertRuleState{State: StateRecovering, ConsecutiveRecoveries: 2}, Condition: ConditionResult{Unknown: true}})
+	if r.Next.State != StateFiring || r.Next.ConsecutiveRecoveries != 0 || r.RecoverEvent {
+		t.Fatalf("unknown lost open incident: %+v", r)
+	}
+	r = Transition(StateInput{Previous: AlertRuleState{State: StatePending, ConsecutiveViolations: 2}, Condition: ConditionResult{Unknown: true}})
+	if r.Next.ConsecutiveViolations != 0 {
+		t.Fatal("missing samples must break consecutive run")
+	}
+}
+
+func TestRecoveryFlappingDoesNotOpenSecondEvent(t *testing.T) {
+	r := Transition(StateInput{Previous: AlertRuleState{State: StateRecovering, ConsecutiveRecoveries: 2}, Condition: ConditionResult{Violated: true}, TriggerConsecutive: 3})
+	if r.OpenEvent || r.Next.State != StateFiring {
+		t.Fatalf("flap reopened event: %+v", r)
+	}
+}

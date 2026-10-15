@@ -456,6 +456,10 @@ func usageEventFromRemote(stationID uint, usage remoteUsage, syncedAt time.Time)
 	if err != nil || usage.ID <= 0 {
 		return storage.RelayUsageEvent{}, false
 	}
+	userID := ""
+	if usage.UserID > 0 {
+		userID = strconv.FormatInt(usage.UserID, 10)
+	}
 	return storage.RelayUsageEvent{
 		RelayStationID:        stationID,
 		RemoteUsageID:         usage.ID,
@@ -463,6 +467,8 @@ func usageEventFromRemote(stationID uint, usage remoteUsage, syncedAt time.Time)
 		GroupExternalID:       usage.GroupID,
 		GroupName:             usage.GroupName,
 		UserEmail:             usage.UserEmail,
+		UserExternalID:        userID,
+		IPAddress:             strings.TrimSpace(usage.IPAddress),
 		Model:                 usage.Model,
 		RequestType:           usage.RequestType,
 		FirstTokenMS:          usage.FirstTokenMS,
@@ -484,10 +490,13 @@ func usageEventFromRemote(stationID uint, usage remoteUsage, syncedAt time.Time)
 }
 
 func remoteUsageFromEvent(event storage.RelayUsageEvent) remoteUsage {
+	userID, _ := strconv.ParseInt(event.UserExternalID, 10, 64)
 	return remoteUsage{
 		ID:                    event.RemoteUsageID,
 		AccountID:             event.AccountExternalID,
 		UserEmail:             event.UserEmail,
+		UserID:                userID,
+		IPAddress:             event.IPAddress,
 		GroupID:               event.GroupExternalID,
 		GroupName:             event.GroupName,
 		FirstTokenMS:          event.FirstTokenMS,

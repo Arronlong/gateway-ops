@@ -76,9 +76,9 @@ export function MonitorHeader() {
   const systemItems = [
     { to: "/settings", label: "系统设置", icon: Settings2 },
     { to: "/captcha", label: "验证码服务", icon: ShieldCheck },
-    { to: "/notifications", label: "通知渠道", icon: Bell },
+    { to: "/alerts", label: "预警中心", icon: Bell },
   ]
-  const systemActive = ["/settings", "/captcha", "/notifications"].some((path) => location.pathname.startsWith(path))
+  const systemActive = ["/settings", "/captcha", "/alerts", "/notifications"].some((path) => location.pathname.startsWith(path))
   const isPathActive = (to: string, end = false) => end ? location.pathname === to : location.pathname.startsWith(to)
 
   return (

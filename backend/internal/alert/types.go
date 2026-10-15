@@ -24,6 +24,26 @@ const (
 	MetricUserMultiIP      MetricKind = "user_multi_ip"
 )
 
+type ActionKind string
+
+const (
+	ActionDisableAccountScheduling ActionKind = "disable_account_scheduling"
+	ActionEnableAccountScheduling  ActionKind = "enable_account_scheduling"
+	ActionDisableUser              ActionKind = "disable_user"
+	ActionEnableUser               ActionKind = "enable_user"
+)
+
+type ActionSpec struct {
+	Kind    ActionKind `json:"kind"`
+	Enabled bool       `json:"enabled"`
+}
+
+type RecoverySpec struct {
+	Enabled     bool     `json:"enabled"`
+	Consecutive int      `json:"consecutive"`
+	Threshold   *float64 `json:"threshold,omitempty"`
+}
+
 type AlertState = storage.AlertLifecycleState
 
 type AlertRuleState = storage.AlertRuleState
@@ -47,6 +67,48 @@ type RuleSpec struct {
 	RecoveryConsecutive int
 	BaselineMultiplier  *float64
 	TrustedIPs          []string
+	RateMode            string
+	Direction           string
+	HitWindow           int
+	StabilityMetric     string
+}
+
+type ConditionConfig struct {
+	WindowSeconds       int      `json:"window_seconds"`
+	Threshold           float64  `json:"threshold"`
+	RecoveryThreshold   *float64 `json:"recovery_threshold,omitempty"`
+	MinRequests         int64    `json:"min_requests"`
+	TriggerConsecutive  int      `json:"trigger_consecutive"`
+	RecoveryConsecutive int      `json:"recovery_consecutive"`
+	BaselineMultiplier  *float64 `json:"baseline_multiplier,omitempty"`
+	TrustedIPs          []string `json:"trusted_ips,omitempty"`
+	StabilityMetric     string   `json:"stability_metric,omitempty"`
+	RateMode            string   `json:"rate_mode,omitempty"`
+	Direction           string   `json:"direction,omitempty"`
+	HitWindow           int      `json:"hit_window,omitempty"`
+}
+
+func (c ConditionConfig) RuleSpec(metric MetricKind) RuleSpec {
+	window := time.Duration(c.WindowSeconds) * time.Second
+	if window <= 0 {
+		window = 15 * time.Minute
+	}
+	return RuleSpec{
+		Metric: metric, Window: window, Threshold: c.Threshold,
+		RecoveryThreshold: c.RecoveryThreshold, MinRequests: c.MinRequests,
+		TriggerConsecutive: c.TriggerConsecutive, RecoveryConsecutive: c.RecoveryConsecutive,
+		BaselineMultiplier: c.BaselineMultiplier, TrustedIPs: c.TrustedIPs,
+		RateMode: c.RateMode, Direction: c.Direction, HitWindow: c.HitWindow, StabilityMetric: c.StabilityMetric,
+	}
+}
+
+type ScopeConfig struct {
+	StationIDs []uint   `json:"station_ids,omitempty"`
+	TargetIDs  []string `json:"target_ids,omitempty"`
+}
+
+type ActionConfig struct {
+	Actions []ActionSpec `json:"actions,omitempty"`
 }
 
 type Observation struct {
@@ -66,10 +128,11 @@ type Baseline struct {
 }
 
 type ConditionResult struct {
-	Violated bool
-	Unknown  bool
-	Actual   float64
-	Summary  string
+	Violated       bool
+	Unknown        bool
+	Actual         float64
+	Summary        string
+	InRecoveryBand bool
 }
 
 type StateInput struct {
@@ -78,6 +141,8 @@ type StateInput struct {
 	TriggerConsecutive  int
 	RecoveryConsecutive int
 	Now                 time.Time
+	ObservedAt          *time.Time
+	HitWindow           int
 }
 
 type StateTransition struct {

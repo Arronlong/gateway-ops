@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"sort"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -93,7 +95,7 @@ func (r *RelayStations) ListUsageEventsByAccountWindow(stationID uint, accountEx
 }
 
 func (r *RelayStations) ListUsageEventsByUserWindow(stationID uint, userKey string, since, until time.Time) ([]RelayUsageEvent, error) {
-	query := r.db.Where("relay_station_id = ? AND (user_external_id = ? OR (user_external_id = '' AND user_email = ?))", stationID, userKey, userKey)
+	query := r.db.Where("relay_station_id = ? AND (user_external_id = ? OR (COALESCE(user_external_id, '') = '' AND user_email = ?))", stationID, userKey, userKey)
 	if !since.IsZero() {
 		query = query.Where("occurred_at >= ?", since)
 	}
@@ -103,6 +105,38 @@ func (r *RelayStations) ListUsageEventsByUserWindow(stationID uint, userKey stri
 	var events []RelayUsageEvent
 	err := query.Order("occurred_at ASC, remote_usage_id ASC").Find(&events).Error
 	return events, err
+}
+
+func (r *RelayStations) ListUsageUserKeys(stationID uint, since time.Time) ([]string, error) {
+	var rows []struct {
+		UserExternalID string
+		UserEmail      string
+	}
+	query := r.db.Model(&RelayUsageEvent{}).Select("user_external_id, user_email").Where("relay_station_id = ?", stationID)
+	if !since.IsZero() {
+		query = query.Where("occurred_at >= ?", since)
+	}
+	if err := query.Group("user_external_id, user_email").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(rows))
+	keys := make([]string, 0, len(rows))
+	for _, row := range rows {
+		key := strings.TrimSpace(row.UserExternalID)
+		if key == "" {
+			key = strings.TrimSpace(row.UserEmail)
+		}
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 func (r *RelayStations) RecentUsageEventsByAccount(stationID uint, limit int) ([]RelayUsageEvent, error) {

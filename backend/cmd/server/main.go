@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/guliansheng/gateway-ops/internal/alert"
 	"github.com/guliansheng/gateway-ops/internal/api"
 	"github.com/guliansheng/gateway-ops/internal/auth"
 	"github.com/guliansheng/gateway-ops/internal/channel"
@@ -101,6 +102,7 @@ func main() {
 	settings := storage.NewSettings(db)
 	relayStations := storage.NewRelayStations(db)
 	operations := storage.NewOperations(db)
+	alertRules := storage.NewAlerts(db)
 
 	channelSvc := channel.NewService(channels, authSessions, captchas, monLogs, cipher)
 	dispatcher := notify.NewDispatcher(notifies, cipher, log, notify.Policy{
@@ -111,8 +113,10 @@ func main() {
 	})
 	relaySvc := relay.NewService(relayStations, cipher, channels, rates)
 	monitorSvc := monitor.NewService(channels, rates, monLogs, channelUsage, channelSvc, dispatcher, log)
+	alertCollector := alert.NewCollector(alertRules, relayStations, channels)
+	alertSvc := alert.NewService(alertRules, alertCollector, relaySvc, dispatcher, log)
 
-	sch := scheduler.New(cfg.Scheduler, monitorSvc, monLogs, rates, notifies, settings, relaySvc, log)
+	sch := scheduler.New(cfg.Scheduler, monitorSvc, monLogs, rates, notifies, settings, relaySvc, alertSvc, log)
 	if err := sch.Start(); err != nil {
 		log.Error("start scheduler failed", "err", err)
 		os.Exit(1)
@@ -152,6 +156,7 @@ func main() {
 		Relay:         relaySvc,
 		RelayStations: relayStations,
 		Operations:    operations,
+		Alerts:        alertSvc,
 		Settings:      settings,
 		Scheduler:     sch,
 		Dispatcher:    dispatcher,

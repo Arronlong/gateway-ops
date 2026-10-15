@@ -60,6 +60,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="channels" element={<ChannelsPage />} />
             <Route path="captcha" element={<CaptchaPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
+            <Route path="alerts" element={<NotificationsPage />} />
             <Route path="settings" element={<SystemSettingsPage />} />
             <Route path="relay-stations" element={<RelayStationsPage />} />
             <Route path="operations/costs" element={<OperationsCostsPage />} />

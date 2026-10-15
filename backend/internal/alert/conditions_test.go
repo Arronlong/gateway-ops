@@ -1,9 +1,36 @@
 package alert
 
 import (
+	"math"
 	"testing"
 	"time"
 )
+
+func TestAllMetricThresholdsAndRecovery(t *testing.T) {
+	for _, tc := range []struct {
+		metric           MetricKind
+		value, threshold float64
+		violated         bool
+	}{
+		{MetricBalanceLow, 5, 10, true}, {MetricBalanceLow, 15, 10, false},
+		{MetricAccountStability, 20, 10, true}, {MetricAccountStability, 5, 10, false},
+	} {
+		r := EvaluateCondition(RuleSpec{Metric: tc.metric, Threshold: tc.threshold}, Observation{Value: tc.value, Valid: true}, nil)
+		if r.Unknown || r.Violated != tc.violated {
+			t.Fatalf("threshold: %+v => %+v", tc, r)
+		}
+	}
+	if r := EvaluateCondition(RuleSpec{Metric: MetricAccountSpend}, Observation{Value: math.NaN(), Valid: true}, nil); !r.Unknown {
+		t.Fatal("non-finite sample accepted")
+	}
+}
+
+func TestMultiIPNormalizesIPv6AndCIDR(t *testing.T) {
+	r := EvaluateCondition(RuleSpec{Metric: MetricUserMultiIP, Threshold: 2, TrustedIPs: []string{"10.0.0.0/8"}}, Observation{Valid: true, IPAddresses: []string{"10.1.2.3", "2001:db8::1", "2001:0db8:0:0::1"}}, nil)
+	if r.Unknown || r.Actual != 1 || r.Violated {
+		t.Fatalf("IP normalization: %+v", r)
+	}
+}
 
 func TestEvaluateRateChangeUsesAbsolutePercentage(t *testing.T) {
 	rule := RuleSpec{Metric: MetricRateChange, Threshold: 20}
@@ -33,6 +60,15 @@ func TestEvaluateSpendBaselineNeedsAmountAndMultiplier(t *testing.T) {
 	result = EvaluateCondition(rule, Observation{Value: 16, RequestCount: 4, Valid: true}, baseline)
 	if !result.Violated {
 		t.Fatalf("expected baseline amount and multiplier to violate, got %+v", result)
+	}
+}
+
+func TestSpendBaselineDoesNotBypassRecoveryThreshold(t *testing.T) {
+	multiplier, recoverAt := 3.0, 5.0
+	rule := RuleSpec{Metric: MetricAccountSpend, Threshold: 10, RecoveryThreshold: &recoverAt, BaselineMultiplier: &multiplier}
+	result := EvaluateCondition(rule, Observation{Value: 12, RequestCount: 4, Valid: true}, &Baseline{Value: 5})
+	if result.Violated || result.Unknown || !result.InRecoveryBand {
+		t.Fatalf("baseline comparison bypassed recovery threshold: %+v", result)
 	}
 }
 

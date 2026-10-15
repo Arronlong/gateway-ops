@@ -3,6 +3,7 @@ package alert
 import (
 	"fmt"
 	"math"
+	"net/netip"
 	"sort"
 	"strings"
 )
@@ -11,47 +12,90 @@ func EvaluateCondition(rule RuleSpec, observation Observation, baseline *Baselin
 	if !observation.Valid {
 		return ConditionResult{Unknown: true, Summary: observation.Reason}
 	}
+	if math.IsNaN(observation.Value) || math.IsInf(observation.Value, 0) {
+		return ConditionResult{Unknown: true, Summary: "指标数据无效"}
+	}
 	if observation.RequestCount < rule.MinRequests {
-		return ConditionResult{Unknown: true, Actual: float64(observation.RequestCount), Summary: "insufficient samples"}
+		return ConditionResult{Unknown: true, Actual: float64(observation.RequestCount), Summary: "窗口内请求样本不足"}
 	}
 
 	switch rule.Metric {
 	case MetricRateChange:
-		if baseline == nil || baseline.Value == 0 || math.IsNaN(baseline.Value) || math.IsInf(baseline.Value, 0) {
-			return ConditionResult{Unknown: true, Summary: "missing rate baseline"}
+		if baseline == nil || (baseline.Value == 0 && rule.RateMode != "absolute") || math.IsNaN(baseline.Value) || math.IsInf(baseline.Value, 0) {
+			return ConditionResult{Unknown: true, Summary: "尚无有效倍率基线"}
 		}
-		change := math.Abs((observation.Value - baseline.Value) / baseline.Value * 100)
-		return ConditionResult{Violated: change >= rule.Threshold, Actual: change, Summary: fmt.Sprintf("rate changed %.2f%%", change)}
+		change := observation.Value - baseline.Value
+		if rule.RateMode != "absolute" {
+			change = change / math.Abs(baseline.Value) * 100
+		}
+		switch rule.Direction {
+		case "increase":
+		case "decrease":
+			change = -change
+		default:
+			change = math.Abs(change)
+		}
+		return thresholdResult(rule, change, "倍率变化")
+	case MetricBalanceLow:
+		return thresholdResult(rule, observation.Value, "关联渠道账号最低余额")
+	case MetricAccountStability:
+		return thresholdResult(rule, observation.Value, "稳定性指标")
 	case MetricAccountSpend, MetricUserSpend:
 		violated := observation.Value >= rule.Threshold
 		if rule.BaselineMultiplier != nil {
-			if baseline == nil || baseline.Value < 0 {
-				return ConditionResult{Unknown: true, Actual: observation.Value, Summary: "missing spend baseline"}
+			if baseline == nil || baseline.Value <= 0 || math.IsNaN(baseline.Value) || math.IsInf(baseline.Value, 0) {
+				return ConditionResult{Unknown: true, Actual: observation.Value, Summary: "历史基线不足：至少需要三个完整的历史同时间窗口"}
 			}
 			violated = violated && observation.Value >= baseline.Value**rule.BaselineMultiplier
 		}
-		return ConditionResult{Violated: violated, Actual: observation.Value, Summary: fmt.Sprintf("spend %.4f", observation.Value)}
-	case MetricUserMultiIP:
-		trusted := make(map[string]struct{}, len(rule.TrustedIPs))
-		for _, ip := range rule.TrustedIPs {
-			trusted[strings.TrimSpace(ip)] = struct{}{}
+		result := thresholdResult(rule, observation.Value, "窗口消耗")
+		result.Violated = violated
+		if !violated && rule.RecoveryThreshold != nil {
+			result.InRecoveryBand = observation.Value > *rule.RecoveryThreshold
 		}
-		seen := make(map[string]struct{}, len(observation.IPAddresses))
-		for _, ip := range observation.IPAddresses {
-			ip = strings.TrimSpace(ip)
-			if ip == "" {
-				continue
+		return result
+	case MetricUserMultiIP:
+		seen := make(map[netip.Addr]struct{}, len(observation.IPAddresses))
+		for _, raw := range observation.IPAddresses {
+			ip, err := netip.ParseAddr(strings.TrimSpace(raw))
+			if err != nil {
+				return ConditionResult{Unknown: true, Summary: "来源 IP 数据缺失或格式无效"}
 			}
-			if _, ok := trusted[ip]; ok {
-				continue
+			ip = ip.Unmap()
+			trusted := false
+			for _, allow := range rule.TrustedIPs {
+				if prefix, err := netip.ParsePrefix(allow); err == nil && prefix.Contains(ip) {
+					trusted = true
+				}
+				if addr, err := netip.ParseAddr(allow); err == nil && addr.Unmap() == ip {
+					trusted = true
+				}
 			}
-			seen[ip] = struct{}{}
+			if !trusted {
+				seen[ip] = struct{}{}
+			}
 		}
 		count := len(seen)
-		return ConditionResult{Violated: float64(count) >= rule.Threshold, Actual: float64(count), Summary: fmt.Sprintf("distinct IPs %d", count)}
+		return thresholdResult(rule, float64(count), "非白名单来源 IP 数")
 	default:
-		return ConditionResult{Unknown: true, Summary: "unsupported metric"}
+		return ConditionResult{Unknown: true, Summary: "当前适配器不支持此指标"}
 	}
+}
+
+func thresholdResult(rule RuleSpec, value float64, label string) ConditionResult {
+	violated := value >= rule.Threshold
+	recovered := !violated
+	if rule.Metric == MetricBalanceLow {
+		violated = value <= rule.Threshold
+		recovered = !violated
+	}
+	if rule.RecoveryThreshold != nil {
+		recovered = value <= *rule.RecoveryThreshold
+		if rule.Metric == MetricBalanceLow {
+			recovered = value >= *rule.RecoveryThreshold
+		}
+	}
+	return ConditionResult{Violated: violated, InRecoveryBand: !violated && !recovered, Actual: value, Summary: fmt.Sprintf("%s %.4f，触发阈值 %.4f", label, value, rule.Threshold)}
 }
 
 func Percentile(values []float64, percentile float64) (float64, bool) {

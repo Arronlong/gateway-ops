@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/guliansheng/gateway-ops/internal/alert"
 	"github.com/guliansheng/gateway-ops/internal/auth"
 	"github.com/guliansheng/gateway-ops/internal/channel"
 	"github.com/guliansheng/gateway-ops/internal/crypto"
@@ -42,6 +43,7 @@ type Deps struct {
 	Settings       *storage.Settings
 	Scheduler      *scheduler.Scheduler
 	Dispatcher     *notify.Dispatcher
+	Alerts         *alert.Service
 	Log            *slog.Logger
 	VersionChecker *version.Checker
 
@@ -80,6 +82,7 @@ func Register(r *gin.Engine, d *Deps) {
 		registerChannels(api, d)
 		registerCaptchas(api, d)
 		registerNotifications(api, d)
+		registerAlerts(api, d)
 		registerRates(api, d)
 		registerMonitorLogs(api, d)
 		registerDashboard(api, d)
