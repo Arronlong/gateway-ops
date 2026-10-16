@@ -7,7 +7,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, PublicGroupMonitorCall, RelayLatencySample, RelayUsageRange } from "@/lib/api-types"
 import { relayAccountComparisonKey, type ChannelCompareLink, type RelayCompareLink } from "@/lib/channel-relay-association"
 import { ChannelLatencyComparisonTooltip, RelayLatencyComparisonTooltip } from "@/components/monitor/channel-relay-compare"
-import { formatLatency, formatOutputTokenSpeed, latencyBucketGranularityLabel, latencyColor, latencyTone, latencyTooltipTextClass, outputTokenSpeed } from "@/lib/latency"
+import { formatLatency, formatOutputTokenSpeed, latencyBucketGranularityLabel, latencyBucketTones, latencyColor, latencyTone, latencyTooltipTextClass, outputTokenSpeed } from "@/lib/latency"
 import { matchRelatedRecentCall } from "@/lib/recent-call-comparison"
 import { cn } from "@/lib/utils"
 import { formatMonitorTime } from "@/lib/monitor-time"
@@ -35,6 +35,7 @@ function totalTokens(sample: LatencyDetailSample) {
 }
 
 function BucketTooltip({ bucket }: { bucket: LatencyBucket }) {
+  const hasLatency = [bucket.first_token_p50_ms, bucket.first_token_p95_ms, bucket.duration_p50_ms, bucket.duration_p95_ms].some((value) => value != null)
   const firstP50 = bucket.first_token_p50_ms == null ? null : latencyTone(bucket.first_token_p50_ms, "first")
   const firstP95 = bucket.first_token_p95_ms == null ? null : latencyTone(bucket.first_token_p95_ms, "first")
   const durationP50 = bucket.duration_p50_ms == null ? null : latencyTone(bucket.duration_p50_ms, "duration")
@@ -45,6 +46,7 @@ function BucketTooltip({ bucket }: { bucket: LatencyBucket }) {
         <p className="font-semibold text-foreground">{formatBucketTime(bucket.start)} - {formatBucketTime(bucket.end)}</p>
         <p className="mt-0.5 text-[10px] text-muted-foreground">点击查看该时间桶的调用明细</p>
       </div>
+      {bucket.request_count > 0 && !hasLatency ? <p className="text-[10px] text-muted-foreground">已有调用记录，上游未提供延迟；色块按成功率显示。</p> : null}
       <div className="grid grid-cols-[72px_1fr_1fr] gap-x-2 gap-y-1 rounded-md bg-muted/60 p-2 font-mono tabular-nums">
         <span />
         <span className="font-sans text-[10px] text-muted-foreground">P50</span>
@@ -266,12 +268,7 @@ function BucketCell({ bucket, onOpen, relay, channel }: { bucket: LatencyBucket;
   if (bucket.request_count === 0) {
     return <span className="block h-8 w-full rounded-sm bg-muted/55 ring-1 ring-inset ring-border" title={formatBucketTime(bucket.start) + " - " + formatBucketTime(bucket.end) + " · 无调用"} />
   }
-  const cells = [
-    bucket.first_token_p50_ms == null ? null : latencyTone(bucket.first_token_p50_ms, "first"),
-    bucket.first_token_p95_ms == null ? null : latencyTone(bucket.first_token_p95_ms, "first"),
-    bucket.duration_p50_ms == null ? null : latencyTone(bucket.duration_p50_ms, "duration"),
-    bucket.duration_p95_ms == null ? null : latencyTone(bucket.duration_p95_ms, "duration"),
-  ]
+  const cells = latencyBucketTones(bucket)
   return (
     <Tooltip delayDuration={120}>
       <TooltipTrigger asChild>
@@ -281,7 +278,7 @@ function BucketCell({ bucket, onOpen, relay, channel }: { bucket: LatencyBucket;
           aria-label={formatBucketTime(bucket.start) + " 至 " + formatBucketTime(bucket.end) + "，" + bucket.request_count + " 次请求"}
           onClick={() => onOpen(bucket)}
         >
-          {cells.map((tone, index) => <span key={index} style={{ backgroundColor: tone ? latencyColor[tone] : "var(--muted)" }} />)}
+          {cells.map((tone, index) => <span key={index} style={{ backgroundColor: tone ? latencyColor[tone] : "var(--muted-foreground)" }} />)}
         </button>
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={8} className="border border-border bg-popover p-2 text-popover-foreground shadow-2xl ring-1 ring-black/5">

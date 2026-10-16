@@ -16,6 +16,26 @@ export function latencyTone(value: number | null | undefined, metric: LatencyMet
   return "good"
 }
 
+export function latencyBucketTones(bucket: LatencyBucket): Array<LatencyTone | null> {
+  if (bucket.request_count <= 0) return [null, null, null, null]
+  const rate = bucket.success_rate
+  const outcome: LatencyTone | null = rate == null || !Number.isFinite(rate) || rate < 0 || rate > 1
+    ? null
+    : rate === 0 ? "bad" : rate < 1 ? "warn" : "good"
+  const tone = (value: number | null | undefined, metric: LatencyMetric): LatencyTone | null => {
+    const measured = value == null || !Number.isFinite(value) || value < 0 ? null : latencyTone(value, metric)
+    if (outcome === "bad" || measured === "bad") return "bad"
+    if (outcome === "warn" || measured === "warn") return "warn"
+    return measured ?? outcome
+  }
+  return [
+    tone(bucket.first_token_p50_ms, "first"),
+    tone(bucket.first_token_p95_ms, "first"),
+    tone(bucket.duration_p50_ms, "duration"),
+    tone(bucket.duration_p95_ms, "duration"),
+  ]
+}
+
 export const latencyColor: Record<LatencyTone, string> = {
   good: "#10b981",
   warn: "#f59e0b",

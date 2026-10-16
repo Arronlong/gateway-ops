@@ -19,6 +19,7 @@ const (
 	groupMonitorPageSize = 200
 	groupMonitorCacheTTL = 15 * time.Second
 	groupMonitorWorkers  = 6
+	groupMonitorMaxPages = 1000
 )
 
 // PublicGroupMonitor is deliberately a small, non-sensitive projection of the
@@ -231,18 +232,30 @@ func fetchGroupMonitorUsagePages(ctx context.Context, client *Service, baseURL, 
 		return nil, err
 	}
 	items := append([]remoteUsage(nil), first.Items...)
-	pageCount := groupMonitorPageCount(first.Total, first.Pages)
-	if pageCount <= 1 {
-		if len(first.Items) < groupMonitorPageSize {
-			return items, nil
-		}
-		pageCount = 1000
+	if len(first.Items) < groupMonitorPageSize {
+		return items, nil
 	}
+	pageCount := max(1, min(groupMonitorPageCount(first.Total, first.Pages), groupMonitorMaxPages))
 	pages, err := fetchGroupMonitorUsagePagesConcurrent(ctx, client, baseURL, apiKey, groupID, since, until, 2, pageCount)
 	if err != nil {
 		return nil, err
 	}
-	return append(items, pages...), nil
+	items = append(items, pages...)
+	if len(pages) < (pageCount-1)*groupMonitorPageSize {
+		return items, nil
+	}
+	// 上游页数可能是估算值，末页满页时继续读取，直到返回不足一页的数据。
+	for page := pageCount + 1; page <= groupMonitorMaxPages; page++ {
+		var response remoteUsagePage
+		if err := client.get(ctx, groupMonitorEndpointForPage(baseURL, groupID, monitorFetchUsage, since, until, page), apiKey, &response); err != nil {
+			return nil, err
+		}
+		items = append(items, response.Items...)
+		if len(response.Items) < groupMonitorPageSize {
+			return items, nil
+		}
+	}
+	return nil, fmt.Errorf("group monitor usage exceeded pagination limit (%d pages)", groupMonitorMaxPages)
 }
 
 func fetchGroupMonitorUsagePagesConcurrent(ctx context.Context, client *Service, baseURL, apiKey string, groupID int64, since, until time.Time, startPage, endPage int) ([]remoteUsage, error) {
@@ -303,24 +316,20 @@ func fetchGroupMonitorErrorPages(ctx context.Context, client *Service, baseURL, 
 		return nil, err
 	}
 	items := append([]remoteRequestError(nil), first.Items...)
-	pageCount := groupMonitorPageCount(first.Total, first.Pages)
-	if pageCount <= 1 {
-		if len(first.Items) < groupMonitorPageSize {
-			return items, nil
-		}
-		pageCount = 1000
+	if len(first.Items) < groupMonitorPageSize {
+		return items, nil
 	}
-	for page := 2; page <= pageCount; page++ {
+	for page := 2; page <= groupMonitorMaxPages; page++ {
 		var response remoteRequestErrorPage
 		if err := client.get(ctx, groupMonitorEndpointForPage(baseURL, groupID, monitorFetchErrors, since, until, page), apiKey, &response); err != nil {
 			return nil, err
 		}
 		items = append(items, response.Items...)
 		if len(response.Items) < groupMonitorPageSize {
-			break
+			return items, nil
 		}
 	}
-	return items, nil
+	return nil, fmt.Errorf("group monitor errors exceeded pagination limit (%d pages)", groupMonitorMaxPages)
 }
 
 // PublicGroupMonitor aggregates the latest successful calls and provider-side
