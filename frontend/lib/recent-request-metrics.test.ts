@@ -22,7 +22,7 @@ test("limits the selected records to the newest 60 before calculating weighted t
   const result = recentRequestMetrics(rows.reverse(), now)
   assert.equal(result.sampleCount, 60)
   assert.equal(result.successCount, 29)
-  assert.equal(result.successKnownCount, 59)
+  assert.equal(result.successAttemptCount, 59)
   assert.equal(result.cacheReadTokens, 60)
   assert.equal(result.cacheInputTokens, 600)
   assert.equal(result.cacheCreationTokens, 360)
@@ -42,6 +42,22 @@ test("uses cache creation detail fields when the aggregate field is absent", () 
   assert.equal(result.cacheHitRate, 20 / 130)
 })
 
+test("counts retries as separate attempts and excludes auxiliary, probe, and cyber calls", () => {
+  const result = recentRequestMetrics([
+    sample(1, {status_code: 500, request_type: "sync"}),
+    sample(2, {status_code: 200, request_type: "sync"}),
+    sample(3, {status_code: 200, request_type: "auxiliary"}),
+    sample(4, {status_code: 500, request_type: "probe"}),
+    sample(5, {status_code: 200, request_type: "cyber"}),
+    sample(6, {status_code: 0, request_type: "text", in_progress: true}),
+    sample(7, {status_code: 202, request_type: "image", in_progress: true}),
+    sample(8, {status_code: 200, request_type: "sync", is_cyber: true}),
+  ], now)
+  assert.equal(result.successCount, 1)
+  assert.equal(result.successAttemptCount, 4)
+  assert.equal(result.successRate, 0.25)
+})
+
 test("keeps HTTP success rate independent from token cache rate", () => {
   const result = recentRequestMetrics([
     sample(1, {status_code: 200, input_tokens: 10, cache_read_tokens: 5}),
@@ -49,6 +65,7 @@ test("keeps HTTP success rate independent from token cache rate", () => {
     sample(3, {status_code: 0}),
   ], now)
   assert.equal(result.successRate, 0.5)
+  assert.equal(result.successAttemptCount, 2)
   assert.equal(result.cacheHitRate, 5 / 25)
   assert.equal(result.sampleCount, 3)
   assert.equal(recentRequestMetrics([], now).successRate, null)

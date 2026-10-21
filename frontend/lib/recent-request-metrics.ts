@@ -9,6 +9,12 @@ export interface RecentRequestSample {
   success_known?: boolean
   success?: boolean
   status_code?: number
+  request_type?: string
+  is_auxiliary?: boolean
+  is_probe?: boolean
+  is_cyber?: boolean
+  in_progress?: boolean
+  attempt_status?: "in_progress" | "completed" | "failed"
 }
 
 const RECENT_WINDOW_MS = 60 * 60 * 1000
@@ -17,6 +23,11 @@ const RECENT_LIMIT = 60
 
 function nonNegative(value: number | undefined) {
   return Number.isFinite(value) ? Math.max(0, value ?? 0) : 0
+}
+
+function excludedFromSuccessRate(sample: RecentRequestSample) {
+  const requestType = sample.request_type?.trim().toLowerCase() ?? ""
+  return sample.is_auxiliary === true || sample.is_probe === true || sample.is_cyber === true || /(?:^|[_-])(auxiliary|probe|cyber)(?:$|[_-])/.test(requestType)
 }
 
 function cacheCreationTokens(sample: RecentRequestSample) {
@@ -30,7 +41,7 @@ export function recentRequestMetrics(samples: readonly RecentRequestSample[], no
   const selected = samples.map((sample, index) => ({sample, index, time: Date.parse(sample.created_at)}))
     .filter(({time}) => Number.isFinite(time) && time >= windowStart && time <= cutoff)
     .sort((a, b) => b.time - a.time || a.index - b.index).slice(0, RECENT_LIMIT)
-  let successCount = 0, successKnownCount = 0, cacheHitCount = 0, cacheKnownCount = 0
+  let successCount = 0, successAttemptCount = 0, cacheHitCount = 0, cacheKnownCount = 0
   let cacheInputTokens = 0, cacheReadTokens = 0, cacheCreationTotal = 0
   for (const {sample} of selected) {
     const inputTokens = nonNegative(sample.input_tokens)
@@ -44,21 +55,23 @@ export function recentRequestMetrics(samples: readonly RecentRequestSample[], no
       cacheCreationTotal += creationTokens
       if (readTokens > 0) cacheHitCount++
     }
-    if (sample.success_known != null) {
-      if (sample.success_known) {
-        successKnownCount++
-        if (sample.success) successCount++
-      }
-    } else if ((sample.status_code ?? 0) >= 100) {
-      successKnownCount++
-      if (sample.status_code! >= 200 && sample.status_code! < 300) successCount++
+    if (!excludedFromSuccessRate(sample)) {
+      const inProgress = sample.in_progress === true || sample.attempt_status === "in_progress"
+      const hasStatus = (sample.status_code ?? 0) >= 100
+      const isAttempt = inProgress || sample.success_known === true || hasStatus
+      if (!isAttempt) continue
+      successAttemptCount++
+      const succeeded = !inProgress && (sample.success_known === true
+        ? sample.success === true
+        : (sample.status_code ?? 0) >= 200 && (sample.status_code ?? 0) < 300)
+      if (succeeded) successCount++
     }
   }
   const cacheTokenTotal = cacheInputTokens + cacheReadTokens + cacheCreationTotal
   return {
-    sampleCount: selected.length, successCount, successKnownCount, cacheHitCount, cacheKnownCount,
+    sampleCount: selected.length, successCount, successAttemptCount, successKnownCount: successAttemptCount, cacheHitCount, cacheKnownCount,
     cacheInputTokens, cacheReadTokens, cacheCreationTokens: cacheCreationTotal, cacheTokenTotal,
-    successRate: successKnownCount ? successCount / successKnownCount : null,
+    successRate: successAttemptCount ? successCount / successAttemptCount : null,
     cacheHitRate: cacheTokenTotal ? cacheReadTokens / cacheTokenTotal : null,
     latestAt: selected[0]?.sample.created_at ?? null,
   }
