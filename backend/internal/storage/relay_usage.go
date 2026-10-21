@@ -59,7 +59,7 @@ func (r *RelayStations) UpsertUsageEvents(events []RelayUsageEvent) error {
 		DoUpdates: clause.AssignmentColumns([]string{
 			"account_external_id", "group_external_id", "group_name", "user_email",
 			"model", "request_type", "first_token_ms", "duration_ms", "status_code",
-			"input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
+			"cache_known", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
 			"cache_creation5m_tokens", "cache_creation1h_tokens", "actual_cost", "total_cost",
 			"account_rate_multiplier", "account_stats_cost", "occurred_at", "synced_at",
 		}),

@@ -171,7 +171,7 @@ func (s *Service) RefreshUsage(ctx context.Context, c *storage.Channel) error {
 					continue
 				}
 				events = append(events, storage.ChannelUsageEvent{
-					ChannelID: c.ID, ChannelAccountID: account.ID, Source: string(c.Type), RemoteUsageID: record.RemoteID,
+					CacheKnown: record.CacheKnown, ChannelID: c.ID, ChannelAccountID: account.ID, Source: string(c.Type), RemoteUsageID: record.RemoteID,
 					RequestID: record.RequestID, Model: record.Model, FirstTokenMS: record.FirstTokenMS, DurationMS: record.DurationMS,
 					SuccessKnown: record.SuccessKnown, Success: record.Success, InputTokens: record.InputTokens, OutputTokens: record.OutputTokens,
 					CacheReadTokens: record.CacheReadTokens, CacheCreationTokens: record.CacheCreationTokens,
@@ -186,7 +186,11 @@ func (s *Service) RefreshUsage(ctx context.Context, c *storage.Channel) error {
 			if effectivePageSize <= 0 {
 				effectivePageSize = requestedPageSize
 			}
-			if len(result.Records) == 0 || result.Pages <= page || len(result.Records) < effectivePageSize {
+			rawCount := result.RawCount
+			if rawCount == 0 {
+				rawCount = len(result.Records)
+			}
+			if result.Pages <= page || rawCount < effectivePageSize {
 				completed = true
 				break
 			}

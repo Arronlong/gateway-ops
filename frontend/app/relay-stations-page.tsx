@@ -2,7 +2,7 @@
 
 import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react"
 import type { CSSProperties, ReactNode } from "react"
-import { Activity, Archive, ArrowDown, ArrowUp, ArrowUpDown, Box, Check, ChevronDown, CircleAlert, CircleDollarSign, CircleHelp, Cog, Columns3, Copy, ExternalLink, Gauge, GripVertical, History, KeyRound, Layers3, LayoutGrid, List, ListChecks, PencilLine, Play, Plus, Power, PowerOff, RefreshCw, RotateCcw, Save, Search, Server, Settings2, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, TrendingDown, Users, X } from "lucide-react"
+import { Activity, Archive, ArrowDown, ArrowUp, ArrowUpDown, Bird, Box, Check, ChevronDown, CircleAlert, CircleDollarSign, CircleHelp, Cog, Columns3, Copy, ExternalLink, Gauge, GripVertical, History, KeyRound, Layers3, LayoutGrid, List, ListChecks, PencilLine, Play, Plus, Power, PowerOff, RefreshCw, RotateCcw, Save, Search, Server, Settings2, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, TrendingDown, Users, X } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -20,6 +20,9 @@ import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api"
+import { PelicanProvider, PelicanAccountPanel, PelicanDashboard } from "@/components/relay/pelican"
+import { useRelayLatencyTrends } from "@/lib/queries"
+import { RecentRequestMetrics } from "@/components/monitor/recent-request-metrics"
 import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, RelayAccountBatchActionResult, RelayAccountBatchCloneGroup, RelayAccountBatchCloneResult, RelayAccountConsumptionBucket, RelayLatencySample, RelayUsageRange, RelayAccountTestResult, RelayAccountView, RelayGroupOption, RelayGroupTestResult, RelayGroupView, RelayOverview, RelayRecentUsage, RelayStation, RelayStationAuthMode, RelayStationPayload, RelayStationType } from "@/lib/api-types"
 import { useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelLatencyTrends, useChannelRelayAssociations, useChannels, usePrefetchRelayOverviews, useRelayAccountConsumptionBuckets, useRelayAccountModelCatalog, useRelayDailyConsumption, useRelayLatencyBuckets, useRelayOverview, useRelayRecentUsage, useRelayStations, useRelayUsage, useRelayUserBalanceHistory } from "@/lib/queries"
 import { RelayAdjustmentLog } from "@/components/monitor/relay-adjustment-log"
@@ -129,7 +132,7 @@ type SortDirection = "asc" | "desc"
 type GroupSortKey = "name" | "rate"
 type AccountSortKey = "score" | "recent_call" | "last_used" | "priority" | "cost" | "usage" | "name"
 type SortState<K extends string> = { key: K; direction: SortDirection } | null
-type RelayDetailModule = "usage" | "users" | "groups" | "accounts"
+type RelayDetailModule = "usage" | "users" | "groups" | "accounts" | "pelican"
 type AccountAdjustmentMode = "suggestion" | "downgrade"
 type AccountAdjustmentSelection = Record<number, number[]>
 type AccountAdjustmentDialogState = {
@@ -276,7 +279,7 @@ function usePersistedDetailModule(storageKey: string, defaultModule: RelayDetail
   const [module, setModule] = useState<RelayDetailModule>(() => {
     try {
       const stored = window.localStorage.getItem(storageKey)
-      if (stored === "usage" || stored === "users" || stored === "groups" || stored === "accounts") return stored
+      if (stored === "usage" || stored === "users" || stored === "groups" || stored === "accounts" || stored === "pelican") return stored
     } catch {
       // Keep the default module when localStorage is unavailable.
     }
@@ -1098,7 +1101,7 @@ function RiskRow({
       {visibleColumns.has("retry") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">重试次数</span><span className={cn("font-mono text-sm font-semibold tabular-nums", account.pool_mode ? "text-foreground" : "text-muted-foreground")} title={account.pool_mode ? "同账号重试次数" : "池模式未开启，当前重试次数不生效"}>{account.pool_mode_retry_count}</span></div> : null}
       {visibleColumns.has("schedulable") ? <div className="flex min-h-11 items-center gap-2 lg:min-h-0 lg:flex-col lg:items-start lg:gap-1"><Switch checked={account.schedulable} onCheckedChange={onSchedulableChange} disabled={busy || scheduling} aria-label={`${account.name}${account.schedulable ? "关闭" : "开启"}调度`} /><span className={cn("text-[11px]", account.schedulable ? "text-success" : "text-muted-foreground")}>{account.schedulable ? "已开启" : "已关闭"}</span></div> : null}
       {visibleColumns.has("model") ? <div className="min-w-0"><p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">模型类型</p><span className={cn("inline-flex max-w-full truncate rounded-md border px-2 py-1 text-[11px] font-medium", account.model_type ? "border-brand/20 bg-brand/10 text-brand" : "border-border bg-muted text-muted-foreground")} title={account.model_type || "未绑定，不参与自动调组"}>{account.model_type || "未绑定"}</span></div> : null}
-      {visibleColumns.has("recent") ? <div className="min-w-0"><p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">最近调用</p><LatencyStabilityLane buckets={stabilityBuckets} recentSamples={latestRelayLatencySamples(account.latency_samples ?? [], 30)} loading={stabilityLoading} layout="fill" compact channelLinks={channelLinks} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} channelRecentSamplesByChannel={channelRecentSamplesByChannel} relayAccountName={account.name} loadSamples={(bucket) => apiFetch<RelayLatencySample[]>("/relay-stations/" + stationID + "/accounts/" + account.external_id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /></div> : null}
+      {visibleColumns.has("recent") ? <div className="min-w-0"><p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">最近调用</p><LatencyStabilityLane buckets={stabilityBuckets} recentSamples={latestRelayLatencySamples(account.latency_samples ?? [], 30)} loading={stabilityLoading} layout="fill" compact channelLinks={channelLinks} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} channelRecentSamplesByChannel={channelRecentSamplesByChannel} relayAccountName={account.name} loadSamples={(bucket) => apiFetch<RelayLatencySample[]>("/relay-stations/" + stationID + "/accounts/" + account.external_id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /><RecentRequestMetrics samples={account.latency_samples ?? []} loading={stabilityLoading} /></div> : null}
       {visibleColumns.has("stability") ? <div className="min-w-0"><LatencyStabilityLane buckets={stabilityBuckets} loading={stabilityLoading} layout="fill" compact granularity={latencyGranularity} channelLinks={channelLinks} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} relayAccountName={account.name} loadSamples={(bucket) => apiFetch<RelayLatencySample[]>("/relay-stations/" + stationID + "/accounts/" + account.external_id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /></div> : null}
       {visibleColumns.has("usage") ? <div className="min-w-0"><p className="text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">区间消费</p><p className="mt-1 font-mono text-sm font-semibold leading-5 tabular-nums text-foreground lg:mt-0 lg:leading-4">{tokenAmount(account.usage_total_tokens)} Token</p><p className="mt-0.5 text-[11px] font-medium leading-4 tabular-nums text-brand lg:mt-0">用户扣费 {chargeAmount(account.user_charge_amount)}</p><p className="mt-0.5 text-[11px] font-medium leading-4 tabular-nums text-warning lg:mt-0">成本 {chargeAmount(account.account_cost_amount)}</p></div> : null}
       {visibleColumns.has("consumption_trend") ? <div className="min-w-0"><p className="mb-1 text-[11px] uppercase tracking-wide text-muted-foreground lg:hidden">消费趋势</p><RelayAccountConsumptionTrend buckets={consumptionBuckets} loading={consumptionLoading} compact channelLinks={channelLinks} channelConsumptionBucketsByChannel={channelConsumptionBucketsByChannel} relayAccountName={account.name} /></div> : null}
@@ -1201,6 +1204,7 @@ function RiskRow({
           <TooltipContent side="top">删除账号</TooltipContent>
         </Tooltip>
       </div>
+      <PelicanAccountPanel account={account} />
     </div>
   );
 }
@@ -1303,6 +1307,7 @@ export function RelayAccountGalleryCard({
 
     <div className="mt-3 border-t border-border pt-3">
       <div className="mb-1.5 flex items-center justify-between gap-2"><span className="text-[11px] font-medium text-muted-foreground">最近调用延迟</span><span className="font-mono text-[10px] tabular-nums text-muted-foreground">最近 {recentCount} / 60 条</span></div>
+      <RecentRequestMetrics samples={account.latency_samples ?? []} loading={stabilityLoading} />
       <LatencyStabilityLane buckets={stabilityBuckets} recentSamples={latestRelayLatencySamples(account.latency_samples ?? [], 60)} loading={stabilityLoading} layout="fill" compact granularity={latencyGranularity} channelLinks={channelLinks} channelLatencyBucketsByChannel={channelLatencyBucketsByChannel} channelRecentSamplesByChannel={channelRecentSamplesByChannel} relayAccountName={account.name} emptyLabel="当前范围暂无调用数据" loadSamples={(bucket) => apiFetch<RelayLatencySample[]>("/relay-stations/" + stationID + "/accounts/" + account.external_id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} />
     </div>
 
@@ -1325,6 +1330,7 @@ export function RelayAccountGalleryCard({
           <Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 border-danger/30 text-danger hover:bg-danger/10 hover:text-danger" aria-label={`删除账号${account.name}`} disabled={busy || deleting} onClick={onDelete}><Trash2 className={cn("size-3.5", deleting && "animate-pulse")} /></Button></TooltipTrigger><TooltipContent side="top">删除账号</TooltipContent></Tooltip>
         </div>
       </div>
+      <PelicanAccountPanel account={account} />
     </div>
   </Card>
 }
@@ -1789,6 +1795,7 @@ export default function RelayStationsPage() {
   const accountDisplayBucketCount = relayAccountDisplayBucketCount(accountViewMode)
   const overview = useRelayOverview(selectedID)
   const overviewReady = overview.data !== null
+  const relayLatencyTrends = useRelayLatencyTrends(60, detailModule === "accounts" && overviewReady)
   const channels = useChannels()
   const channelAssociations = useChannelRelayAssociations()
   const channelLatencyTrends = useChannelLatencyTrends(60, detailModule === "accounts" && overviewReady)
@@ -1864,6 +1871,9 @@ export default function RelayStationsPage() {
   useEffect(() => { setBatchCloneOpen(false); setBatchCloneResult(null) }, [selectedID])
   useEffect(() => { if (selectedID != null && overview.data) lastOverviewByStation.current.set(selectedID, overview.data) }, [overview.data, selectedID])
 
+  const relayRecentSamplesByAccount = useMemo(() => new Map((relayLatencyTrends.data ?? [])
+    .filter((item) => item.station_id === selectedID)
+    .map((item) => [item.account_id, item.samples])), [relayLatencyTrends.data, selectedID])
   const baseOverview = overview.data ?? (selectedID == null ? null : lastOverviewByStation.current.get(selectedID) ?? null)
   const currentOverview = useMemo(() => {
     if (!baseOverview) return null
@@ -1872,13 +1882,13 @@ export default function RelayStationsPage() {
       ...baseOverview,
       accounts: baseOverview.accounts.map((account) => {
         const stats = usageByAccount.get(account.external_id)
-        return { ...account, usage_total_tokens: stats?.usage_total_tokens ?? null, user_charge_amount: stats?.user_charge_amount ?? null, account_cost_amount: stats?.account_cost_amount ?? null }
+        return { ...account, latency_samples: relayRecentSamplesByAccount.get(account.external_id) ?? [], usage_total_tokens: stats?.usage_total_tokens ?? null, user_charge_amount: stats?.user_charge_amount ?? null, account_cost_amount: stats?.account_cost_amount ?? null }
       }),
       range: usage.data?.range ?? usageRange,
       usage_complete: usage.data?.complete ?? false,
       usage_failed_accounts: usage.data?.failed_accounts ?? 0,
     }
-  }, [baseOverview, usage.data, usageRange])
+  }, [baseOverview, usage.data, usageRange, relayRecentSamplesByAccount])
   const latencyBucketsByAccount = useMemo(() => new Map((latencyBuckets.data ?? []).map((item) => [item.account_id, item.buckets])), [latencyBuckets.data])
   const scoreLatencyBucketsByAccount = useMemo(() => new Map((scoreLatencyBuckets.data ?? []).map((item) => [item.account_id, item.buckets])), [scoreLatencyBuckets.data])
   const consumptionBucketsByAccount = useMemo(() => new Map((accountConsumptionBuckets.data ?? []).map((item) => [item.account_id, item.buckets])), [accountConsumptionBuckets.data])
@@ -2023,7 +2033,7 @@ export default function RelayStationsPage() {
     setAccountAdjustmentSelections((current) => ({ ...current, [accountID]: [...new Set(groupIDs)] }))
   }
 
-  async function reload() { await Promise.all([stations.refetch(), overview.refetch(), usage.refetch(), recentUsage.refetch()]) }
+  async function reload() { await Promise.all([stations.refetch(), overview.refetch(), usage.refetch(), recentUsage.refetch(), relayLatencyTrends.refetch()]) }
   function openCreate() { setEditingID(null); setShowForm(true) }
   function openBatchClone() { if (cloneableAccounts.length === 0) { toast.info("当前没有支持克隆的账号"); return }; setBatchCloneResult(null); setBatchCloneOpen(true) }
   function closeBatchClone() { if (busy) return; setBatchCloneOpen(false); setBatchCloneResult(null) }
@@ -2046,12 +2056,12 @@ export default function RelayStationsPage() {
   async function setSchedulable(account: RelayAccountView, schedulable: boolean) { if (!selectedID) return; setSchedulingAccountID(account.external_id); try { await apiFetch(`/relay-stations/${selectedID}/accounts/${account.external_id}/schedulable`, { method: "PUT", body: JSON.stringify({ schedulable }) }); await reload(); toast.success(schedulable ? "账号调度已开启" : "账号调度已关闭") } catch (error) { toast.error(error instanceof Error ? error.message : "更新调度状态失败") } finally { setSchedulingAccountID(null) } }
   async function probeAccount(account: RelayAccountView) { if (!selectedID) return; setProbingAccountID(account.external_id); try { await apiFetch(`/relay-stations/${selectedID}/accounts/${account.external_id}/probe`, { method: "POST" }); await reload(); toast.success(account.cost_override_mode ? "上游倍率已探测，当前手工成本覆盖继续优先" : "上游倍率已立即探测并刷新") } catch (error) { toast.error(error instanceof Error ? error.message : "上游倍率探测失败") } finally { setProbingAccountID(null) } }
   async function openAccountTest(account: RelayAccountView) { if (!selectedID) return; setTestAccount(account); setTestModels([]); setTestModel(""); setTestMode("regular"); setTestResult(null); setTestError(""); setTestModelsLoading(true); try { const models = await apiFetch<string[]>(`/relay-stations/${selectedID}/accounts/${account.external_id}/models`); setTestModels(models); setTestModel(models[0] ?? "") } catch (error) { setTestError(error instanceof Error ? error.message : "读取测试模型失败") } finally { setTestModelsLoading(false) } }
-  async function runAccountTest() { if (!selectedID || !testAccount || !testModel) return; setTestResult(null); setTestError(""); setTestingAccountID(testAccount.external_id); try { const result = await apiFetch<RelayAccountTestResult>(`/relay-stations/${selectedID}/accounts/${testAccount.external_id}/test`, { method: "POST", body: JSON.stringify({ model_id: testModel, mode: testMode }) }); setTestResult(result); toast.success("账号连接测试成功") } catch (error) { setTestError(error instanceof Error ? error.message : "账号连接测试失败") } finally { setTestingAccountID(null) } }
+  async function runAccountTest() { if (!selectedID || !testAccount || !testModel) return; setTestResult(null); setTestError(""); setTestingAccountID(testAccount.external_id); try { const result = await apiFetch<RelayAccountTestResult>(`/relay-stations/${selectedID}/accounts/${testAccount.external_id}/test`, { method: "POST", body: JSON.stringify({ model_id: testModel, mode: testMode }) }); setTestResult(result); if (parseAccountTestOutput(result.output).completed === false) toast.error("账号连接测试失败"); else toast.success("账号连接测试完成") } catch (error) { setTestError(error instanceof Error ? error.message : "账号连接测试失败") } finally { setTestingAccountID(null);  } }
   async function openGroupTest(group: RelayGroupView) { if (!selectedID) return; setTestGroup(group); setGroupTestModels([]); setGroupTestModel(""); setGroupTestCount("1"); setGroupTestResult(null); setGroupTestError(""); setGroupTestNeedsKey(false); setGroupTestModelsLoading(true); try { const models = await apiFetch<string[]>(`/relay-stations/${selectedID}/groups/${group.external_id}/models`); setGroupTestModels(models); setGroupTestModel(models[0] ?? "") } catch (error) { setGroupTestNeedsKey(isMissingGroupAPIKeyError(error)); setGroupTestError(relayStationErrorMessage(stationType, "group-models", error instanceof Error ? error.message : "读取分组模型失败")) } finally { setGroupTestModelsLoading(false) } }
   async function runGroupTest() { if (!selectedID || !testGroup || !groupTestModel) return; const count = Number(groupTestCount); if (!Number.isInteger(count) || count < 1 || count > 10) { setGroupTestError("调用次数必须是 1 到 10 次"); return } setGroupTestResult(null); setGroupTestError(""); setGroupTestNeedsKey(false); setTestingGroupID(testGroup.external_id); try { const result = await apiFetch<RelayGroupTestResult>(`/relay-stations/${selectedID}/groups/${testGroup.external_id}/test`, { method: "POST", body: JSON.stringify({ model: groupTestModel, count }) }); setGroupTestResult(result); await recentUsage.refetch(); if (result.failed === 0) toast.success(`${result.succeeded} 次真实调用均成功`); else toast.error(`测试完成：成功 ${result.succeeded} 次，失败 ${result.failed} 次`) } catch (error) { setGroupTestNeedsKey(isMissingGroupAPIKeyError(error)); setGroupTestError(relayStationErrorMessage(stationType, "group-test", error instanceof Error ? error.message : "分组快速测试失败")) } finally { setTestingGroupID(null) } }
   async function deleteGroup(group: RelayGroupView) { if (!selectedID) return; const accepted = await confirm({ title: `删除分组“${group.name}”？`, description: `将从当前中转站真实删除该分组，操作不可恢复。${group.account_count > 0 ? `当前关联 ${group.account_count} 个账号，删除后这些账号的分组配置可能受到影响。` : ""}`, confirmLabel: "确认删除", destructive: true }); if (!accepted) return; setDeletingGroupID(group.external_id); try { await apiFetch(`/relay-stations/${selectedID}/groups/${group.external_id}`, { method: "DELETE" }); if (testGroup?.external_id === group.external_id) setTestGroup(null); await reload(); toast.success(`分组“${group.name}”已删除`) } catch (error) { toast.error(error instanceof Error ? error.message : "删除分组失败") } finally { setDeletingGroupID(null) } }
   async function deleteAccount(account: RelayAccountView) { if (!selectedID) return; const accepted = await confirm({ title: `删除账号“${account.name}”？`, description: "将从当前中转站真实删除该账号及其调度配置，操作不可恢复；历史使用记录不会被删除。", confirmLabel: "确认删除", destructive: true }); if (!accepted) return; setDeletingAccountID(account.external_id); try { await apiFetch(`/relay-stations/${selectedID}/accounts/${account.external_id}`, { method: "DELETE" }); setSelected((current) => current.filter((id) => id !== account.external_id)); if (groupEditor?.external_id === account.external_id) setGroupEditor(null); if (testAccount?.external_id === account.external_id) setTestAccount(null); await reload(); toast.success(`账号“${account.name}”已删除`) } catch (error) { toast.error(error instanceof Error ? error.message : "删除账号失败") } finally { setDeletingAccountID(null) } }
-  async function refreshAccounts() { await Promise.all([overview.refetch(), usage.refetch(), scoreLatencyBuckets.refetch(), latencyBuckets.refetch(), accountConsumptionBuckets.refetch()]); toast.success("账号列表已刷新") }
+  async function refreshAccounts() { await Promise.all([overview.refetch(), usage.refetch(), relayLatencyTrends.refetch(), scoreLatencyBuckets.refetch(), latencyBuckets.refetch(), accountConsumptionBuckets.refetch()]); toast.success("账号列表已刷新") }
   async function refreshGroups() { await overview.refetch(); toast.success("分组列表已刷新") }
   async function saveBatchOverride(clear = false) { if (!selectedID || selected.length === 0) return; if (batchMode === "groups") { setBatchGroupDialogOpen(true); return } if (!clear && batchMode === "channel_group" && (!batchChannelID || !batchGroup)) { toast.error("请选择渠道和渠道分组"); return } if (!clear && batchMode === "manual" && (!batchMultiplier || !Number.isFinite(Number(batchMultiplier)) || Number(batchMultiplier) < 0)) { toast.error("手工倍率必须是非负数"); return } setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}/accounts/cost-overrides`, { method: "PUT", body: JSON.stringify({ account_external_ids: selected, clear, mode: batchMode, monitor_channel_id: batchChannelID ? Number(batchChannelID) : undefined, upstream_group: batchGroup, manual_multiplier: batchMode === "manual" ? Number(batchMultiplier) : undefined }) }); setSelected([]); await reload(); toast.success(clear ? "已清除账号成本覆盖" : "账号成本覆盖已保存") } catch (error) { toast.error(error instanceof Error ? error.message : "保存成本覆盖失败") } finally { setBusy(false) } }
   async function submitBatchClone(groups: RelayAccountBatchCloneGroup[]) { if (!selectedID) return; setBusy(true); try { const result = await apiFetch<RelayAccountBatchCloneResult>(`/relay-stations/${selectedID}/accounts/batch-clone`, { method: "POST", body: JSON.stringify({ groups }) }); setBatchCloneResult(result); await reload(); if (result.sync_error) toast.warning(`已新增 ${result.succeeded} 个账号，但本地快照刷新失败`); else if (result.failed) toast.warning(`批量新增完成：成功 ${result.succeeded} 个，失败 ${result.failed} 个`); else toast.success(`已批量新增 ${result.succeeded} 个账号`) } catch (error) { toast.error(error instanceof Error ? error.message : "批量新增账号失败") } finally { setBusy(false) } }
@@ -2061,7 +2071,7 @@ export default function RelayStationsPage() {
   async function runFilteredAccountAction(path: string, schedulable: boolean | undefined, successLabel: string) { if (!selectedID || filteredAccounts.length === 0) { toast.info("当前筛选没有账号"); return } let accountGroupExternalIDs: AccountAdjustmentSelection | undefined; if (path === "apply-suggestions" || path === "add-downgrades") { const previewAccounts = path === "apply-suggestions" ? filteredSuggestionAccounts : filteredDowngradeAccounts; if (previewAccounts.length === 0) { toast.info(path === "apply-suggestions" ? "当前筛选没有可应用建议的账号" : "当前筛选没有可降价账号"); return } const selection = await openAccountAdjustmentDialog({ mode: path === "apply-suggestions" ? "suggestion" : "downgrade", title: path === "apply-suggestions" ? `接受 ${previewAccounts.length} 个账号的推荐调组？` : `接受 ${previewAccounts.length} 个账号的推荐降价？`, confirmLabel: path === "apply-suggestions" ? "接受推荐调组" : "接受推荐降价", accounts: previewAccounts, totalCount: filteredAccounts.length }); if (!selection) return; accountGroupExternalIDs = selection } setBusy(true); try { const result = await apiFetch<RelayAccountBatchActionResult>(`/relay-stations/${selectedID}/accounts/${path}`, { method: path === "schedulable" ? "PUT" : "POST", body: JSON.stringify({ account_external_ids: filteredAccounts.map((account) => account.external_id), ...(path === "schedulable" ? { schedulable } : {}), ...(accountGroupExternalIDs ? { account_group_external_ids: accountGroupExternalIDs } : {}) }) }); setSelected([]); await reload(); const detail = result.failed ? `，失败 ${result.failed} 个${result.errors?.[0] ? `：${result.errors[0]}` : ""}` : ""; const message = `${successLabel}：已处理 ${result.applied} 个，跳过 ${result.skipped} 个${detail}`; if (result.failed) toast.warning(message); else toast.success(message) } catch (error) { toast.error(error instanceof Error ? error.message : `${successLabel}失败`) } finally { setBusy(false) } }
   async function remove() { if (!selectedID || !selectedStation) return; const accepted = await confirm({ title: `删除中转站“${selectedStation.name}”？`, description: "将从系统真实删除该中转站及其账号快照、调整记录，操作不可恢复；历史使用记录不会被删除。", confirmLabel: "确认删除", destructive: true }); if (!accepted) return; setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}`, { method: "DELETE" }); setSelectedID(null); await reload(); toast.success("中转站已删除") } catch (error) { toast.error(error instanceof Error ? error.message : "删除失败") } finally { setBusy(false) } }
 
-  return <section className="space-y-4"><header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3"><div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><Server className="size-5 text-brand" />中转站管理</h1><p className="mt-1 text-xs text-muted-foreground">Sub2API 同步时自动探测上游倍率；New API 成本通过渠道关联或手工倍率配置。</p></div><div className="flex flex-wrap items-center gap-2"><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href="/settings#background-tasks" title="前往系统设置修改全部中转站的同步任务"><Settings2 className="size-3.5" />全局同步设置</a></Button><Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" onClick={openCreate}><Plus className="size-3.5" />添加中转站</Button>{stations.data?.length ? <Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy} onClick={() => void syncAll()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步全部</Button> : null}{selectedStation ? <><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/relay-monitor/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><Activity className="size-3.5" />分组监控</a></Button><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/model-pricing/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><CircleDollarSign className="size-3.5" />模型价格</a></Button><Button variant="outline" size="sm" className="h-11 sm:h-9" onClick={openEdit}>编辑</Button><Button size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy || !selectedStation.api_key_configured} onClick={() => void sync()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />实时同步</Button><Button variant="ghost" size="icon" className="size-11 sm:size-9" aria-label="删除中转站" disabled={busy} onClick={() => void remove()}><Trash2 className="size-4 text-danger" /></Button></> : null}</div></header>
+  return <PelicanProvider key={selectedID ?? "none"} stationID={selectedID}><section className="space-y-4"><header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3"><div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><Server className="size-5 text-brand" />中转站管理</h1><p className="mt-1 text-xs text-muted-foreground">Sub2API 同步时自动探测上游倍率；New API 成本通过渠道关联或手工倍率配置。</p></div><div className="flex flex-wrap items-center gap-2"><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href="/settings#background-tasks" title="前往系统设置修改全部中转站的同步任务"><Settings2 className="size-3.5" />全局同步设置</a></Button><Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" onClick={openCreate}><Plus className="size-3.5" />添加中转站</Button>{stations.data?.length ? <Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy} onClick={() => void syncAll()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步全部</Button> : null}{selectedStation ? <><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/relay-monitor/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><Activity className="size-3.5" />分组监控</a></Button><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/model-pricing/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><CircleDollarSign className="size-3.5" />模型价格</a></Button><Button variant="outline" size="sm" className="h-11 sm:h-9" onClick={openEdit}>编辑</Button><Button size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy || !selectedStation.api_key_configured} onClick={() => void sync()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />实时同步</Button><Button variant="ghost" size="icon" className="size-11 sm:size-9" aria-label="删除中转站" disabled={busy} onClick={() => void remove()}><Trash2 className="size-4 text-danger" /></Button></> : null}</div></header>
 
     {showForm ? <RelayStationEditor key={editingID ?? "new"} station={stations.data?.find((station) => station.id === editingID)} busy={busy} onSave={saveStation} onCancel={() => setShowForm(false)} /> : null}
 
@@ -2094,6 +2104,7 @@ export default function RelayStationsPage() {
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto" role="tablist" aria-label="中转站详情模块">
           {([
             ["accounts", ShieldAlert, "账号列表"],
+            ["pelican", Bird, "鹈鹕测智"],
             ["usage", History, "最近使用记录"],
             ["users", Users, "用户管理"],
             ["groups", Layers3, "分组管理"],
@@ -2135,6 +2146,8 @@ export default function RelayStationsPage() {
       {detailModule === "users" ? <UserManagement key={selectedID} stationID={selectedID!} range={usageRange} stationType={currentOverview.station.type ?? "sub2api"} /> : null}
 
       {detailModule === "groups" ? <GroupManagement overview={currentOverview} busy={busy} refreshing={overview.refreshing} testingGroupID={testingGroupID} deletingGroupID={deletingGroupID} onUpdate={updateGroup} onOrderChange={updateGroupOrder} onTest={(group) => void openGroupTest(group)} onDelete={(group) => void deleteGroup(group)} onRefresh={() => void refreshGroups()} /> : null}
+
+      {detailModule === "pelican" ? <PelicanDashboard accounts={currentOverview.accounts} /> : null}
 
       {detailModule === "accounts" ? <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
         <ListPanelHeader
@@ -2192,7 +2205,7 @@ export default function RelayStationsPage() {
             <p>测试模式：<span className="text-slate-100">{testMode === "stream" ? "流式请求" : "常规请求"}</span></p>
             {testingAccountID != null ? <p className="mt-2 flex items-center gap-2 text-teal-300"><RefreshCw className="size-3.5 animate-spin" />正在连接 API...</p> : null}
             {testError ? <><p className="mt-2 text-red-300">连接测试失败</p><p className="max-h-36 overflow-auto whitespace-pre-wrap break-words text-red-200">{testError}</p></> : null}
-            {testResult ? <><p className="mt-2 text-emerald-300">已连接到 API</p><p>使用模型：<span className="text-cyan-300">{testOutput.model || testModel}</span></p><p>发送测试消息：<span className="text-slate-100">&quot;hi&quot;</span></p><p className="mt-2 text-amber-300">响应：</p><div className="max-h-44 overflow-auto whitespace-pre-wrap break-words text-emerald-200">{testOutput.content || testOutput.fallback || "上游未返回文本内容"}</div><p className="mt-3 flex items-center gap-2 text-emerald-300"><Check className="size-3.5" />测试完成 <span className="text-slate-500">HTTP {testResult.status_code} · {formatLatency(testResult.duration_ms)}</span></p></> : null}
+            {testResult ? <><p className={testOutput.completed === false ? "mt-2 text-red-300" : "mt-2 text-emerald-300"}>{testOutput.completed === false ? "上游报告测试失败" : "已连接到 API"}</p><p>使用模型：<span className="text-cyan-300">{testOutput.model || testModel}</span></p><p>发送测试消息：<span className="text-slate-100">&quot;hi&quot;</span></p><p className="mt-2 text-amber-300">响应：</p><div className="max-h-44 overflow-auto whitespace-pre-wrap break-words text-emerald-200">{testOutput.content || testOutput.fallback || "上游未返回文本内容"}</div><p className="mt-3 flex items-center gap-2 text-emerald-300"><Check className="size-3.5" />测试完成 <span className="text-slate-500">HTTP {testResult.status_code} · {formatLatency(testResult.duration_ms)}</span></p></> : null}
             {!testingAccountID && !testError && !testResult ? <p className="mt-2 text-slate-500">准备测试，点击开始测试。</p> : null}
           </div>
         </div>
@@ -2201,5 +2214,5 @@ export default function RelayStationsPage() {
     </Dialog>
     <AccountAdjustmentSelectionDialog state={accountAdjustmentDialog} selections={accountAdjustmentSelections} busy={busy} groupsByID={groupsByID} onSelectionChange={updateAccountAdjustmentSelection} onCancel={() => finishAccountAdjustmentDialog(null)} onConfirm={() => finishAccountAdjustmentDialog(accountAdjustmentSelections)} />
     {confirmDialog}
-  </section>
+  </section></PelicanProvider>
 }

@@ -1000,6 +1000,24 @@ type newAPILog struct {
 	IP               string  `json:"ip"`
 }
 
+func newAPICacheKnown(other string) bool {
+	var fields map[string]json.RawMessage
+	if json.Unmarshal([]byte(other), &fields) != nil {
+		return false
+	}
+	for _, key := range []string{"cache_tokens", "cache_read_tokens"} {
+		raw, ok := fields[key]
+		if !ok || string(raw) == "null" {
+			continue
+		}
+		var value int64
+		if json.Unmarshal(raw, &value) == nil && value >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) newAPILogs(ctx context.Context, base string, c newAPICredential, q url.Values) (remoteUsagePage, error) {
 	quota, err := s.newAPIQuota(ctx, base, c)
 	if err != nil {
@@ -1091,7 +1109,7 @@ func (s *Service) newAPILogs(ctx context.Context, base string, c newAPICredentia
 		} else {
 			baseCost = total
 		}
-		out.Items = append(out.Items, remoteUsage{ID: log.ID, AccountID: log.Channel, AccountName: log.ChannelName, UserID: log.UserID, UserName: log.Username, GroupID: newAPIGroupID(log.Group), GroupName: log.Group, IPAddress: log.IP, StatusCode: status, CreatedAt: time.Unix(log.CreatedAt, 0).UTC().Format(time.RFC3339), Model: log.Model, RequestedModel: log.Model, InputTokens: log.PromptTokens, OutputTokens: log.CompletionTokens, CacheReadTokens: metadata.CacheTokens, CacheCreationTokens: metadata.CacheCreationTokens, FirstTokenMS: metadata.FRT, DurationMS: log.UseTime * 1000, RequestType: requestType, RequestID: log.RequestID, ActualCost: total, TotalCost: baseCost})
+		out.Items = append(out.Items, remoteUsage{ID: log.ID, AccountID: log.Channel, AccountName: log.ChannelName, UserID: log.UserID, UserName: log.Username, GroupID: newAPIGroupID(log.Group), GroupName: log.Group, IPAddress: log.IP, StatusCode: status, CreatedAt: time.Unix(log.CreatedAt, 0).UTC().Format(time.RFC3339), Model: log.Model, RequestedModel: log.Model, InputTokens: log.PromptTokens, OutputTokens: log.CompletionTokens, CacheKnown: newAPICacheKnown(log.Other), CacheReadTokens: metadata.CacheTokens, CacheCreationTokens: metadata.CacheCreationTokens, FirstTokenMS: metadata.FRT, DurationMS: log.UseTime * 1000, RequestType: requestType, RequestID: log.RequestID, ActualCost: total, TotalCost: baseCost})
 	}
 	return out, nil
 }

@@ -36,6 +36,7 @@ import type {
   RelayUserRiskLevel,
   RelayUserBalanceHistory,
   RelayStation,
+  PelicanGallery,
   DashboardRange,
   RelayUsageRange,
   LatencyBucketGranularity,
@@ -324,6 +325,9 @@ export function useCaptchaConfigs() {
   return useApi<CaptchaConfig[]>("/captcha-configs")
 }
 
+export function usePelicanGallery(stationID: number | null) {
+  return useApi<PelicanGallery>(stationID == null ? null : `/relay-stations/${stationID}/pelican`)
+}
 export function useRelayStations() {
   return useApi<RelayStation[]>("/relay-stations")
 }

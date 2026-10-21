@@ -570,6 +570,40 @@ export interface RelayGroupTestCallResult {
   output: string
 }
 
+export interface PelicanConfig {
+  id?: number
+  relay_station_id?: number
+  account_external_id?: number
+  enabled: boolean
+  model: string
+  prompt: string
+  reasoning_effort: string
+  parallel_count: number
+  cron_expression: string
+  next_run_at?: string
+  lease_until?: string | null
+}
+export interface PelicanResult {
+  id: number
+  relay_station_id: number
+  account_external_id: number
+  account_name: string
+  model: string
+  prompt?: string
+  reasoning_effort: string
+  trigger: string
+  status: "success" | "failed"
+  html?: string
+  error: string
+  duration_ms: number
+  started_at: string
+  finished_at: string
+}
+export interface PelicanGallery {
+  configs: PelicanConfig[]
+  results: PelicanResult[]
+}
+
 export interface RelayGroupTestResult {
   model: string
   requested: number
@@ -719,6 +753,7 @@ export interface OperationLinkStation {
 }
 
 export interface RelayLatencySample {
+  cache_known?: boolean
   first_token_ms: number
   duration_ms: number
   status_code?: number
@@ -740,6 +775,7 @@ export interface RelayLatencySample {
 }
 
 export interface ChannelUsageSample {
+  cache_known?: boolean
   channel_account_id: number
   first_token_ms: number | null
   duration_ms: number | null

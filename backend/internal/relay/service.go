@@ -1348,6 +1348,7 @@ type remoteBatchUpdateResult struct {
 }
 
 type remoteUsage struct {
+	CacheKnown            bool     `json:"-"`
 	ID                    int64    `json:"id"`
 	RequestID             string   `json:"request_id"`
 	ClientRequestID       string   `json:"client_request_id"`

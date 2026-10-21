@@ -17,6 +17,10 @@ import (
 
 func registerRelayStations(g *gin.RouterGroup, d *Deps) {
 	gp := g.Group("/relay-stations")
+	gp.GET("/:id/pelican", func(c *gin.Context) { relayPelicanGallery(c, d) })
+	gp.PUT("/:id/accounts/:external_id/pelican", func(c *gin.Context) { saveRelayPelicanConfig(c, d) })
+	gp.POST("/:id/accounts/:external_id/pelican/run", func(c *gin.Context) { startRelayPelican(c, d) })
+	gp.GET("/:id/accounts/:external_id/pelican/results/:result_id", func(c *gin.Context) { relayPelicanResult(c, d) })
 	gp.GET("", func(c *gin.Context) { listRelayStations(c, d) })
 	gp.POST("", func(c *gin.Context) { createRelayStation(c, d) })
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllRelayStations(c, d) })

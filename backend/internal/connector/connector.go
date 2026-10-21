@@ -100,6 +100,7 @@ type UsageQuery struct {
 }
 
 type UsageRecord struct {
+	CacheKnown          bool
 	RemoteID            string
 	RequestID           string
 	CreatedAt           time.Time
@@ -117,6 +118,7 @@ type UsageRecord struct {
 }
 
 type UsagePage struct {
+	RawCount int
 	Records  []UsageRecord
 	Total    int64
 	Page     int

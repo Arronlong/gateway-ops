@@ -9,11 +9,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/robfig/cron/v3"
 	"github.com/guliansheng/gateway-ops/internal/config"
 	"github.com/guliansheng/gateway-ops/internal/monitor"
 	"github.com/guliansheng/gateway-ops/internal/relay"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"github.com/robfig/cron/v3"
 )
 
 type Scheduler struct {
@@ -26,6 +26,8 @@ type Scheduler struct {
 	notifies             *storage.Notifications
 	settings             *storage.Settings
 	relay                *relay.Service
+	pelicanCtx           context.Context
+	pelicanCancel        context.CancelFunc
 	legacyBalanceID      cron.EntryID
 	legacyRateID         cron.EntryID
 	channelSyncID        cron.EntryID
@@ -49,16 +51,19 @@ func New(
 	relaySvc *relay.Service,
 	log *slog.Logger,
 ) *Scheduler {
+	pelicanCtx, pelicanCancel := context.WithCancel(context.Background())
 	return &Scheduler{
-		cfg:      cfg,
-		log:      log,
-		cron:     cron.New(cron.WithSeconds()),
-		monitor:  m,
-		monLogs:  monLogs,
-		rates:    rates,
-		notifies: notifies,
-		settings: settings,
-		relay:    relaySvc,
+		cfg:           cfg,
+		log:           log,
+		cron:          cron.New(cron.WithSeconds()),
+		monitor:       m,
+		monLogs:       monLogs,
+		rates:         rates,
+		notifies:      notifies,
+		settings:      settings,
+		relay:         relaySvc,
+		pelicanCtx:    pelicanCtx,
+		pelicanCancel: pelicanCancel,
 	}
 }
 
@@ -96,6 +101,11 @@ func (s *Scheduler) Start() error {
 	}
 	if err := s.configureSyncJobs(); err != nil {
 		return err
+	}
+	if s.relay != nil {
+		if _, err := s.cron.AddFunc("@every 30s", s.runPelicans); err != nil {
+			return err
+		}
 	}
 	s.cron.Start()
 	if settings, settingsErr := s.settings.SyncSettings(); settingsErr == nil && settings.ChannelConfigured && settings.ChannelEnabled {
@@ -188,6 +198,9 @@ func (s *Scheduler) configureSyncJobs() error {
 }
 
 func (s *Scheduler) Stop() {
+	if s.pelicanCancel != nil {
+		s.pelicanCancel()
+	}
 	if s.cron != nil {
 		<-s.cron.Stop().Done()
 	}
