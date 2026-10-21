@@ -23,6 +23,7 @@ import { apiFetch } from "@/lib/api"
 import { PelicanProvider, PelicanAccountPanel, PelicanDashboard } from "@/components/relay/pelican"
 import { useRelayLatencyTrends } from "@/lib/queries"
 import { RecentRequestMetrics } from "@/components/monitor/recent-request-metrics"
+import { recentRequestMetrics } from "@/lib/recent-request-metrics"
 import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, RelayAccountBatchActionResult, RelayAccountBatchCloneGroup, RelayAccountBatchCloneResult, RelayAccountConsumptionBucket, RelayLatencySample, RelayUsageRange, RelayAccountTestResult, RelayAccountView, RelayGroupOption, RelayGroupTestResult, RelayGroupView, RelayOverview, RelayRecentUsage, RelayStation, RelayStationAuthMode, RelayStationPayload, RelayStationType } from "@/lib/api-types"
 import { useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelLatencyTrends, useChannelRelayAssociations, useChannels, usePrefetchRelayOverviews, useRelayAccountConsumptionBuckets, useRelayAccountModelCatalog, useRelayDailyConsumption, useRelayLatencyBuckets, useRelayOverview, useRelayRecentUsage, useRelayStations, useRelayUsage, useRelayUserBalanceHistory } from "@/lib/queries"
 import { RelayAdjustmentLog } from "@/components/monitor/relay-adjustment-log"
@@ -130,7 +131,7 @@ export function relayPriorityRequiresOAuth(type: RelayStationType, priority: num
 }
 type SortDirection = "asc" | "desc"
 type GroupSortKey = "name" | "rate"
-type AccountSortKey = "score" | "recent_call" | "last_used" | "priority" | "cost" | "usage" | "name"
+type AccountSortKey = "score" | "cache_hit_rate" | "success_rate" | "recent_call" | "last_used" | "priority" | "cost" | "usage" | "name"
 type SortState<K extends string> = { key: K; direction: SortDirection } | null
 type RelayDetailModule = "usage" | "users" | "groups" | "accounts" | "pelican"
 type AccountAdjustmentMode = "suggestion" | "downgrade"
@@ -157,6 +158,8 @@ const usageRanges: { value: RelayUsageRange; label: string }[] = [
 
 const accountSortOptions: Array<{ value: AccountSortKey; label: string }> = [
   { value: "score", label: "综合评分" },
+  { value: "cache_hit_rate", label: "缓存命中率" },
+  { value: "success_rate", label: "重试感知成功率" },
   { value: "recent_call", label: "最近调用" },
   { value: "last_used", label: "最近使用时间" },
   { value: "usage", label: "区间消费" },
@@ -1912,6 +1915,7 @@ export default function RelayStationsPage() {
     }
     return scores
   }, [managedAccounts, scoreLatencyBucketsByAccount])
+  const recentMetricsByAccount = useMemo(() => new Map(managedAccounts.map((account) => [account.external_id, recentRequestMetrics(account.latency_samples ?? [])])), [managedAccounts])
   const latestCallByAccount = useMemo(() => {
     const latest = new Map<number, number>()
     for (const account of managedAccounts) {
@@ -1976,6 +1980,12 @@ export default function RelayStationsPage() {
         case "score":
           result = compareNumber(healthScoreByAccount.get(a.external_id)?.score ?? null, healthScoreByAccount.get(b.external_id)?.score ?? null)
           break
+        case "cache_hit_rate":
+          result = compareNumber(recentMetricsByAccount.get(a.external_id)?.cacheHitRate ?? null, recentMetricsByAccount.get(b.external_id)?.cacheHitRate ?? null)
+          break
+        case "success_rate":
+          result = compareNumber(recentMetricsByAccount.get(a.external_id)?.successRate ?? null, recentMetricsByAccount.get(b.external_id)?.successRate ?? null)
+          break
         case "recent_call":
           result = compareNumber(latestCallByAccount.get(a.external_id) ?? null, latestCallByAccount.get(b.external_id) ?? null)
           break
@@ -2001,7 +2011,7 @@ export default function RelayStationsPage() {
       }
       return result || a.external_id - b.external_id
     })
-  }, [managedAccounts, accountNameFilter, modelTypeFilter, schedulableFilter, riskFilter, groupFilter, accountSort, healthScoreByAccount, latestCallByAccount, accountSearchIndex])
+  }, [managedAccounts, accountNameFilter, modelTypeFilter, schedulableFilter, riskFilter, groupFilter, accountSort, healthScoreByAccount, latestCallByAccount, recentMetricsByAccount, accountSearchIndex])
   const allFilteredSelected = filteredAccounts.length > 0 && filteredAccounts.every((account) => selected.includes(account.external_id))
   const filteredEnableCount = filteredAccounts.filter((account) => !account.schedulable).length
   const filteredDisableCount = filteredAccounts.filter((account) => account.schedulable).length

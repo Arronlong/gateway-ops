@@ -58,6 +58,7 @@ import { channelTypeLabel, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
 import { RecentRequestMetrics } from "@/components/monitor/recent-request-metrics"
+import { recentRequestMetrics } from "@/lib/recent-request-metrics"
 import type { Channel, ChannelAccount, ChannelType, ChannelUsageSample, LatencyBucketGranularity, RateBoundAccount, RateSnapshot, RelayUsageRange, SystemSettings } from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
 import { linkedStationsByChannel as buildLinkedStationsByChannel, relayAccountComparisonKey, relayComparisonsByChannel } from "@/lib/channel-relay-association"
@@ -74,7 +75,7 @@ type ManagementModeFilter = "auto" | "manual" | "all"
 type AccountCountFilter = "multi" | "single" | "all"
 type ChannelTypeFilter = "all" | ChannelType
 type AssociationFilter = "all" | "unlinked" | `station:${number}`
-type ChannelSortKey = "score" | "ratio_change" | "recent_call" | "updated" | "output_speed_p50" | "output_speed_p95" | "first_latency_p50" | "first_latency_p95" | "duration_latency_p50" | "duration_latency_p95" | "balance" | "consumption" | "usage_cost" | "name" | "account_count" | "status"
+type ChannelSortKey = "score" | "cache_hit_rate" | "success_rate" | "ratio_change" | "recent_call" | "updated" | "output_speed_p50" | "output_speed_p95" | "first_latency_p50" | "first_latency_p95" | "duration_latency_p50" | "duration_latency_p95" | "balance" | "consumption" | "usage_cost" | "name" | "account_count" | "status"
 type SortDirection = "asc" | "desc"
 type ChannelViewMode = "gallery" | "list"
 type ChannelColumnKey = "score" | "type" | "status" | "management" | "accounts" | "balance" | "consumption" | "usage_cost" | "recent" | "stability" | "consumption_trend" | "updated" | "remark"
@@ -157,6 +158,8 @@ function channelListGridStyle(visibleColumns: Set<ChannelColumnKey>): CSSPropert
 
 const channelSortOptions: Array<{ value: ChannelSortKey; label: string }> = [
   { value: "score", label: "综合评分" },
+  { value: "cache_hit_rate", label: "缓存命中率" },
+  { value: "success_rate", label: "重试感知成功率" },
   { value: "ratio_change", label: "最近倍率变动" },
   { value: "recent_call", label: "最近调用时间" },
   { value: "updated", label: "上次更新时间" },
@@ -760,6 +763,7 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
   const consumptionBuckets = useChannelConsumptionBuckets(usageRange, latencyGranularity, displayBucketCount, consumptionVisible)
   const metricByChannel = useMemo(() => new Map((metrics.data ?? []).map((item) => [item.channel_id, item])), [metrics.data])
   const latencyByChannel = useMemo(() => new Map((latencyTrends.data ?? []).map((item) => [item.channel_id, item.samples])), [latencyTrends.data])
+  const recentMetricsByChannel = useMemo(() => new Map(Array.from(latencyByChannel, ([channelID, samples]) => [channelID, recentRequestMetrics(samples)])), [latencyByChannel])
   const relayRecentSamplesByAccount = useMemo(() => new Map((relayLatencyTrends.data ?? []).map((item) => [relayAccountComparisonKey(item.station_id, item.account_id), item.samples])), [relayLatencyTrends.data])
   const latencyBucketsByChannel = useMemo(() => new Map((latencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [latencyBuckets.data])
   const scoreLatencyBucketsByChannel = useMemo(() => new Map((scoreLatencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [scoreLatencyBuckets.data])
@@ -841,6 +845,12 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
         case "score":
           result = compareNumber(healthScoreByChannel.get(left.id)?.score ?? null, healthScoreByChannel.get(right.id)?.score ?? null)
           break
+        case "cache_hit_rate":
+          result = compareNumber(recentMetricsByChannel.get(left.id)?.cacheHitRate ?? null, recentMetricsByChannel.get(right.id)?.cacheHitRate ?? null)
+          break
+        case "success_rate":
+          result = compareNumber(recentMetricsByChannel.get(left.id)?.successRate ?? null, recentMetricsByChannel.get(right.id)?.successRate ?? null)
+          break
         case "recent_call":
           result = compareNumber(latestCallByChannel.get(left.id) ?? null, latestCallByChannel.get(right.id) ?? null)
           break
@@ -890,7 +900,7 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
       }
       return result || left.id - right.id
     })
-  }, [accountCount, associatedModelsByChannel, associationFilter, channelType, channels, healthScoreByChannel, latestCallByChannel, latencySortMetricsByChannel, linkedStationsByChannel, managementMode, metricByChannel, monitorStatus, searchQuery, sortDirection, sortKey])
+  }, [accountCount, associatedModelsByChannel, associationFilter, channelType, channels, healthScoreByChannel, latestCallByChannel, latencySortMetricsByChannel, linkedStationsByChannel, managementMode, metricByChannel, monitorStatus, recentMetricsByChannel, searchQuery, sortDirection, sortKey])
   const refresh = useTriggerRefresh()
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [editing, setEditing] = useState<Channel | null>(null)
