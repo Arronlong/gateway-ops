@@ -14,9 +14,9 @@ export function RecentRequestMetrics({samples, loading = false}: {samples: reado
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30000); return () => window.clearInterval(timer) }, [])
   const metrics = recentRequestMetrics(samples, now)
   const latestText = metrics.latestAt ? `\n最新调用：${new Date(metrics.latestAt).toLocaleString("zh-CN", {hour12: false})}` : ""
-  const windowText = `最近 1 小时，最多 60 次调用。当前 ${metrics.sampleCount} 次。${latestText}`
+  const windowText = `最近 1 小时，截止当前时间前 45 秒，最多 60 次调用。当前 ${metrics.sampleCount} 次。${latestText}`
   return <div className="flex flex-wrap items-center gap-2" aria-busy={loading}>
-    <Ring rate={metrics.cacheHitRate} label="1h 缓存命中" color="#38bdf8" detail={`${windowText}\n计算：有缓存读取的请求次数 / 缓存状态已知次数。\n命中 ${metrics.cacheHitCount} / ${metrics.cacheKnownCount} 次；缓存读取 ${metrics.cacheReadTokens.toLocaleString("zh-CN")} tokens。\n未提供缓存字段的调用不进入分母。`}/>
+    <Ring rate={metrics.cacheHitRate} label="1h 缓存命中" color="#38bdf8" detail={`${windowText}\n缓存命中率 = 缓存读取 Token ÷ (输入 Token + 缓存读取 Token + 缓存创建 Token)。\n${metrics.cacheReadTokens.toLocaleString("zh-CN")} ÷ (${metrics.cacheInputTokens.toLocaleString("zh-CN")} + ${metrics.cacheReadTokens.toLocaleString("zh-CN")} + ${metrics.cacheCreationTokens.toLocaleString("zh-CN")}) = ${metrics.cacheTokenTotal.toLocaleString("zh-CN")} tokens。\n该指标按 Token 数量加权，不按请求次数加权。\n未报告缓存字段的普通输入会计入分母；没有有效 Token 时显示未知。`}/>
     <Ring rate={metrics.successRate} label="1h 成功率" color="#34d399" detail={`${windowText}\n计算：成功次数 / 结果已知次数。\n成功 ${metrics.successCount} / ${metrics.successKnownCount} 次。未知状态不进入分母。\n只统计已采集的调用日志，不代表上游未暴露的内部重试。`}/>
     <span className="text-[10px] text-muted-foreground">{loading && !samples.length ? "读取中…" : `1h · ${metrics.sampleCount}/60 次`}</span>
   </div>
