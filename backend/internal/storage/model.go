@@ -759,6 +759,7 @@ type UISettings struct {
 	ChannelsGroupsExpanded      bool     `json:"channels_groups_expanded"`
 	ChannelsShowStability       bool     `json:"channels_show_stability"`
 	ChannelsShowConsumption     bool     `json:"channels_show_consumption"`
+	RecentMetricsWindowHours    int      `json:"recent_metrics_window_hours"`
 	IframeEmbeddingEnabled      bool     `json:"iframe_embedding_enabled"`
 	IframeEmbeddingMode         string   `json:"iframe_embedding_mode"`
 	IframeEmbeddingAllowlist    []string `json:"iframe_embedding_allowlist"`

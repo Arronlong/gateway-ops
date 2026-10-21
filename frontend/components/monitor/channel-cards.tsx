@@ -763,7 +763,7 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
   const consumptionBuckets = useChannelConsumptionBuckets(usageRange, latencyGranularity, displayBucketCount, consumptionVisible)
   const metricByChannel = useMemo(() => new Map((metrics.data ?? []).map((item) => [item.channel_id, item])), [metrics.data])
   const latencyByChannel = useMemo(() => new Map((latencyTrends.data ?? []).map((item) => [item.channel_id, item.samples])), [latencyTrends.data])
-  const recentMetricsByChannel = useMemo(() => new Map(Array.from(latencyByChannel, ([channelID, samples]) => [channelID, recentRequestMetrics(samples)])), [latencyByChannel])
+  const recentMetricsByChannel = useMemo(() => new Map(Array.from(latencyByChannel, ([channelID, samples]) => [channelID, recentRequestMetrics(samples, Date.now(), uiSettings.recent_metrics_window_hours)])), [latencyByChannel, uiSettings.recent_metrics_window_hours])
   const relayRecentSamplesByAccount = useMemo(() => new Map((relayLatencyTrends.data ?? []).map((item) => [relayAccountComparisonKey(item.station_id, item.account_id), item.samples])), [relayLatencyTrends.data])
   const latencyBucketsByChannel = useMemo(() => new Map((latencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [latencyBuckets.data])
   const scoreLatencyBucketsByChannel = useMemo(() => new Map((scoreLatencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [scoreLatencyBuckets.data])
@@ -1317,7 +1317,7 @@ actions={<>
                   ) : null}
                 </div>
 
-                <RecentRequestMetrics samples={latencyByChannel.get(c.id) ?? []} loading={latencyTrends.loading} />
+                <RecentRequestMetrics samples={latencyByChannel.get(c.id) ?? []} loading={latencyTrends.loading} windowHours={uiSettings.recent_metrics_window_hours} />
                 {channelSectionVisible(uiSettings, "recent") ? <LatencyStabilityLane
                   buckets={latencyBucketsByChannel.get(c.id) ?? []}
                   recentSamples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)}

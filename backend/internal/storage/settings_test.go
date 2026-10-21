@@ -9,6 +9,9 @@ func TestUISettingsOperationsManagementDefaultsEnabled(t *testing.T) {
 	if !got.OperationsManagementEnabled {
 		t.Fatal("operations management must be enabled by default")
 	}
+	if got.RecentMetricsWindowHours != 1 {
+		t.Fatalf("recent metrics window hours = %d, want 1", got.RecentMetricsWindowHours)
+	}
 }
 
 func TestUISettingsValuesSerializesOperationsManagement(t *testing.T) {
@@ -23,6 +26,9 @@ func TestUISettingsValuesSerializesOperationsManagement(t *testing.T) {
 	}
 	if got := values[SettingUIOperationsManagementEnabled]; got != "false" {
 		t.Fatalf("operations management value = %q, want false", got)
+	}
+	if got := values[SettingUIRecentMetricsWindowHours]; got != "1" {
+		t.Fatalf("recent metrics window hours value = %q, want 1", got)
 	}
 }
 

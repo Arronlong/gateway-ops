@@ -47,6 +47,9 @@ func registerSystemSettings(g *gin.RouterGroup, d *Deps) {
 }
 
 func validateSystemSettings(settings storage.UISettings) error {
+	if settings.RecentMetricsWindowHours < 1 || settings.RecentMetricsWindowHours > 24 {
+		return fmt.Errorf("recent metrics window hours must be between 1 and 24")
+	}
 	switch settings.IframeEmbeddingMode {
 	case storage.IframeEmbeddingModeAll, storage.IframeEmbeddingModeAllowlist:
 	default:

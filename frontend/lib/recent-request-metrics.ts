@@ -17,7 +17,9 @@ export interface RecentRequestSample {
   attempt_status?: "in_progress" | "completed" | "failed"
 }
 
-const RECENT_WINDOW_MS = 60 * 60 * 1000
+const DEFAULT_WINDOW_HOURS = 1
+const MIN_WINDOW_HOURS = 1
+const MAX_WINDOW_HOURS = 24
 const RECENT_CUTOFF_MS = 45 * 1000
 const RECENT_LIMIT = 60
 
@@ -35,9 +37,10 @@ function cacheCreationTokens(sample: RecentRequestSample) {
   return nonNegative(sample.cache_creation_5m_tokens) + nonNegative(sample.cache_creation_1h_tokens)
 }
 
-export function recentRequestMetrics(samples: readonly RecentRequestSample[], now = Date.now()) {
+export function recentRequestMetrics(samples: readonly RecentRequestSample[], now = Date.now(), windowHours = DEFAULT_WINDOW_HOURS) {
+  const normalizedWindowHours = Number.isInteger(windowHours) ? Math.min(MAX_WINDOW_HOURS, Math.max(MIN_WINDOW_HOURS, windowHours)) : DEFAULT_WINDOW_HOURS
   const cutoff = now - RECENT_CUTOFF_MS
-  const windowStart = cutoff - RECENT_WINDOW_MS
+  const windowStart = cutoff - normalizedWindowHours * 60 * 60 * 1000
   const selected = samples.map((sample, index) => ({sample, index, time: Date.parse(sample.created_at)}))
     .filter(({time}) => Number.isFinite(time) && time >= windowStart && time <= cutoff)
     .sort((a, b) => b.time - a.time || a.index - b.index).slice(0, RECENT_LIMIT)
@@ -69,7 +72,7 @@ export function recentRequestMetrics(samples: readonly RecentRequestSample[], no
   }
   const cacheTokenTotal = cacheInputTokens + cacheReadTokens + cacheCreationTotal
   return {
-    sampleCount: selected.length, successCount, successAttemptCount, successKnownCount: successAttemptCount, cacheHitCount, cacheKnownCount,
+    sampleCount: selected.length, windowHours: normalizedWindowHours, successCount, successAttemptCount, successKnownCount: successAttemptCount, cacheHitCount, cacheKnownCount,
     cacheInputTokens, cacheReadTokens, cacheCreationTokens: cacheCreationTotal, cacheTokenTotal,
     successRate: successAttemptCount ? successCount / successAttemptCount : null,
     cacheHitRate: cacheTokenTotal ? cacheReadTokens / cacheTokenTotal : null,

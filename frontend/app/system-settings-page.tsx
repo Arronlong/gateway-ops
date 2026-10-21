@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { Input } from "@/components/ui/input"
 import { apiFetch } from "@/lib/api"
 import type { SyncSettings, SystemSettings } from "@/lib/api-types"
 import { useSyncSettings, useSystemSettings } from "@/lib/queries"
@@ -323,12 +324,25 @@ export default function SystemSettingsPage() {
         </CardContent>}
       </Card>
 
+      <Card id="monitor-metrics" className="scroll-mt-4 gap-0 border border-border py-0 shadow-none">
+        <CardHeader className="border-b border-border px-4 py-3">
+          <CardTitle className="flex items-center gap-2 text-sm font-semibold"><Clock3 className="size-4 text-brand" />监控指标</CardTitle>
+          <p className="mt-1 text-xs text-muted-foreground">配置缓存命中率和重试感知成功率的统计时间范围，保存后立即对渠道和中转站账号生效。</p>
+        </CardHeader>
+        <CardContent className="px-4 pb-4">
+          <div className="flex min-h-16 items-center justify-between gap-5 py-3">
+            <div className="min-w-0"><p className="text-sm font-medium text-foreground">缓存与成功率统计时长</p><p className="mt-1 text-xs leading-5 text-muted-foreground">默认 1 小时，可填写 1～24 的整数，单位为小时。</p></div>
+            <div className="flex shrink-0 items-center gap-2"><Input className="h-9 w-20 text-center font-mono text-xs" type="number" min={1} max={24} step={1} inputMode="numeric" aria-label="缓存与成功率统计时长" value={settings.recent_metrics_window_hours} onChange={(event) => updateSettings((current) => ({ ...current, recent_metrics_window_hours: Number(event.target.value) }))} /><span className="text-xs text-muted-foreground">小时</span></div>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="pt-2">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-semibold text-foreground">界面与页面</h2>
           <Button size="sm" className="h-11 shrink-0 gap-1.5 sm:h-9" disabled={saving || query.loading} onClick={() => void save()}>
             <Save className="size-3.5" />
-            保存界面设置
+            保存界面与监控设置
           </Button>
         </div>
         <p className="mt-1 text-xs text-muted-foreground">控制导航入口和页面内容的显示方式；关闭父级只会暂时隐藏下级内容，不会清空原有选择。</p>

@@ -1133,6 +1133,7 @@ export interface SystemSettings {
   channels_groups_expanded: boolean
   channels_show_stability: boolean
   channels_show_consumption: boolean
+  recent_metrics_window_hours: number
   iframe_embedding_enabled: boolean
   iframe_embedding_mode: "all" | "allowlist"
   iframe_embedding_allowlist: string[]

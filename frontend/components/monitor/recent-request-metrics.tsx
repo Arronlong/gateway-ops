@@ -9,15 +9,15 @@ function Ring({rate, label, color, detail}: {rate: number | null; label: string;
     <span className="text-[10px] text-muted-foreground">{label}</span>
   </button></TooltipTrigger><TooltipContent className="max-w-72 whitespace-pre-line text-xs leading-5">{detail}</TooltipContent></Tooltip>
 }
-export function RecentRequestMetrics({samples, loading = false}: {samples: readonly RecentRequestSample[]; loading?: boolean}) {
+export function RecentRequestMetrics({samples, loading = false, windowHours = 1}: {samples: readonly RecentRequestSample[]; loading?: boolean; windowHours?: number}) {
   const [now, setNow] = useState(Date.now)
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30000); return () => window.clearInterval(timer) }, [])
-  const metrics = recentRequestMetrics(samples, now)
+  const metrics = recentRequestMetrics(samples, now, windowHours)
   const latestText = metrics.latestAt ? `\n最新调用：${new Date(metrics.latestAt).toLocaleString("zh-CN", {hour12: false})}` : ""
-  const windowText = `最近 1 小时，截止当前时间前 45 秒，最多 60 次调用。当前 ${metrics.sampleCount} 次。${latestText}`
+  const windowText = `最近 ${metrics.windowHours} 小时，截止当前时间前 45 秒，最多 60 次调用。当前 ${metrics.sampleCount} 次。${latestText}`
   return <div className="flex flex-wrap items-center gap-2" aria-busy={loading}>
     <Ring rate={metrics.cacheHitRate} label="1h 缓存命中" color="#38bdf8" detail={`${windowText}\n缓存命中率 = 缓存读取 Token ÷ (输入 Token + 缓存读取 Token + 缓存创建 Token)。\n${metrics.cacheReadTokens.toLocaleString("zh-CN")} ÷ (${metrics.cacheInputTokens.toLocaleString("zh-CN")} + ${metrics.cacheReadTokens.toLocaleString("zh-CN")} + ${metrics.cacheCreationTokens.toLocaleString("zh-CN")}) × 100% = ${metrics.cacheHitRate == null ? "未知" : `${(metrics.cacheHitRate * 100).toFixed(1)}%`}。\n该指标按 Token 数量加权，不按请求次数加权。\n未报告缓存字段的普通输入会计入分母；没有有效 Token 时显示未知。`}/>
     <Ring rate={metrics.successRate} label="1h 重试感知成功率" color="#34d399" detail={`${windowText}\n计算方法：成功次数 ÷ 实际尝试次数。\n成功 ${metrics.successCount} / ${metrics.successAttemptCount} 次。\n一次失败后重试成功，失败和成功分别计入。\n辅助调用、探测和已确认的 cyber 请求不计入成功或失败，也不计入分母。\n进行中的文字尝试保留在分母内；图片等待完成计入。无样本显示未知。`}/>
-    <span className="text-[10px] text-muted-foreground">{loading && !samples.length ? "读取中…" : `1h · ${metrics.sampleCount}/60 次`}</span>
+    <span className="text-[10px] text-muted-foreground">{loading && !samples.length ? "读取中…" : `${metrics.windowHours}h · ${metrics.sampleCount}/60 次`}</span>
   </div>
 }

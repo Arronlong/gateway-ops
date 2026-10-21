@@ -24,6 +24,7 @@ export const defaultSystemSettings: SystemSettings = {
   channels_groups_expanded: false,
   channels_show_stability: true,
   channels_show_consumption: true,
+  recent_metrics_window_hours: 1,
   iframe_embedding_enabled: false,
   iframe_embedding_mode: "allowlist",
   iframe_embedding_allowlist: [],

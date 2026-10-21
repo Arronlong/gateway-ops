@@ -17,13 +17,25 @@ func TestValidateSystemSettingsIframeConfiguration(t *testing.T) {
 		{
 			name: "allow all",
 			settings: storage.UISettings{
-				IframeEmbeddingEnabled: true,
-				IframeEmbeddingMode:    storage.IframeEmbeddingModeAll,
+				RecentMetricsWindowHours: 1,
+				IframeEmbeddingEnabled:   true,
+				IframeEmbeddingMode:      storage.IframeEmbeddingModeAll,
 			},
+		},
+		{
+			name:     "window hours out of range",
+			settings: storage.UISettings{RecentMetricsWindowHours: 25, IframeEmbeddingMode: storage.IframeEmbeddingModeAll},
+			wantErr:  true,
+		},
+		{
+			name:     "window hours below range",
+			settings: storage.UISettings{RecentMetricsWindowHours: 0, IframeEmbeddingMode: storage.IframeEmbeddingModeAll},
+			wantErr:  true,
 		},
 		{
 			name: "valid allowlist",
 			settings: storage.UISettings{
+				RecentMetricsWindowHours: 1,
 				IframeEmbeddingEnabled:   true,
 				IframeEmbeddingMode:      storage.IframeEmbeddingModeAllowlist,
 				IframeEmbeddingAllowlist: []string{"example.com", "*.example.com", "**.devai.**", "a*abc.com", "devai_cn.xxx.cn"},
@@ -32,14 +44,16 @@ func TestValidateSystemSettingsIframeConfiguration(t *testing.T) {
 		{
 			name: "invalid mode",
 			settings: storage.UISettings{
-				IframeEmbeddingEnabled: true,
-				IframeEmbeddingMode:    "invalid",
+				RecentMetricsWindowHours: 1,
+				IframeEmbeddingEnabled:   true,
+				IframeEmbeddingMode:      "invalid",
 			},
 			wantErr: true,
 		},
 		{
 			name: "invalid allowlist pattern",
 			settings: storage.UISettings{
+				RecentMetricsWindowHours: 1,
 				IframeEmbeddingEnabled:   true,
 				IframeEmbeddingMode:      storage.IframeEmbeddingModeAllowlist,
 				IframeEmbeddingAllowlist: []string{"https://example.com"},

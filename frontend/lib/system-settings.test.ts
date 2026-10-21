@@ -6,3 +6,7 @@ import { defaultSystemSettings } from "./system-settings.ts"
 test("operations management visibility defaults to enabled", () => {
   assert.equal(defaultSystemSettings.operations_management_enabled, true)
 })
+
+test("recent metrics window defaults to one hour", () => {
+  assert.equal(defaultSystemSettings.recent_metrics_window_hours, 1)
+})

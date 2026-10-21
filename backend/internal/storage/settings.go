@@ -2,6 +2,7 @@ package storage
 
 import (
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -30,6 +31,7 @@ const (
 	SettingUIChannelsGroupsExpanded      = "ui.channels.groups_expanded"
 	SettingUIChannelsShowStability       = "ui.channels.show_stability"
 	SettingUIChannelsShowConsumption     = "ui.channels.show_consumption"
+	SettingUIRecentMetricsWindowHours    = "ui.monitor.recent_metrics_window_hours"
 	SettingSecurityIframeEnabled         = "security.iframe.enabled"
 	SettingSecurityIframeMode            = "security.iframe.mode"
 	SettingSecurityIframeAllowlist       = "security.iframe.allowlist"
@@ -218,6 +220,7 @@ func defaultUISettings() UISettings {
 		ChannelsGroupsExpanded:      false,
 		ChannelsShowStability:       true,
 		ChannelsShowConsumption:     true,
+		RecentMetricsWindowHours:    1,
 		IframeEmbeddingEnabled:      false,
 		IframeEmbeddingMode:         IframeEmbeddingModeAllowlist,
 		IframeEmbeddingAllowlist:    []string{},
@@ -250,6 +253,7 @@ func uiSettingsValues(settings UISettings) (map[string]string, error) {
 		SettingUIChannelsGroupsExpanded:      strconv.FormatBool(settings.ChannelsGroupsExpanded),
 		SettingUIChannelsShowStability:       strconv.FormatBool(settings.ChannelsShowStability),
 		SettingUIChannelsShowConsumption:     strconv.FormatBool(settings.ChannelsShowConsumption),
+		SettingUIRecentMetricsWindowHours:    strconv.Itoa(settings.RecentMetricsWindowHours),
 		SettingSecurityIframeEnabled:         strconv.FormatBool(settings.IframeEmbeddingEnabled),
 		SettingSecurityIframeMode:            strings.TrimSpace(settings.IframeEmbeddingMode),
 		SettingSecurityIframeAllowlist:       string(allowlistJSON),
@@ -276,6 +280,18 @@ func (s *Settings) UISettings() (UISettings, error) {
 			return err
 		}
 		*target = strings.TrimSpace(value)
+		return nil
+	}
+	readWindowHours := func(target *int) error {
+		value, found, err := s.Get(SettingUIRecentMetricsWindowHours)
+		if err != nil || !found {
+			return err
+		}
+		parsed, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || parsed < 1 || parsed > 24 {
+			return fmt.Errorf("invalid recent metrics window hours %q", value)
+		}
+		*target = parsed
 		return nil
 	}
 	readStringSlice := func(key string, target *[]string) error {
@@ -316,6 +332,9 @@ func (s *Settings) UISettings() (UISettings, error) {
 		return settings, err
 	}
 	if err := readBool(SettingUIChannelsShowConsumption, &settings.ChannelsShowConsumption); err != nil {
+		return settings, err
+	}
+	if err := readWindowHours(&settings.RecentMetricsWindowHours); err != nil {
 		return settings, err
 	}
 	if err := readBool(SettingSecurityIframeEnabled, &settings.IframeEmbeddingEnabled); err != nil {

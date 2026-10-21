@@ -11,6 +11,12 @@ test("selects the one-hour window before the 45-second cutoff", () => {
   assert.equal(result.sampleCount, 2)
 })
 
+test("uses the configured integer hour window up to 24 hours", () => {
+  const result = recentRequestMetrics([sample(60 * 24 - 1), sample(60 * 24 + 1)], now, 24)
+  assert.equal(result.windowHours, 24)
+  assert.equal(result.sampleCount, 1)
+})
+
 test("limits the selected records to the newest 60 before calculating weighted tokens", () => {
   const rows = Array.from({length: 80}, (_, i) => sample(i / 2 + 1, {
     input_tokens: 10,
