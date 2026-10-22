@@ -6,6 +6,21 @@ import { channelSectionVisible, defaultSystemSettings } from "./system-settings.
 
 const source = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8")
 
+test("\u76d1\u63a7\u6307\u6807\u5361\u7247\u5185\u63d0\u4f9b\u53ef\u4fdd\u5b58\u7684\u6309\u94ae", () => {
+  const page = source("../app/system-settings-page.tsx")
+  const card = page.match(/<Card id="monitor-metrics"[\s\S]*?<\/Card>/)?.[0]
+  assert.ok(card)
+  assert.match(card, /<Button[\s\S]*?disabled=\{saving \|\| query\.loading\}[\s\S]*?onClick=\{\(\) => void save\(\)\}[\s\S]*?\u4fdd\u5b58\u76d1\u63a7\u8bbe\u7f6e[\s\S]*?<\/Button>/)
+})
+
+test("\u540e\u53f0\u4efb\u52a1\u4fdd\u5b58\u6309\u94ae\u4f7f\u7528\u4efb\u52a1\u8bbe\u7f6e\u6587\u6848", () => {
+  const page = source("../app/system-settings-page.tsx")
+  const card = page.match(/<Card id="background-tasks"[\s\S]*?<\/Card>/)?.[0]
+  assert.ok(card)
+  assert.match(card, /onClick=\{\(\) => void saveSyncSettings\(\)\}[\s\S]*?\u4fdd\u5b58\u4efb\u52a1\u8bbe\u7f6e[\s\S]*?<\/Button>/)
+  assert.doesNotMatch(card, /\u4fdd\u5b58\u540c\u6b65\u8bbe\u7f6e/)
+})
+
 test("\u672a\u8bfb\u5230\u914d\u7f6e\u65f6\u6240\u6709\u6e20\u9053\u5b50\u533a\u57df\u5747\u4e0d\u663e\u793a", () => {
   for (const section of ["recent", "stability", "consumption_trend", "groups", "rate_changes"] as const) {
     assert.equal(channelSectionVisible(null, section), false)

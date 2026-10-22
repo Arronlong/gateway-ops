@@ -268,7 +268,7 @@ export default function SystemSettingsPage() {
           </div>
           <Button size="sm" className="h-9 shrink-0 gap-1.5" disabled={savingSync || syncQuery.loading || !syncQuery.data || !syncSettings} onClick={() => void saveSyncSettings()}>
             <Save className="size-3.5" />
-            保存同步设置
+            保存任务设置
           </Button>
         </CardHeader>
         {!syncQuery.data || !syncSettings ? <CardContent className="px-4 pb-4"><ConfigurationLoading query={syncQuery} title={"后台任务与同步设置"} className="py-5" /></CardContent> : <CardContent className="px-4 pb-4">
@@ -325,9 +325,15 @@ export default function SystemSettingsPage() {
       </Card>
 
       <Card id="monitor-metrics" className="scroll-mt-4 gap-0 border border-border py-0 shadow-none">
-        <CardHeader className="border-b border-border px-4 py-3">
-          <CardTitle className="flex items-center gap-2 text-sm font-semibold"><Clock3 className="size-4 text-brand" />监控指标</CardTitle>
-          <p className="mt-1 text-xs text-muted-foreground">配置缓存命中率和重试感知成功率的统计时间范围，保存后立即对渠道和中转站账号生效。</p>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border px-4 py-3">
+          <div className="min-w-0">
+            <CardTitle className="flex items-center gap-2 text-sm font-semibold"><Clock3 className="size-4 text-brand" />监控指标</CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">配置缓存命中率和重试感知成功率的统计时间范围，保存后立即对渠道和中转站账号生效。</p>
+          </div>
+          <Button size="sm" className="h-11 shrink-0 gap-1.5 sm:h-9" disabled={saving || query.loading} onClick={() => void save()}>
+            <Save className="size-3.5" />
+            保存监控设置
+          </Button>
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <div className="flex min-h-16 items-center justify-between gap-5 py-3">
