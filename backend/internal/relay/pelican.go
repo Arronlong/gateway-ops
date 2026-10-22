@@ -180,18 +180,22 @@ func (s *Service) SavePelicanConfig(stationID uint, accountID int64, config stor
 	return s.stations.PelicanConfig(stationID, accountID)
 }
 func (s *Service) generatePelican(ctx context.Context, station storage.RelayStation, key string, config storage.PelicanConfig) (string, error) {
-	encoded, err := json.Marshal(map[string]any{"model_id": config.Model, "prompt": config.Prompt + pelicanContract, "reasoning_effort": config.ReasoningEffort})
+	encoded, err := json.Marshal(map[string]any{
+		"model_id": config.Model,
+		"prompt":   config.Prompt + pelicanContract,
+		"mode":     "default",
+	})
 	if err != nil {
 		return "", err
 	}
-	endpoint := fmt.Sprintf("%s/api/v1/admin/accounts/%d/pelican-test", strings.TrimRight(station.BaseURL, "/"), config.AccountExternalID)
+	endpoint := fmt.Sprintf("%s/api/v1/admin/accounts/%d/test", strings.TrimRight(station.BaseURL, "/"), config.AccountExternalID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(string(encoded)))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("x-api-key", key)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("Accept", "text/event-stream, application/json")
 	client := *s.client
 	client.Timeout = pelicanTimeout
 	response, err := client.Do(req)
@@ -205,9 +209,6 @@ func (s *Service) generatePelican(ctx context.Context, station storage.RelayStat
 	}
 	if len(data) > 4<<20 {
 		return "", errors.New("上游生成响应超过 4 MiB")
-	}
-	if response.StatusCode == 404 || response.StatusCode == 405 {
-		return "", errors.New("中转站未提供账号 pelican-test 接口，请升级至支持鹈鹕测智的 Sub2API 版本")
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return "", fmt.Errorf("HTTP %d: %s", response.StatusCode, redactTestText(string(data), key))

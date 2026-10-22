@@ -11,41 +11,39 @@ import (
 	"time"
 )
 
-func TestPelicanGenerationUsesDedicatedAccountEndpoint(t *testing.T) {
+func TestPelicanGenerationUsesStandardAccountTestEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/admin/accounts/42/pelican-test" {
+		if r.URL.Path != "/api/v1/admin/accounts/42/test" {
 			t.Errorf("unexpected route %s", r.URL.Path)
 		}
 		if r.Header.Get("x-api-key") != "admin-secret" {
 			t.Error("missing admin key")
 		}
-		var input map[string]string
-		json.NewDecoder(r.Body).Decode(&input)
-		if input["model_id"] != "test-model" || input["reasoning_effort"] != "high" || !strings.HasPrefix(input["prompt"], "custom drawing") {
+		var input struct {
+			ModelID string `json:"model_id"`
+			Prompt  string `json:"prompt"`
+			Mode    string `json:"mode"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+			t.Error(err)
+		}
+		if input.ModelID != "test-model" || input.Mode != "default" || !strings.HasPrefix(input.Prompt, "custom drawing") {
 			t.Errorf("input=%#v", input)
 		}
+		if !strings.Contains(input.Prompt, "\u76f4\u63a5\u8fd4\u56de\u72ec\u7acb HTML") || !strings.Contains(input.Prompt, "\u53ea\u8f93\u51fa HTML") {
+			t.Errorf("HTML-only contract missing: %q", input.Prompt)
+		}
 		w.Header().Set("Content-Type", "text/event-stream")
-		w.Write([]byte("data: {\"type\":\"content\",\"text\":\"<svg><text>" + strings.Repeat("x", 12000) + "</text></svg>\"}\n\ndata: {\"type\":\"test_complete\",\"success\":true}\n"))
+		w.Write([]byte(`data: {"type":"content","text":"<svg></svg>"}` + "\n\n" + `data: {"type":"test_complete","success":true}` + "\n"))
 	}))
 	defer server.Close()
 	service := NewService(nil, nil)
 	html, err := service.generatePelican(context.Background(), storage.RelayStation{BaseURL: server.URL}, "admin-secret", storage.PelicanConfig{AccountExternalID: 42, Model: "test-model", Prompt: "custom drawing", ReasoningEffort: "high"})
-	if err != nil || len(html) < 12000 {
-		t.Fatalf("artwork was truncated: %d,%v", len(html), err)
+	if err != nil || html != "<svg></svg>" {
+		t.Fatalf("html=%q err=%v", html, err)
 	}
 }
-func TestPelicanMissingEndpointDoesNotFallbackToGroup(t *testing.T) {
-	calls := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; w.WriteHeader(404) }))
-	defer server.Close()
-	service := NewService(nil, nil)
-	if _, err := service.generatePelican(context.Background(), storage.RelayStation{BaseURL: server.URL}, "key", storage.PelicanConfig{AccountExternalID: 42}); err == nil || !strings.Contains(err.Error(), "pelican-test") {
-		t.Fatalf("error=%v", err)
-	}
-	if calls != 1 {
-		t.Fatalf("fallback sent %d requests", calls)
-	}
-}
+
 func TestPelicanConfigurationDefaultsAndSchedule(t *testing.T) {
 	now := time.Date(2026, 10, 15, 0, 59, 0, 0, time.UTC)
 	config := storage.PelicanConfig{Model: "gpt-5"}
