@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/spf13/viper"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"github.com/spf13/viper"
 )
 
 type Config struct {
@@ -32,6 +32,7 @@ type DatabaseConfig struct {
 	User         string `mapstructure:"user"`
 	Password     string `mapstructure:"password"`
 	Name         string `mapstructure:"name"`
+	SearchPath   string `mapstructure:"searchPath"`
 	SSLMode      string `mapstructure:"sslMode"`
 	Timezone     string `mapstructure:"timezone"`
 	MaxOpenConns int    `mapstructure:"maxOpenConns"`
@@ -45,6 +46,7 @@ func (d DatabaseConfig) ToStorageConfig() storage.DBConfig {
 		User:         d.User,
 		Password:     d.Password,
 		Name:         d.Name,
+		SearchPath:   d.SearchPath,
 		SSLMode:      d.SSLMode,
 		Timezone:     d.Timezone,
 		MaxOpenConns: d.MaxOpenConns,
@@ -153,6 +155,7 @@ func Load(path string) (*Config, error) {
 	bindEnv(v, "database.user", "GATEWAYOPS_DATABASE_USER")
 	bindEnv(v, "database.password", "GATEWAYOPS_DATABASE_PASSWORD")
 	bindEnv(v, "database.name", "GATEWAYOPS_DATABASE_NAME")
+	bindEnv(v, "database.searchPath", "GATEWAYOPS_DATABASE_SCHEMA")
 	bindEnv(v, "database.sslMode", "GATEWAYOPS_DATABASE_SSLMODE")
 	bindEnv(v, "server.port", "GATEWAYOPS_SERVER_PORT")
 	bindEnv(v, "server.mode", "GATEWAYOPS_SERVER_MODE")

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -17,6 +18,7 @@ type DBConfig struct {
 	User         string
 	Password     string
 	Name         string
+	SearchPath   string
 	SSLMode      string
 	Timezone     string
 	MaxOpenConns int
@@ -24,10 +26,11 @@ type DBConfig struct {
 }
 
 func (c DBConfig) DSN() string {
-	return fmt.Sprintf(
-		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s",
-		c.Host, c.Port, c.User, c.Password, c.Name, c.SSLMode, c.Timezone,
-	)
+	dsn := fmt.Sprintf("host=%s port=%d user=%s password=%s dbname=%s sslmode=%s TimeZone=%s", c.Host, c.Port, c.User, c.Password, c.Name, c.SSLMode, c.Timezone)
+	if regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`).MatchString(c.SearchPath) {
+		dsn += " search_path=" + c.SearchPath
+	}
+	return dsn
 }
 
 // newGormLogger 关掉 GORM 默认 logger 对 ErrRecordNotFound 的告警噪音。
