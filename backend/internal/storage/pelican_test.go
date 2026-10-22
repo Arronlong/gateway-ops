@@ -82,6 +82,46 @@ func TestPelicanResultReadRequiresStationAccountAndResult(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPelicanResultDeleteRequiresStationAccountAndResult(t *testing.T) {
+	repo, mock := pelicanDB(t)
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta(`DELETE FROM "relay_pelican_results" WHERE relay_station_id = $1 AND account_external_id = $2 AND id = $3`)).WithArgs(uint(7), int64(20), uint(31)).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := repo.DeletePelicanResult(7, 20, 31); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPelicanResultDeleteReturnsNotFoundForWrongOwnerOrMissingResult(t *testing.T) {
+	repo, mock := pelicanDB(t)
+	mock.ExpectBegin()
+	mock.ExpectExec(`DELETE FROM "relay_pelican_results" WHERE relay_station_id = \$1 AND account_external_id = \$2 AND id = \$3`).WithArgs(uint(9), int64(99), uint(31)).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectCommit()
+	if err := repo.DeletePelicanResult(9, 99, 31); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("delete error = %v, want record not found", err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPelicanResultDeletePropagatesDatabaseFailure(t *testing.T) {
+	repo, mock := pelicanDB(t)
+	wantErr := errors.New("database unavailable")
+	mock.ExpectBegin()
+	mock.ExpectExec(`DELETE FROM "relay_pelican_results"`).WillReturnError(wantErr)
+	mock.ExpectRollback()
+	if err := repo.DeletePelicanResult(7, 20, 31); !errors.Is(err, wantErr) {
+		t.Fatalf("delete error = %v, want %v", err, wantErr)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
 func TestPelicanDeleteLocksStationFirst(t *testing.T) {
 	repo, mock := pelicanDB(t)
 	mock.ExpectBegin()

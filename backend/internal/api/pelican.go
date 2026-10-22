@@ -7,6 +7,8 @@ import (
 	"github.com/guliansheng/gateway-ops/internal/storage"
 	"net/http"
 	"strconv"
+
+	"gorm.io/gorm"
 )
 
 func pelicanIDs(c *gin.Context) (uint, int64, error) {
@@ -100,4 +102,32 @@ func relayPelicanResult(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(200, gin.H{"data": result})
+}
+
+func deleteRelayPelicanResult(c *gin.Context, d *Deps) {
+	stationID, accountID, err := pelicanIDs(c)
+	if err != nil || stationID == 0 {
+		if err == nil {
+			err = errors.New("invalid station ID")
+		}
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	resultID, err := uintParam(c, "result_id")
+	if err != nil || resultID == 0 {
+		if err == nil {
+			err = errors.New("invalid result ID")
+		}
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	if err := d.RelayStations.DeletePelicanResult(stationID, accountID, resultID); err != nil {
+		status := http.StatusInternalServerError
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			status = http.StatusNotFound
+		}
+		fail(c, status, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
 }

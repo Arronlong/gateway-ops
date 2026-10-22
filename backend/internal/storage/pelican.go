@@ -114,3 +114,14 @@ func (r *RelayStations) PelicanResult(stationID uint, accountID int64, resultID 
 	err := r.db.Where("relay_station_id = ? AND account_external_id = ? AND id = ?", stationID, accountID, resultID).First(&result).Error
 	return &result, err
 }
+
+func (r *RelayStations) DeletePelicanResult(stationID uint, accountID int64, resultID uint) error {
+	result := r.db.Where("relay_station_id = ? AND account_external_id = ? AND id = ?", stationID, accountID, resultID).Delete(&PelicanResult{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}

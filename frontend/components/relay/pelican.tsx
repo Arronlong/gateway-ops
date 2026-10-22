@@ -1,10 +1,12 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react"
-import { Bird, Download, Pause, Play, RotateCcw, Settings2 } from "lucide-react"
+import { Bird, Download, Pause, Play, RotateCcw, Settings2, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useConfirm } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api"
 import type { PelicanConfig, PelicanGallery, PelicanResult, RelayAccountView } from "@/lib/api-types"
 import { pelicanEfforts } from "@/lib/pelican"
@@ -18,6 +20,7 @@ type PelicanContextValue={
  open:(result:PelicanResult)=>void
  toggle:(account:RelayAccountView,enabled:boolean)=>void; run:(accountID:number)=>Promise<void>
  body:(result:PelicanResult)=>Promise<PelicanResult>
+ remove:(result:PelicanResult)=>Promise<void>; deletingID:number|null
 }
 const PelicanContext=createContext<PelicanContextValue|null>(null)
 function usePelican(){const context=useContext(PelicanContext);if(!context)throw new Error("PelicanProvider required");return context}
@@ -26,6 +29,10 @@ export function PelicanProvider({stationID,children}:{stationID:number|null;chil
  const query=usePelicanGallery(stationID)
  const [selected,setSelected]=useState<PelicanResult|null>(null)
  const [actionError,setActionError]=useState<string|null>(null)
+ const {confirm,dialog:deleteDialog}=useConfirm()
+ const [deletingID,setDeletingID]=useState<number|null>(null)
+ const [removedIDs,setRemovedIDs]=useState<Set<number>>(()=>new Set())
+ const deleting=useRef(false)
  const requests=useRef(new Map<string,Promise<PelicanResult>>())
  useEffect(()=>{
   if(!query.data)return
@@ -57,9 +64,27 @@ export function PelicanProvider({stationID,children}:{stationID:number|null;chil
   if(!promise){promise=apiFetch<PelicanResult>(`/relay-stations/${result.relay_station_id}/accounts/${result.account_external_id}/pelican/results/${result.id}`).catch(error=>{requests.current.delete(key);throw error});requests.current.set(key,promise)}
   return promise
  }
- return <PelicanContext.Provider value={{stationID,data:query.data,error:actionError??query.error,open:setSelected,toggle:(account,enabled)=>void toggle(account,enabled),run,body}}>
+ const remove=async(result:PelicanResult)=>{
+  if(deleting.current)return
+  deleting.current=true
+  try{
+   const accepted=await confirm({title:"\u5220\u9664\u8fd9\u4efd\u6d4b\u667a\u4f5c\u54c1\uff1f",description:`${result.account_name} \u00b7 ${result.model} \u00b7 ${timeLabel(result.finished_at)}\u3002\u5c06\u6c38\u4e45\u5220\u9664\u672c\u6b21\u751f\u6210\u7684\u4f5c\u54c1\u53ca\u7ed3\u679c\uff0c\u4e0d\u5f71\u54cd\u8d26\u53f7\u914d\u7f6e\u548c\u5176\u4ed6\u5386\u53f2\u8bb0\u5f55\u3002\u64cd\u4f5c\u4e0d\u53ef\u6062\u590d\u3002`,confirmLabel:"\u786e\u8ba4\u5220\u9664",destructive:true})
+   if(!accepted)return
+   setDeletingID(result.id)
+   await apiFetch(`/relay-stations/${result.relay_station_id}/accounts/${result.account_external_id}/pelican/results/${result.id}`,{method:"DELETE"})
+   requests.current.delete(`${result.relay_station_id}/${result.account_external_id}/${result.id}`)
+   setRemovedIDs(current=>new Set(current).add(result.id))
+   setSelected(current=>current?.id===result.id?null:current)
+   toast.success("\u6d4b\u667a\u4f5c\u54c1\u5df2\u5220\u9664")
+   try{await query.refetch()}catch{toast.warning("\u4f5c\u54c1\u5df2\u5220\u9664\uff0c\u4f46\u5237\u65b0\u5217\u8868\u5931\u8d25\uff0c\u8bf7\u7a0d\u540e\u5237\u65b0\u3002")}
+  }catch(error){toast.error(error instanceof Error?error.message:"\u5220\u9664\u4f5c\u54c1\u5931\u8d25")}
+  finally{setDeletingID(null);deleting.current=false}
+ }
+ const data=query.data?{...query.data,results:query.data.results.filter(result=>!removedIDs.has(result.id))}:null
+ return <PelicanContext.Provider value={{stationID,data,error:actionError??query.error,open:setSelected,toggle:(account,enabled)=>void toggle(account,enabled),run,body,remove,deletingID}}>
   {children}
   {selected?<PelicanPreview key={selected.id} result={selected} onClose={()=>setSelected(null)}/>:null}
+  {deleteDialog}
  </PelicanContext.Provider>
 }
 
@@ -111,7 +136,14 @@ function PelicanThumbnail({result}:{result:PelicanResult}){
   </div>
   <div className="space-y-1 p-2 text-[10px]"><p className="truncate font-mono text-xs" title={result.model}>{result.model}</p><p className="flex justify-between text-muted-foreground"><span>{timeLabel(result.finished_at)}</span><span>{(result.duration_ms/1000).toFixed(1)} 秒</span></p><p className={result.status==="success"?"text-teal-600":"text-danger"}>{result.status==="success"?`思考强度 ${pelicanEfforts[result.reasoning_effort]??result.reasoning_effort}`:"生成失败·点击查看"}</p></div>
   <button type="button" className="absolute inset-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={`查看测智作品 ${result.id}`} onClick={()=>context.open(result)}/>
+  <PelicanDeleteButton result={result} compact/>
  </div>
+}
+
+function PelicanDeleteButton({result,compact=false}:{result:PelicanResult;compact?:boolean}){
+ const context=usePelican()
+ const busy=context.deletingID===result.id
+ return <Button type="button" size={compact?"icon":"sm"} variant="outline" className={compact?"absolute right-2 top-2 z-10 size-8 bg-card/95 text-danger shadow-sm hover:text-danger":"gap-1 text-danger hover:text-danger"} aria-label={`\u5220\u9664\u6d4b\u667a\u4f5c\u54c1 ${result.id}`} disabled={context.deletingID!==null} onClick={event=>{event.stopPropagation();void context.remove(result)}}><Trash2 className="size-3.5"/>{compact?null:busy?"\u5220\u9664\u4e2d\u2026":"\u5220\u9664\u4f5c\u54c1"}</Button>
 }
 
 
@@ -121,6 +153,7 @@ function PelicanPreview({result,onClose}:{result:PelicanResult;onClose:()=>void}
  function download(){if(!value?.html)return;const url=URL.createObjectURL(new Blob([value.html],{type:"text/html;charset=utf-8"}));const link=document.createElement("a");link.href=url;link.download=`pelican-${result.relay_station_id}-${result.account_external_id}-${result.id}.html`;link.click();window.setTimeout(()=>URL.revokeObjectURL(url),1000)}
  return <Dialog open onOpenChange={open=>{if(!open)onClose()}}><DialogContent className="flex max-h-[92dvh] w-[calc(100vw-1rem)] max-w-6xl flex-col overflow-hidden p-4 sm:p-6">
   <DialogHeader><DialogTitle className="pr-6">{result.account_name} · {result.model}</DialogTitle><DialogDescription>{timeLabel(result.finished_at)} · 思考强度 {pelicanEfforts[result.reasoning_effort]??result.reasoning_effort} · 耗时 {(result.duration_ms/1000).toFixed(1)} 秒</DialogDescription></DialogHeader>
+  <div className="flex justify-end"><PelicanDeleteButton result={result}/></div>
   {result.status==="success"?<div className="flex flex-wrap items-center gap-2">
    <Button size="sm" variant="outline" className="gap-1" onClick={()=>setPlaying(current=>!current)}>{playing?<Pause className="size-3.5"/>:<Play className="size-3.5"/>}{playing?"暂停":"恢复"}</Button>
    <Button size="sm" variant="outline" className="gap-1" onClick={()=>{setRevision(current=>current+1);setPlaying(true)}}><RotateCcw className="size-3.5"/>重播</Button>

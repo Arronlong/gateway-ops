@@ -4,6 +4,18 @@ import test from "node:test"
 
 const source = (file: string) => readFileSync(new URL(file, import.meta.url), "utf8")
 
+test("\u4f5c\u54c1\u7f29\u7565\u56fe\u548c\u8be6\u60c5\u90fd\u652f\u6301\u4e8c\u6b21\u786e\u8ba4\u5220\u9664", () => {
+  const panel = source("../components/relay/pelican.tsx")
+  assert.match(panel, /method:\s*"DELETE"/)
+  assert.match(panel, /function PelicanDeleteButton/)
+  assert.equal((panel.match(/<PelicanDeleteButton result=\{result\}/g) ?? []).length, 2)
+  assert.match(panel, /await confirm\(/)
+  assert.match(panel, /destructive:\s*true/)
+  assert.match(panel, /requests\.current\.delete\(/)
+  assert.match(panel, /setSelected\(/)
+  assert.match(panel, /setRemovedIDs\(/)
+})
+
 test("\u7cfb\u7edf\u8bbe\u7f6e\u63d0\u4f9b\u5168\u5c40\u6d4b\u667a\u53c2\u6570\u548c\u4fdd\u5b58\u5165\u53e3", () => {
   const page = source("../app/system-settings-page.tsx")
   const card = source("../components/system/pelican-settings-card.tsx")
