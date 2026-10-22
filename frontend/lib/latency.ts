@@ -1,4 +1,7 @@
-import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, RelayLatencySample, RelayUsageRange } from "@/lib/api-types"
+import type { LatencyBucket, LatencyBucketGranularity, RelayUsageRange } from "@/lib/api-types"
+
+// @ts-expect-error Node 22 原生 TypeScript 测试需要显式扩展名。
+import { recentRequestAttemptOutcome, recentRequestMetrics, recentRequestWindow, type RecentRequestSample } from "./recent-request-metrics.ts"
 
 export type LatencyMetric = "first" | "duration"
 export type LatencyTone = "good" | "warn" | "bad"
@@ -63,91 +66,111 @@ function latencyPerformanceScore(value: number | null | undefined, metric: Laten
 }
 
 export interface LatencyHealthScore {
-  score: number
+  score: number | null
   recentSuccess: number | null
   recentLatency: number | null
   stability: number | null
+  cacheHit: number | null
   sampleCount: number
-  bucketRequestCount: number
+  attemptCount: number
+  windowHours: number
+  missingMetrics: string[]
+  lowConfidence: boolean
 }
 
-type HealthSample = RelayLatencySample | ChannelUsageSample
+type HealthSample = RecentRequestSample & {
+  first_token_ms?: number | null
+  duration_ms?: number | null
+}
 
 function average(values: number[]) {
   if (values.length === 0) return null
   return values.reduce((sum, value) => sum + value, 0) / values.length
 }
 
-function sampleSuccessScore(sample: HealthSample): number | null {
-  if ("success_known" in sample) {
-    if (!sample.success_known) return null
-    return sample.success ? 100 : 0
-  }
-  const status = sample.status_code
-  if (status == null) return null
-  return status === 0 || (status >= 200 && status < 400) ? 100 : 0
+function validLatency(value: number | null | undefined): value is number {
+  return value != null && Number.isFinite(value) && value > 0
 }
 
 function sampleLatencyScore(sample: HealthSample) {
   const values: number[] = []
-  if (sample.first_token_ms != null) values.push(latencyPerformanceScore(sample.first_token_ms, "first"))
-  if (sample.duration_ms != null) values.push(latencyPerformanceScore(sample.duration_ms, "duration"))
+  if (validLatency(sample.first_token_ms)) values.push(latencyPerformanceScore(sample.first_token_ms, "first"))
+  if (validLatency(sample.duration_ms)) values.push(latencyPerformanceScore(sample.duration_ms, "duration"))
   return average(values)
 }
 
-export function latencyHealthScore(samples: HealthSample[], buckets: LatencyBucket[]): LatencyHealthScore | null {
-  const recent = samples.slice(0, 60)
-  const sampleCount = recent.length
-  const bucketRequestCount = buckets.reduce((sum, bucket) => sum + Math.max(0, bucket.request_count), 0)
-  if (sampleCount === 0 && bucketRequestCount === 0) return null
+function latencyConsistency(values: number[]) {
+  if (values.length < 2) return null
+  const mean = average(values)!
+  const deviation = Math.sqrt(average(values.map((value) => (value - mean) ** 2))!)
+  return 100 / (1 + deviation / mean)
+}
 
-  const recentSuccess = average(recent.map(sampleSuccessScore).filter((value): value is number => value != null))
-  const recentLatency = average(recent.map(sampleLatencyScore).filter((value): value is number => value != null))
-
-  let stability: number | null = null
-  if (bucketRequestCount > 0) {
-    let weighted = 0
-    let weightedCount = 0
-    for (const bucket of buckets) {
-      const count = Math.max(0, bucket.request_count)
-      if (count === 0) continue
-
-      const components: number[] = []
-      if (bucket.success_rate != null) {
-        components.push(Math.max(0, Math.min(100, bucket.success_rate * 100)))
-      }
-      const tailLatency = average([
-        bucket.first_token_p95_ms == null ? null : latencyPerformanceScore(bucket.first_token_p95_ms, "first"),
-        bucket.duration_p95_ms == null ? null : latencyPerformanceScore(bucket.duration_p95_ms, "duration"),
-      ].filter((value): value is number => value != null))
-      if (tailLatency != null) components.push(tailLatency)
-
-      const bucketScore = average(components)
-      if (bucketScore == null) continue
-      weighted += bucketScore * count
-      weightedCount += count
+function requestStability(attempts: Array<{ sample: HealthSample; outcome: boolean }>) {
+  if (attempts.length < 2) return null
+  const successful = attempts.filter(({outcome}) => outcome).map(({sample}) => sample)
+  const completed = attempts.filter(({sample}) => sample.in_progress !== true && sample.attempt_status !== "in_progress")
+  const consistency = average([
+    latencyConsistency(successful.map((sample) => sample.first_token_ms).filter(validLatency)),
+    latencyConsistency(successful.map((sample) => sample.duration_ms).filter(validLatency)),
+  ].filter((value): value is number => value != null))
+  let run = 0, longestRun = 0
+  for (const {sample, outcome} of attempts) {
+    if (sample.in_progress === true || sample.attempt_status === "in_progress") {
+      run = 0
+      continue
     }
-    if (weightedCount > 0) stability = weighted / weightedCount
+    run = outcome ? 0 : run + 1
+    longestRun = Math.max(longestRun, run)
   }
+  if (consistency == null) return completed.length >= 2 && completed.every(({outcome}) => !outcome) ? 0 : null
+  const continuity = 1 - Math.max(0, longestRun - 1) / (attempts.length - 1)
+  return consistency * Math.max(0, continuity)
+}
 
-  const parts: Array<{ value: number | null; weight: number }> = [
-    { value: recentSuccess, weight: 0.4 },
-    { value: recentLatency, weight: 0.3 },
-    { value: stability, weight: 0.3 },
+export function latencyHealthScore(samples: readonly HealthSample[], options: { now?: number; windowHours?: number } = {}): LatencyHealthScore | null {
+  const {now = Date.now(), windowHours = 1} = options
+  const selected = recentRequestWindow(samples, now, windowHours)
+  if (selected.samples.length === 0) return null
+  const metrics = recentRequestMetrics(selected.samples, now, selected.windowHours)
+  const attempts = selected.samples.map((sample) => ({sample, outcome: recentRequestAttemptOutcome(sample)}))
+    .filter((attempt): attempt is {sample: HealthSample; outcome: boolean} => attempt.outcome != null)
+  const successful = attempts.filter(({outcome}) => outcome).map(({sample}) => sample)
+  const recentSuccess = metrics.successRate == null ? null : metrics.successRate * 100
+  const recentLatency = average(successful.map(sampleLatencyScore).filter((value): value is number => value != null))
+  const stability = requestStability(attempts)
+  const cacheHit = metrics.cacheHitRate == null ? null : metrics.cacheHitRate * 100
+  const parts = [
+    { name: "成功率", value: recentSuccess },
+    { name: "稳定性", value: stability },
+    { name: "缓存命中", value: cacheHit },
+    { name: "延迟", value: recentLatency },
   ]
-  const available = parts.filter((part): part is { value: number; weight: number } => part.value != null)
-  const weight = available.reduce((sum, part) => sum + part.weight, 0)
-  if (weight === 0) return null
-  const score = available.reduce((sum, part) => sum + part.value * part.weight, 0) / weight
-
+  const missingMetrics = parts.filter(({value}) => value == null).map(({name}) => name)
+  const score = missingMetrics.length > 0 ? null : Math.round(parts.reduce((sum, {value}) => sum + value! * 0.25, 0))
   return {
-    score: Math.round(Math.max(0, Math.min(100, score))),
-    recentSuccess: recentSuccess == null ? null : Math.round(recentSuccess),
-    recentLatency: recentLatency == null ? null : Math.round(recentLatency),
-    stability: stability == null ? null : Math.round(stability),
-    sampleCount,
-    bucketRequestCount,
+    score,
+    recentSuccess,
+    recentLatency,
+    stability,
+    cacheHit,
+    sampleCount: selected.samples.length,
+    attemptCount: attempts.length,
+    windowHours: selected.windowHours,
+    missingMetrics,
+    lowConfidence: attempts.length < 10,
   }
+}
+
+export function healthScoreDescription(score: LatencyHealthScore | null) {
+  if (!score) return "当前统计时间窗内暂无调用样本"
+  const value = (part: number | null) => part == null ? "未知" : part.toFixed(1)
+  const result = score.score == null ? `数据不足：${score.missingMetrics.join("、")}` : `综合评分 ${score.score}`
+  const confidence = score.lowConfidence ? " · 少于 10 次，低置信度" : ""
+  return `${result} · ${score.windowHours}h 最近 ${score.sampleCount}/60 次（有效尝试 ${score.attemptCount} 次）${confidence}
+成功率 ${value(score.recentSuccess)} · 稳定性 ${value(score.stability)} · 缓存命中 ${value(score.cacheHit)} · 延迟 ${value(score.recentLatency)}
+四项各占 25%，缺项不重新分配权重。成功率和缓存与环形指标同口径；稳定性仅评估相对延迟波动与连续失败。
+波动分 = 100 ÷ (1 + 标准差/均值)；连续失败系数 = 1 - max(0, 最长连败-1) ÷ (尝试次数-1)。稳定性 = 波动分 × 连续失败系数；延迟仅评估成功请求。`
 }
 
 export function formatLatency(value: number | null | undefined) {

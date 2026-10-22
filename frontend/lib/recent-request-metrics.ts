@@ -37,16 +37,29 @@ function cacheCreationTokens(sample: RecentRequestSample) {
   return nonNegative(sample.cache_creation_5m_tokens) + nonNegative(sample.cache_creation_1h_tokens)
 }
 
-export function recentRequestMetrics(samples: readonly RecentRequestSample[], now = Date.now(), windowHours = DEFAULT_WINDOW_HOURS) {
+export function recentRequestAttemptOutcome(sample: RecentRequestSample): boolean | null {
+  if (excludedFromSuccessRate(sample)) return null
+  if (sample.in_progress === true || sample.attempt_status === "in_progress") return false
+  if (sample.success_known === true) return sample.success === true
+  if ((sample.status_code ?? 0) < 100) return null
+  return (sample.status_code ?? 0) >= 200 && (sample.status_code ?? 0) < 300
+}
+
+export function recentRequestWindow<T extends RecentRequestSample>(samples: readonly T[], now = Date.now(), windowHours = DEFAULT_WINDOW_HOURS) {
   const normalizedWindowHours = Number.isInteger(windowHours) ? Math.min(MAX_WINDOW_HOURS, Math.max(MIN_WINDOW_HOURS, windowHours)) : DEFAULT_WINDOW_HOURS
   const cutoff = now - RECENT_CUTOFF_MS
   const windowStart = cutoff - normalizedWindowHours * 60 * 60 * 1000
   const selected = samples.map((sample, index) => ({sample, index, time: Date.parse(sample.created_at)}))
     .filter(({time}) => Number.isFinite(time) && time >= windowStart && time <= cutoff)
     .sort((a, b) => b.time - a.time || a.index - b.index).slice(0, RECENT_LIMIT)
+  return { windowHours: normalizedWindowHours, samples: selected.map(({sample}) => sample) }
+}
+
+export function recentRequestMetrics(samples: readonly RecentRequestSample[], now = Date.now(), windowHours = DEFAULT_WINDOW_HOURS) {
+  const selected = recentRequestWindow(samples, now, windowHours)
   let successCount = 0, successAttemptCount = 0, cacheHitCount = 0, cacheKnownCount = 0
   let cacheInputTokens = 0, cacheReadTokens = 0, cacheCreationTotal = 0
-  for (const {sample} of selected) {
+  for (const sample of selected.samples) {
     const inputTokens = nonNegative(sample.input_tokens)
     const readTokens = nonNegative(sample.cache_read_tokens)
     const creationTokens = cacheCreationTokens(sample)
@@ -58,24 +71,18 @@ export function recentRequestMetrics(samples: readonly RecentRequestSample[], no
       cacheCreationTotal += creationTokens
       if (readTokens > 0) cacheHitCount++
     }
-    if (!excludedFromSuccessRate(sample)) {
-      const inProgress = sample.in_progress === true || sample.attempt_status === "in_progress"
-      const hasStatus = (sample.status_code ?? 0) >= 100
-      const isAttempt = inProgress || sample.success_known === true || hasStatus
-      if (!isAttempt) continue
+    const outcome = recentRequestAttemptOutcome(sample)
+    if (outcome != null) {
       successAttemptCount++
-      const succeeded = !inProgress && (sample.success_known === true
-        ? sample.success === true
-        : (sample.status_code ?? 0) >= 200 && (sample.status_code ?? 0) < 300)
-      if (succeeded) successCount++
+      if (outcome) successCount++
     }
   }
   const cacheTokenTotal = cacheInputTokens + cacheReadTokens + cacheCreationTotal
   return {
-    sampleCount: selected.length, windowHours: normalizedWindowHours, successCount, successAttemptCount, successKnownCount: successAttemptCount, cacheHitCount, cacheKnownCount,
+    sampleCount: selected.samples.length, windowHours: selected.windowHours, successCount, successAttemptCount, successKnownCount: successAttemptCount, cacheHitCount, cacheKnownCount,
     cacheInputTokens, cacheReadTokens, cacheCreationTokens: cacheCreationTotal, cacheTokenTotal,
     successRate: successAttemptCount ? successCount / successAttemptCount : null,
     cacheHitRate: cacheTokenTotal ? cacheReadTokens / cacheTokenTotal : null,
-    latestAt: selected[0]?.sample.created_at ?? null,
+    latestAt: selected.samples[0]?.created_at ?? null,
   }
 }

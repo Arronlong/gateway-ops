@@ -101,13 +101,9 @@ test("渠道表格不再重复添加外边框", () => {
 
 test("账号列表折叠时隐藏消费统计", () => {
   const source = parseFile("../../app/relay-stations-page.tsx")
-  const statistic = findElement(source, (element) => tag(element) === "div" && element.openingElement.getText().includes('aria-live="polite"') && element.getText().includes("usageTotals.tokens"))
-  let conditional = false
-  for (let node: ts.Node | undefined = statistic.parent; node; node = node.parent) {
-    if (ts.isJsxElement(node) && tag(node) === "ListPanelHeader") break
-    if (ts.isConditionalExpression(node) && node.condition.getText() === "accountListOpen") conditional = true
-  }
-  assert.ok(conditional, "Statistics must respect accountListOpen")
+  const header = findElement(source, (element) => tag(element) === "ListPanelHeader" && element.getText().includes("账号列表"))
+  const summary = header.openingElement.attributes.properties.find((attribute) => ts.isJsxAttribute(attribute) && attribute.name.getText() === "summary")
+  assert.ok(summary?.getText().includes("accountListOpen ?") && summary.getText().includes("usageTotals.tokens"), "Statistics must respect accountListOpen")
 })
 
 test("收支账本标题与时间操作区同行左右布局", () => {

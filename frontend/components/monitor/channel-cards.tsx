@@ -65,7 +65,7 @@ import { linkedStationsByChannel as buildLinkedStationsByChannel, relayAccountCo
 import { RateChangeDot, RateTooltipBody } from "@/components/monitor/rate-change"
 import { LatencyStabilityLane } from "@/components/monitor/latency-stability-lane"
 import { ChannelConsumptionTrend } from "@/components/monitor/channel-consumption-trend"
-import { latencyHealthScore, outputTokenSpeed, p50, p95 } from "@/lib/latency"
+import { healthScoreDescription, latencyHealthScore, outputTokenSpeed, p50, p95 } from "@/lib/latency"
 import { channelSectionVisible, type ChannelSection } from "@/lib/system-settings"
 import { channelMatchesSearch } from "@/lib/channel-search"
 
@@ -766,16 +766,15 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
   const recentMetricsByChannel = useMemo(() => new Map(Array.from(latencyByChannel, ([channelID, samples]) => [channelID, recentRequestMetrics(samples, Date.now(), uiSettings.recent_metrics_window_hours)])), [latencyByChannel, uiSettings.recent_metrics_window_hours])
   const relayRecentSamplesByAccount = useMemo(() => new Map((relayLatencyTrends.data ?? []).map((item) => [relayAccountComparisonKey(item.station_id, item.account_id), item.samples])), [relayLatencyTrends.data])
   const latencyBucketsByChannel = useMemo(() => new Map((latencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [latencyBuckets.data])
-  const scoreLatencyBucketsByChannel = useMemo(() => new Map((scoreLatencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [scoreLatencyBuckets.data])
   const consumptionBucketsByChannel = useMemo(() => new Map((consumptionBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [consumptionBuckets.data])
   const relayLinksByChannel = useMemo(() => relayComparisonsByChannel(associations.data), [associations.data])
   const healthScoreByChannel = useMemo(() => {
     const scores = new Map<number, ReturnType<typeof latencyHealthScore>>()
     for (const channel of channels ?? []) {
-      scores.set(channel.id, latencyHealthScore(latencyByChannel.get(channel.id) ?? [], scoreLatencyBucketsByChannel.get(channel.id) ?? []))
+      scores.set(channel.id, latencyHealthScore(latencyByChannel.get(channel.id) ?? [], { windowHours: uiSettings.recent_metrics_window_hours }))
     }
     return scores
-  }, [channels, latencyByChannel, scoreLatencyBucketsByChannel])
+  }, [channels, latencyByChannel, uiSettings.recent_metrics_window_hours])
   const latestCallByChannel = useMemo(() => {
     const latest = new Map<number, number>()
     for (const series of latencyTrends.data ?? []) {
@@ -1230,9 +1229,7 @@ actions={<>
             const status = statusOf(c, currentBalance)
             const meta = statusMap[status]
             const healthScore = healthScoreByChannel.get(c.id)
-            const scoreTitle = healthScore
-              ? `综合评分 ${healthScore.score} · 最近成功率 ${healthScore.recentSuccess ?? "-"}% · 最近延迟分 ${healthScore.recentLatency ?? "-"} · 时间稳定性分 ${healthScore.stability ?? "-"}`
-              : "暂无足够调用数据计算综合评分"
+            const scoreTitle = healthScoreDescription(healthScore ?? null)
             return (
               <Card key={c.id} className="@container flex h-full flex-col gap-0 border border-border p-4 shadow-none">
                 <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
@@ -1253,7 +1250,7 @@ actions={<>
                     <span
                       className={cn(
                         "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset",
-                        healthScore ? healthScoreClass(healthScore.score) : "bg-muted/50 text-muted-foreground ring-border",
+                        healthScore?.score != null ? healthScoreClass(healthScore.score) : "bg-muted/50 text-muted-foreground ring-border",
                       )}
                       title={scoreTitle}
                     >
@@ -1460,9 +1457,7 @@ actions={<>
             const meta = statusMap[status]
             const displayStatus = c.monitor_enabled ? meta : { label: "已暂停", cls: "text-muted-foreground bg-muted/60" }
             const healthScore = healthScoreByChannel.get(c.id)
-            const scoreTitle = healthScore
-              ? `综合评分 ${healthScore.score} · 最近成功率 ${healthScore.recentSuccess ?? "-"}% · 最近延迟分 ${healthScore.recentLatency ?? "-"} · 时间稳定性分 ${healthScore.stability ?? "-"}`
-              : "暂无足够调用数据计算综合评分"
+            const scoreTitle = healthScoreDescription(healthScore ?? null)
             return <div key={c.id} style={listGridStyle} className="grid gap-3 border-b border-border px-4 py-3 last:border-b-0 lg:grid-cols-[var(--channel-list-grid-template)] lg:min-w-[var(--channel-list-grid-min-width)] lg:items-center lg:gap-0 lg:p-0 lg:[&>*]:px-4 lg:[&>*]:py-2.5">
               <div className="min-w-0 lg:sticky lg:left-0 lg:z-20 lg:flex lg:self-stretch lg:flex-col lg:justify-center lg:bg-card">
                 <div className="flex min-w-0 items-center gap-2">
@@ -1473,7 +1468,7 @@ actions={<>
                 {c.last_error ? <p className="mt-1 truncate text-[10px] font-medium text-danger" title={managementErrorText(c.last_error)}>{managementErrorText(c.last_error)}</p> : null}
               </div>
 
-              {visibleColumns.has("score") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">综合评分</span><span className={cn("inline-flex items-center rounded px-2 py-1 font-mono text-xs font-semibold tabular-nums ring-1 ring-inset", healthScore ? healthScoreClass(healthScore.score) : "bg-muted/50 text-muted-foreground ring-border")} title={scoreTitle}>{healthScore?.score ?? "--"}</span></div> : null}
+              {visibleColumns.has("score") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">综合评分</span><span className={cn("inline-flex items-center rounded px-2 py-1 font-mono text-xs font-semibold tabular-nums ring-1 ring-inset", healthScore?.score != null ? healthScoreClass(healthScore.score) : "bg-muted/50 text-muted-foreground ring-border")} title={scoreTitle}>{healthScore?.score ?? "--"}</span></div> : null}
               {visibleColumns.has("type") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">站点类型</span><span className={cn("inline-flex rounded px-2 py-1 text-[11px] font-medium ring-1 ring-inset", c.type === "sub2api" ? "bg-emerald-500/10 text-emerald-700 ring-emerald-500/20 dark:text-emerald-400" : "bg-brand/10 text-brand ring-brand/20")}>{channelTypeLabel(c.type)}</span></div> : null}
               {visibleColumns.has("status") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">状态</span><span className={cn("inline-flex rounded px-2 py-1 text-[11px] font-medium", displayStatus.cls)}>{displayStatus.label}</span></div> : null}
               {visibleColumns.has("management") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">管理方式</span><span className={cn("inline-flex rounded px-2 py-1 text-[11px] font-medium ring-1 ring-inset", c.balance_mode === "manual" ? "bg-amber-400/15 text-amber-700 ring-amber-500/30 dark:text-amber-400" : "bg-sky-500/10 text-sky-700 ring-sky-500/20 dark:text-sky-400")}>{c.balance_mode === "manual" ? "手动管理" : "自动读取"}</span></div> : null}
