@@ -10,3 +10,11 @@ test("operations management visibility defaults to enabled", () => {
 test("recent metrics window defaults to one hour", () => {
   assert.equal(defaultSystemSettings.recent_metrics_window_hours, 1)
 })
+
+test("pelican generation parameters belong to global settings", () => {
+  assert.equal(defaultSystemSettings.pelican_model, "")
+  assert.match(defaultSystemSettings.pelican_prompt, /SVG/)
+  assert.equal(defaultSystemSettings.pelican_reasoning_effort, "medium")
+  assert.equal(defaultSystemSettings.pelican_parallel_count, 1)
+  assert.equal(defaultSystemSettings.pelican_cron_expression, "*/30 * * * *")
+})

@@ -760,6 +760,11 @@ type UISettings struct {
 	ChannelsShowStability       bool     `json:"channels_show_stability"`
 	ChannelsShowConsumption     bool     `json:"channels_show_consumption"`
 	RecentMetricsWindowHours    int      `json:"recent_metrics_window_hours"`
+	PelicanModel                string   `json:"pelican_model"`
+	PelicanPrompt               string   `json:"pelican_prompt"`
+	PelicanReasoningEffort      string   `json:"pelican_reasoning_effort"`
+	PelicanParallelCount        int      `json:"pelican_parallel_count"`
+	PelicanCronExpression       string   `json:"pelican_cron_expression"`
 	IframeEmbeddingEnabled      bool     `json:"iframe_embedding_enabled"`
 	IframeEmbeddingMode         string   `json:"iframe_embedding_mode"`
 	IframeEmbeddingAllowlist    []string `json:"iframe_embedding_allowlist"`

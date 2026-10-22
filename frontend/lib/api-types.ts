@@ -575,11 +575,6 @@ export interface PelicanConfig {
   relay_station_id?: number
   account_external_id?: number
   enabled: boolean
-  model: string
-  prompt: string
-  reasoning_effort: string
-  parallel_count: number
-  cron_expression: string
   next_run_at?: string
   lease_until?: string | null
 }
@@ -1134,6 +1129,11 @@ export interface SystemSettings {
   channels_show_stability: boolean
   channels_show_consumption: boolean
   recent_metrics_window_hours: number
+  pelican_model: string
+  pelican_prompt: string
+  pelican_reasoning_effort: string
+  pelican_parallel_count: number
+  pelican_cron_expression: string
   iframe_embedding_enabled: boolean
   iframe_embedding_mode: "all" | "allowlist"
   iframe_embedding_allowlist: string[]

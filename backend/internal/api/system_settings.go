@@ -29,7 +29,11 @@ func registerSystemSettings(g *gin.RouterGroup, d *Deps) {
 			fail(c, http.StatusServiceUnavailable, errors.New("system settings unavailable"))
 			return
 		}
-		var settings storage.UISettings
+		settings, err := d.Settings.UISettings()
+		if err != nil {
+			fail(c, http.StatusInternalServerError, err)
+			return
+		}
 		if err := c.ShouldBindJSON(&settings); err != nil {
 			fail(c, http.StatusBadRequest, err)
 			return
@@ -47,6 +51,9 @@ func registerSystemSettings(g *gin.RouterGroup, d *Deps) {
 }
 
 func validateSystemSettings(settings storage.UISettings) error {
+	if err := storage.ValidatePelicanSettings(settings.PelicanSettings()); err != nil {
+		return err
+	}
 	if settings.RecentMetricsWindowHours < 1 || settings.RecentMetricsWindowHours > 24 {
 		return fmt.Errorf("recent metrics window hours must be between 1 and 24")
 	}

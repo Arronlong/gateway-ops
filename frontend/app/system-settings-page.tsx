@@ -14,6 +14,7 @@ import { ConfigurationLoading } from "@/components/ui/configuration-loading"
 import { VersionCard } from "@/components/system/version-card"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { cn } from "@/lib/utils"
+import { PelicanSettingsCard } from "@/components/system/pelican-settings-card"
 
 const channelSyncIntervals = [5, 10, 15, 30, 60, 180, 360, 720, 1440]
 const relayRateSyncIntervals = [5, 10, 20, 30, 60, 300, 600, 1800, 3600, 18000, 43200, 86400]
@@ -256,6 +257,8 @@ export default function SystemSettingsPage() {
       </header>
 
       <VersionCard />
+
+      <PelicanSettingsCard settings={settings} saving={saving} onChange={updateSettings} onSave={() => void save()} />
 
       <Card id="background-tasks" className="scroll-mt-4 gap-0 border border-border py-0 shadow-none">
         <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border px-4 py-3">

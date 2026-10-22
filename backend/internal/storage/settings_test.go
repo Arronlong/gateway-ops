@@ -14,6 +14,49 @@ func TestUISettingsOperationsManagementDefaultsEnabled(t *testing.T) {
 	}
 }
 
+func TestUISettingsPelicanDefaultsAreGlobal(t *testing.T) {
+	t.Parallel()
+
+	got := defaultUISettings()
+	if got.PelicanModel != "" {
+		t.Fatalf("pelican model = %q, want empty until configured", got.PelicanModel)
+	}
+	if got.PelicanPrompt == "" {
+		t.Fatal("pelican prompt must have a default")
+	}
+	if got.PelicanReasoningEffort != "medium" || got.PelicanParallelCount != 1 || got.PelicanCronExpression != "*/30 * * * *" {
+		t.Fatalf("unexpected pelican defaults: effort=%q parallel=%d cron=%q", got.PelicanReasoningEffort, got.PelicanParallelCount, got.PelicanCronExpression)
+	}
+}
+
+func TestUISettingsValuesSerializeGlobalPelicanConfiguration(t *testing.T) {
+	t.Parallel()
+
+	settings := defaultUISettings()
+	settings.PelicanModel = "gpt-test"
+	settings.PelicanPrompt = "draw an animated bicycle"
+	settings.PelicanReasoningEffort = "high"
+	settings.PelicanParallelCount = 2
+	settings.PelicanCronExpression = "0 * * * *"
+
+	values, err := uiSettingsValues(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{
+		SettingPelicanModel:           "gpt-test",
+		SettingPelicanPrompt:          "draw an animated bicycle",
+		SettingPelicanReasoningEffort: "high",
+		SettingPelicanParallelCount:   "2",
+		SettingPelicanCronExpression:  "0 * * * *",
+	}
+	for key, expected := range want {
+		if got := values[key]; got != expected {
+			t.Errorf("setting %q = %q, want %q", key, got, expected)
+		}
+	}
+}
+
 func TestUISettingsValuesSerializesOperationsManagement(t *testing.T) {
 	t.Parallel()
 

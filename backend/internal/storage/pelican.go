@@ -13,11 +13,11 @@ type PelicanConfig struct {
 	RelayStationID    uint       `gorm:"not null;uniqueIndex:idx_pelican_account" json:"relay_station_id"`
 	AccountExternalID int64      `gorm:"not null;uniqueIndex:idx_pelican_account" json:"account_external_id"`
 	Enabled           bool       `gorm:"not null;default:false" json:"enabled"`
-	Model             string     `gorm:"size:256;not null" json:"model"`
-	Prompt            string     `gorm:"type:text;not null" json:"prompt"`
-	ReasoningEffort   string     `gorm:"size:16;not null" json:"reasoning_effort"`
-	ParallelCount     int        `gorm:"not null;default:1" json:"parallel_count"`
-	CronExpression    string     `gorm:"size:128;not null" json:"cron_expression"`
+	Model             string     `gorm:"size:256;not null" json:"-"`
+	Prompt            string     `gorm:"type:text;not null" json:"-"`
+	ReasoningEffort   string     `gorm:"size:16;not null" json:"-"`
+	ParallelCount     int        `gorm:"not null;default:1" json:"-"`
+	CronExpression    string     `gorm:"size:128;not null" json:"-"`
 	NextRunAt         time.Time  `gorm:"not null;index" json:"next_run_at"`
 	LeaseUntil        *time.Time `json:"lease_until,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`

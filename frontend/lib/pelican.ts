@@ -8,7 +8,7 @@ export const pelicanSchedules = [
 ]
 export const pelicanEfforts: Record<string,string> = {none:"无",minimal:"最低",low:"低",medium:"中",high:"高",xhigh:"极高",max:"最高",ultra:"超高"}
 export function defaultPelicanConfig(): PelicanConfig {
- return {enabled:false,model:"",prompt:defaultPelicanPrompt,reasoning_effort:"medium",parallel_count:1,cron_expression:"*/30 * * * *"}
+ return {enabled:false}
 }
 export function pelicanViewport(html: string) {
  if (/<html[\s>]/i.test(html)) return {width:1024,height:768}

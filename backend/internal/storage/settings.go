@@ -32,6 +32,11 @@ const (
 	SettingUIChannelsShowStability       = "ui.channels.show_stability"
 	SettingUIChannelsShowConsumption     = "ui.channels.show_consumption"
 	SettingUIRecentMetricsWindowHours    = "ui.monitor.recent_metrics_window_hours"
+	SettingPelicanModel                  = "pelican.model"
+	SettingPelicanPrompt                 = "pelican.prompt"
+	SettingPelicanReasoningEffort        = "pelican.reasoning_effort"
+	SettingPelicanParallelCount          = "pelican.parallel_count"
+	SettingPelicanCronExpression         = "pelican.cron_expression"
 	SettingSecurityIframeEnabled         = "security.iframe.enabled"
 	SettingSecurityIframeMode            = "security.iframe.mode"
 	SettingSecurityIframeAllowlist       = "security.iframe.allowlist"
@@ -221,6 +226,10 @@ func defaultUISettings() UISettings {
 		ChannelsShowStability:       true,
 		ChannelsShowConsumption:     true,
 		RecentMetricsWindowHours:    1,
+		PelicanPrompt:               DefaultPelicanPrompt,
+		PelicanReasoningEffort:      "medium",
+		PelicanParallelCount:        1,
+		PelicanCronExpression:       "*/30 * * * *",
 		IframeEmbeddingEnabled:      false,
 		IframeEmbeddingMode:         IframeEmbeddingModeAllowlist,
 		IframeEmbeddingAllowlist:    []string{},
@@ -254,6 +263,11 @@ func uiSettingsValues(settings UISettings) (map[string]string, error) {
 		SettingUIChannelsShowStability:       strconv.FormatBool(settings.ChannelsShowStability),
 		SettingUIChannelsShowConsumption:     strconv.FormatBool(settings.ChannelsShowConsumption),
 		SettingUIRecentMetricsWindowHours:    strconv.Itoa(settings.RecentMetricsWindowHours),
+		SettingPelicanModel:                  settings.PelicanModel,
+		SettingPelicanPrompt:                 settings.PelicanPrompt,
+		SettingPelicanReasoningEffort:        settings.PelicanReasoningEffort,
+		SettingPelicanParallelCount:          strconv.Itoa(settings.PelicanParallelCount),
+		SettingPelicanCronExpression:         settings.PelicanCronExpression,
 		SettingSecurityIframeEnabled:         strconv.FormatBool(settings.IframeEmbeddingEnabled),
 		SettingSecurityIframeMode:            strings.TrimSpace(settings.IframeEmbeddingMode),
 		SettingSecurityIframeAllowlist:       string(allowlistJSON),
@@ -346,6 +360,15 @@ func (s *Settings) UISettings() (UISettings, error) {
 	if err := readStringSlice(SettingSecurityIframeAllowlist, &settings.IframeEmbeddingAllowlist); err != nil {
 		return settings, err
 	}
+	pelican, err := s.PelicanSettings()
+	if err != nil {
+		return settings, err
+	}
+	settings.PelicanModel = pelican.Model
+	settings.PelicanPrompt = pelican.Prompt
+	settings.PelicanReasoningEffort = pelican.ReasoningEffort
+	settings.PelicanParallelCount = pelican.ParallelCount
+	settings.PelicanCronExpression = pelican.CronExpression
 	return settings, nil
 }
 
@@ -354,10 +377,18 @@ func (s *Settings) SaveUISettings(settings UISettings) error {
 	if err != nil {
 		return err
 	}
-	for key, value := range values {
-		if err := s.Set(key, value); err != nil {
+	return s.db.Transaction(func(tx *gorm.DB) error {
+		store := NewSettings(tx)
+		for key, value := range values {
+			if err := store.Set(key, value); err != nil {
+				return err
+			}
+		}
+		next, err := NextPelicanRun(settings.PelicanCronExpression, time.Now())
+		if err != nil {
 			return err
 		}
-	}
-	return nil
+		return tx.Model(&PelicanConfig{}).Where("cron_expression <> ?", settings.PelicanCronExpression).
+			Updates(map[string]any{"cron_expression": settings.PelicanCronExpression, "next_run_at": next}).Error
+	})
 }

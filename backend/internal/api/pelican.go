@@ -48,12 +48,14 @@ func saveRelayPelicanConfig(c *gin.Context, d *Deps) {
 		fail(c, 400, err)
 		return
 	}
-	var input storage.PelicanConfig
+	var input struct {
+		Enabled bool `json:"enabled"`
+	}
 	if err = c.ShouldBindJSON(&input); err != nil {
 		fail(c, 400, err)
 		return
 	}
-	config, err := d.Relay.SavePelicanConfig(stationID, accountID, input)
+	config, err := d.Relay.SavePelicanConfig(stationID, accountID, storage.PelicanConfig{Enabled: input.Enabled})
 	if err != nil {
 		fail(c, 400, err)
 		return

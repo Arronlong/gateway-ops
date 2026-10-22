@@ -99,6 +99,10 @@ func main() {
 	rates := storage.NewRates(db)
 	monLogs := storage.NewMonitorLogs(db)
 	settings := storage.NewSettings(db)
+	if err := settings.MigratePelicanSettings(); err != nil {
+		log.Error("migrate global pelican settings failed", "err", err)
+		os.Exit(1)
+	}
 	relayStations := storage.NewRelayStations(db)
 	operations := storage.NewOperations(db)
 
@@ -109,7 +113,7 @@ func main() {
 		BalanceLowCooldown: time.Duration(cfg.Notifications.BalanceLowCooldownMinutes) * time.Minute,
 		SendMaxAttempts:    cfg.Notifications.SendMaxAttempts,
 	})
-	relaySvc := relay.NewService(relayStations, cipher, channels, rates)
+	relaySvc := relay.NewService(relayStations, cipher, channels, rates, settings)
 	monitorSvc := monitor.NewService(channels, rates, monLogs, channelUsage, channelSvc, dispatcher, log)
 
 	sch := scheduler.New(cfg.Scheduler, monitorSvc, monLogs, rates, notifies, settings, relaySvc, log)

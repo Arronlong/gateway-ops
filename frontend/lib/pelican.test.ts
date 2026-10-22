@@ -2,11 +2,9 @@ import assert from "node:assert/strict"
 import test from "node:test"
 // @ts-expect-error Node 22
 import { defaultPelicanConfig, pelicanViewport, fitPelicanArtwork, createPelicanDocument } from "./pelican.ts"
-test("账号测智默认关闭，并行为一份",()=>{
+test("账号测智只保留默认关闭的开关",()=>{
  const config=defaultPelicanConfig()
- assert.equal(config.enabled,false);assert.equal(config.parallel_count,1)
- assert.equal(config.reasoning_effort,"medium");assert.equal(config.cron_expression,"*/30 * * * *")
- assert.match(config.prompt,/SVG/)
+ assert.deepEqual(config,{enabled:false})
 })
 test("缩略图和详情使用同一作品视口",()=>{
  assert.deepEqual(pelicanViewport('<svg viewBox="0 0 960 600"></svg>'),{width:960,height:600})

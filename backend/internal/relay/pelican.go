@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/guliansheng/gateway-ops/internal/storage"
-	"github.com/robfig/cron/v3"
 	"io"
 	"log/slog"
 	"net/http"
@@ -16,10 +14,12 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	_ "time/tzdata"
+
+	"github.com/guliansheng/gateway-ops/internal/storage"
+	"gorm.io/gorm"
 )
 
-const DefaultPelicanPrompt = "创建一个 HTML，内容是 SVG 绘制一个鹈鹕骑自行车的 2D 动画，你不需要任何测试。"
+const DefaultPelicanPrompt = storage.DefaultPelicanPrompt
 const pelicanContract = "\n\n直接返回独立 HTML，不使用 Markdown 代码块或外部依赖。只输出 HTML，不要解释。"
 const pelicanTimeout = 10 * time.Minute
 
@@ -35,57 +35,22 @@ func validatePelicanStation(station *storage.RelayStation) error {
 }
 
 func nextPelicanRun(expression string, now time.Time) (time.Time, error) {
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-	schedule, err := parser.Parse("CRON_TZ=Asia/Shanghai " + expression)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("频率必须是有效的五段 Cron: %w", err)
-	}
-	next := schedule.Next(now)
-	if next.IsZero() {
-		return time.Time{}, errors.New("频率没有可执行的下次时间")
-	}
-	return next.UTC(), nil
+	return storage.NextPelicanRun(expression, now)
 }
-func normalizePelicanConfig(config *storage.PelicanConfig, now time.Time) error {
-	config.Model = strings.TrimSpace(config.Model)
-	config.Prompt = strings.TrimSpace(config.Prompt)
-	if config.Model == "" || len(config.Model) > 256 {
-		return errors.New("请填写有效模型，最长 256 字节")
+
+func applyPelicanSettings(config *storage.PelicanConfig, settings storage.PelicanSettings) {
+	config.Model = settings.Model
+	config.Prompt = settings.Prompt
+	config.ReasoningEffort = settings.ReasoningEffort
+	config.ParallelCount = settings.ParallelCount
+	config.CronExpression = settings.CronExpression
+}
+
+func (s *Service) pelicanSettings() (storage.PelicanSettings, error) {
+	if s.settings == nil {
+		return storage.PelicanSettings{}, errors.New("system settings unavailable")
 	}
-	if config.Prompt == "" {
-		config.Prompt = DefaultPelicanPrompt
-	}
-	if len(config.Prompt) > 32000 {
-		return errors.New("题目最长 32000 字节")
-	}
-	config.ReasoningEffort = strings.ToLower(strings.TrimSpace(config.ReasoningEffort))
-	if config.ReasoningEffort == "" {
-		config.ReasoningEffort = "medium"
-	}
-	switch config.ReasoningEffort {
-	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
-	default:
-		return errors.New("思考强度无效")
-	}
-	if config.ParallelCount == 0 {
-		config.ParallelCount = 1
-	}
-	if config.ParallelCount < 1 || config.ParallelCount > 8 {
-		return errors.New("并行份数必须是 1 到 8")
-	}
-	config.CronExpression = strings.TrimSpace(config.CronExpression)
-	if config.CronExpression == "" {
-		config.CronExpression = "*/30 * * * *"
-	}
-	if len(config.CronExpression) > 128 {
-		return errors.New("Cron 表达式过长")
-	}
-	next, err := nextPelicanRun(config.CronExpression, now)
-	if err != nil {
-		return err
-	}
-	config.NextRunAt = next
-	return nil
+	return s.settings.PelicanSettings()
 }
 func extractPelicanArtwork(text string) (string, error) {
 	start := pelicanStart.FindStringIndex(text)
@@ -165,13 +130,22 @@ func (s *Service) SavePelicanConfig(stationID uint, accountID int64, config stor
 	if err = validatePelicanStation(station); err != nil {
 		return nil, err
 	}
+	settings, err := s.pelicanSettings()
+	if err != nil {
+		return nil, err
+	}
+	if config.Enabled && settings.Model == "" {
+		return nil, errors.New("\u8bf7\u5148\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u914d\u7f6e\u9e48\u9e55\u6d4b\u667a\u6a21\u578b")
+	}
+	applyPelicanSettings(&config, settings)
 	config.ID = 0
 	config.RelayStationID = stationID
 	config.AccountExternalID = accountID
 	config.LeaseUntil = nil
 	config.CreatedAt = time.Time{}
 	config.UpdatedAt = time.Time{}
-	if err := normalizePelicanConfig(&config, time.Now()); err != nil {
+	config.NextRunAt, err = nextPelicanRun(settings.CronExpression, time.Now())
+	if err != nil {
 		return nil, err
 	}
 	if err := s.stations.SavePelicanConfig(&config); err != nil {
@@ -231,10 +205,21 @@ func (s *Service) StartPelican(ctx context.Context, stationID uint, accountID in
 	if err = validatePelicanStation(station); err != nil {
 		return nil, err
 	}
-	config, err := s.stations.PelicanConfig(stationID, accountID)
+	settings, err := s.pelicanSettings()
 	if err != nil {
 		return nil, err
 	}
+	if settings.Model == "" {
+		return nil, errors.New("\u8bf7\u5148\u5728\u7cfb\u7edf\u8bbe\u7f6e\u4e2d\u914d\u7f6e\u9e48\u9e55\u6d4b\u667a\u6a21\u578b")
+	}
+	config, err := s.stations.PelicanConfig(stationID, accountID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		config, err = s.SavePelicanConfig(stationID, accountID, storage.PelicanConfig{Enabled: false})
+	}
+	if err != nil {
+		return nil, err
+	}
+	applyPelicanSettings(config, settings)
 	if _, err = s.stations.FindAccountByExternalID(stationID, accountID); err != nil {
 		return nil, err
 	}
@@ -251,6 +236,13 @@ func (s *Service) StartPelican(ctx context.Context, stationID uint, accountID in
 	return config, nil
 }
 func (s *Service) RunDuePelicans(ctx context.Context) error {
+	settings, err := s.pelicanSettings()
+	if err != nil {
+		return err
+	}
+	if settings.Model == "" {
+		return nil
+	}
 	configs, err := s.stations.DuePelicanConfigs(time.Now())
 	if err != nil {
 		return err
@@ -258,6 +250,7 @@ func (s *Service) RunDuePelicans(ctx context.Context) error {
 	var jobs sync.WaitGroup
 	defer jobs.Wait()
 	for _, config := range configs {
+		applyPelicanSettings(&config, settings)
 		if err := ctx.Err(); err != nil {
 			return err
 		}

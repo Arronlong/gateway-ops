@@ -44,35 +44,17 @@ func TestPelicanGenerationUsesStandardAccountTestEndpoint(t *testing.T) {
 	}
 }
 
-func TestPelicanConfigurationDefaultsAndSchedule(t *testing.T) {
-	now := time.Date(2026, 10, 15, 0, 59, 0, 0, time.UTC)
-	config := storage.PelicanConfig{Model: "gpt-5"}
-	if err := normalizePelicanConfig(&config, now); err != nil {
-		t.Fatal(err)
+func TestPelicanExecutionUsesGlobalSettingsWithoutChangingAccountState(t *testing.T) {
+	lease := time.Now().Add(time.Minute)
+	next := time.Now().Add(time.Hour)
+	config := storage.PelicanConfig{ID: 7, RelayStationID: 9, AccountExternalID: 42, Enabled: false, Model: "legacy", Prompt: "legacy", ParallelCount: 8, CronExpression: "0 9 * * *", NextRunAt: next, LeaseUntil: &lease}
+	settings := storage.PelicanSettings{Model: "global-model", Prompt: "global-prompt", ReasoningEffort: "high", ParallelCount: 2, CronExpression: "*/15 * * * *"}
+	applyPelicanSettings(&config, settings)
+	if config.Model != settings.Model || config.Prompt != settings.Prompt || config.ReasoningEffort != settings.ReasoningEffort || config.ParallelCount != settings.ParallelCount || config.CronExpression != settings.CronExpression {
+		t.Fatalf("execution must use global settings, got %#v", config)
 	}
-	if config.Enabled || config.ParallelCount != 1 || config.Prompt != DefaultPelicanPrompt || config.ReasoningEffort != "medium" {
-		t.Fatalf("defaults = %#v", config)
-	}
-	config.CronExpression = "0 9 * * *"
-	if err := normalizePelicanConfig(&config, now); err != nil {
-		t.Fatal(err)
-	}
-	if want := time.Date(2026, 10, 15, 1, 0, 0, 0, time.UTC); !config.NextRunAt.Equal(want) {
-		t.Fatalf("next = %v", config.NextRunAt)
-	}
-	for _, cron := range []string{"* * * * * *", "invalid", "0 0 31 2 *"} {
-		config.CronExpression = cron
-		if normalizePelicanConfig(&config, now) == nil {
-			t.Fatalf("accepted %q", cron)
-		}
-	}
-}
-func TestPelicanConfigurationRejectsInvalidOptions(t *testing.T) {
-	cases := []storage.PelicanConfig{{Model: ""}, {Model: "gpt", ParallelCount: 9}, {Model: "gpt", ParallelCount: -1}, {Model: "gpt", ReasoningEffort: "bogus"}, {Model: "gpt", Prompt: strings.Repeat("a", 32001)}}
-	for _, config := range cases {
-		if normalizePelicanConfig(&config, time.Now()) == nil {
-			t.Fatalf("accepted %#v", config)
-		}
+	if config.ID != 7 || config.RelayStationID != 9 || config.AccountExternalID != 42 || config.Enabled || !config.NextRunAt.Equal(next) || config.LeaseUntil != &lease {
+		t.Fatalf("account state must not change: %#v", config)
 	}
 }
 func TestPelicanStreamRequiresCompletionAndCompleteArtwork(t *testing.T) {

@@ -49,6 +49,7 @@ type Service struct {
 	cipher             *crypto.Cipher
 	channels           *storage.Channels
 	rates              *storage.Rates
+	settings           *storage.Settings
 	client             *http.Client
 	usageMu            sync.Mutex
 	usageCache         map[string]usageCacheEntry
@@ -75,17 +76,22 @@ type Service struct {
 func NewService(stations *storage.RelayStations, cipher *crypto.Cipher, deps ...any) *Service {
 	var channels *storage.Channels
 	var rates *storage.Rates
+	var settings *storage.Settings
 	if len(deps) > 0 {
 		channels, _ = deps[0].(*storage.Channels)
 	}
 	if len(deps) > 1 {
 		rates, _ = deps[1].(*storage.Rates)
 	}
+	if len(deps) > 2 {
+		settings, _ = deps[2].(*storage.Settings)
+	}
 	return &Service{
 		stations:           stations,
 		cipher:             cipher,
 		channels:           channels,
 		rates:              rates,
+		settings:           settings,
 		client:             &http.Client{Timeout: requestTimeout},
 		usageCache:         make(map[string]usageCacheEntry),
 		userUsageCache:     make(map[string]userUsageCacheEntry),
