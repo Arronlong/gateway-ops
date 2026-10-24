@@ -139,6 +139,8 @@ func AutoMigrate(db *gorm.DB) error {
 		&RelayUsageEvent{},
 		&RelayUsageSyncState{},
 		&PelicanConfig{},
+		&GroupPelicanConfig{},
+		&GroupPelicanResult{},
 		&PelicanResult{},
 		&RelayAccountGroup{},
 		&RelayAccountCostOverride{},

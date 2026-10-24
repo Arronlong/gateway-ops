@@ -37,6 +37,14 @@ const (
 	SettingPelicanReasoningEffort        = "pelican.reasoning_effort"
 	SettingPelicanParallelCount          = "pelican.parallel_count"
 	SettingPelicanCronExpression         = "pelican.cron_expression"
+	SettingPelicanActiveTimezone         = "pelican.active_timezone"
+	SettingPelicanActiveStart            = "pelican.active_start"
+	SettingPelicanActiveEnd              = "pelican.active_end"
+	SettingPelicanActiveWeekdays         = "pelican.active_weekdays"
+	SettingPelicanPlans                  = "pelican.plans"
+	SettingPelicanHistoryCount           = "pelican.history_count"
+	SettingPelicanPageEnabled            = "pelican.page_enabled"
+	SettingPelicanTasksEnabled           = "pelican.tasks_enabled"
 	SettingSecurityIframeEnabled         = "security.iframe.enabled"
 	SettingSecurityIframeMode            = "security.iframe.mode"
 	SettingSecurityIframeAllowlist       = "security.iframe.allowlist"
@@ -237,10 +245,17 @@ func defaultUISettings() UISettings {
 		ChannelsShowStability:       true,
 		ChannelsShowConsumption:     true,
 		RecentMetricsWindowHours:    1,
+		PelicanPageEnabled:          true,
+		PelicanTasksEnabled:         true,
+		PelicanHistoryCount:         PelicanHistoryLimit,
 		PelicanPrompt:               DefaultPelicanPrompt,
 		PelicanReasoningEffort:      "medium",
 		PelicanParallelCount:        1,
 		PelicanCronExpression:       "*/30 * * * *",
+		PelicanActiveTimezone:       "Asia/Shanghai",
+		PelicanActiveStart:          "08:00",
+		PelicanActiveEnd:            "22:00",
+		PelicanActiveWeekdays:       defaultPelicanWeekdays(),
 		IframeEmbeddingEnabled:      false,
 		IframeEmbeddingMode:         IframeEmbeddingModeAllowlist,
 		IframeEmbeddingAllowlist:    []string{},
@@ -259,7 +274,16 @@ func decodeStringSliceSetting(value string) ([]string, error) {
 }
 
 func uiSettingsValues(settings UISettings) (map[string]string, error) {
+	plans := normalizedPelicanPlans(settings.PelicanPlans, settings.PelicanModel, settings.PelicanPrompt, settings.PelicanReasoningEffort)
+	plansJSON, err := json.Marshal(plans)
+	if err != nil {
+		return nil, err
+	}
 	allowlistJSON, err := json.Marshal(settings.IframeEmbeddingAllowlist)
+	if err != nil {
+		return nil, err
+	}
+	weekdaysJSON, err := json.Marshal(normalizedPelicanWeekdays(settings.PelicanActiveWeekdays))
 	if err != nil {
 		return nil, err
 	}
@@ -274,11 +298,19 @@ func uiSettingsValues(settings UISettings) (map[string]string, error) {
 		SettingUIChannelsShowStability:       strconv.FormatBool(settings.ChannelsShowStability),
 		SettingUIChannelsShowConsumption:     strconv.FormatBool(settings.ChannelsShowConsumption),
 		SettingUIRecentMetricsWindowHours:    strconv.Itoa(settings.RecentMetricsWindowHours),
-		SettingPelicanModel:                  settings.PelicanModel,
-		SettingPelicanPrompt:                 settings.PelicanPrompt,
-		SettingPelicanReasoningEffort:        settings.PelicanReasoningEffort,
+		SettingPelicanModel:                  plans[0].Model,
+		SettingPelicanPrompt:                 plans[0].Prompt,
+		SettingPelicanReasoningEffort:        plans[0].ReasoningEffort,
 		SettingPelicanParallelCount:          strconv.Itoa(settings.PelicanParallelCount),
 		SettingPelicanCronExpression:         settings.PelicanCronExpression,
+		SettingPelicanActiveTimezone:         normalizePelicanTimezone(settings.PelicanActiveTimezone),
+		SettingPelicanActiveStart:            settings.PelicanActiveStart,
+		SettingPelicanActiveEnd:              settings.PelicanActiveEnd,
+		SettingPelicanActiveWeekdays:         string(weekdaysJSON),
+		SettingPelicanPlans:                  string(plansJSON),
+		SettingPelicanHistoryCount:           strconv.Itoa(settings.PelicanHistoryCount),
+		SettingPelicanPageEnabled:            strconv.FormatBool(settings.PelicanPageEnabled),
+		SettingPelicanTasksEnabled:           strconv.FormatBool(settings.PelicanTasksEnabled),
 		SettingSecurityIframeEnabled:         strconv.FormatBool(settings.IframeEmbeddingEnabled),
 		SettingSecurityIframeMode:            strings.TrimSpace(settings.IframeEmbeddingMode),
 		SettingSecurityIframeAllowlist:       string(allowlistJSON),
@@ -380,6 +412,14 @@ func (s *Settings) UISettings() (UISettings, error) {
 	settings.PelicanReasoningEffort = pelican.ReasoningEffort
 	settings.PelicanParallelCount = pelican.ParallelCount
 	settings.PelicanCronExpression = pelican.CronExpression
+	settings.PelicanActiveTimezone = pelican.ActiveTimezone
+	settings.PelicanActiveStart = pelican.ActiveStart
+	settings.PelicanActiveEnd = pelican.ActiveEnd
+	settings.PelicanActiveWeekdays = pelican.ActiveWeekdays
+	settings.PelicanPlans = pelican.Plans
+	settings.PelicanPageEnabled = pelican.PageEnabled
+	settings.PelicanTasksEnabled = pelican.TasksEnabled
+	settings.PelicanHistoryCount = pelican.HistoryCount
 	return settings, nil
 }
 
@@ -390,16 +430,63 @@ func (s *Settings) SaveUISettings(settings UISettings) error {
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
 		store := NewSettings(tx)
+		previousHistoryCount, err := store.PelicanHistoryCount()
+		if err != nil {
+			return err
+		}
+		scheduleWindowChanged := false
+		for _, field := range []struct {
+			key, value string
+		}{
+			{SettingPelicanActiveTimezone, values[SettingPelicanActiveTimezone]},
+			{SettingPelicanActiveStart, settings.PelicanActiveStart}, {SettingPelicanActiveEnd, settings.PelicanActiveEnd},
+			{SettingPelicanActiveWeekdays, values[SettingPelicanActiveWeekdays]},
+		} {
+			value, found, err := store.Get(field.key)
+			if err != nil {
+				return err
+			}
+			if !found || value != field.value {
+				scheduleWindowChanged = true
+			}
+		}
 		for key, value := range values {
 			if err := store.Set(key, value); err != nil {
 				return err
 			}
 		}
-		next, err := NextPelicanRun(settings.PelicanCronExpression, time.Now())
+		if settings.PelicanHistoryCount < previousHistoryCount {
+			if err := tx.Exec(`DELETE FROM relay_pelican_results WHERE id IN (
+				SELECT id FROM (
+					SELECT id, ROW_NUMBER() OVER (PARTITION BY relay_station_id, account_external_id ORDER BY finished_at DESC, id DESC) AS row_number
+					FROM relay_pelican_results
+				) ranked WHERE row_number > ?
+			)`, settings.PelicanHistoryCount).Error; err != nil {
+				return err
+			}
+			if err := NewRelayStations(tx).PruneGroupPelicanResults(settings.PelicanHistoryCount); err != nil {
+				return err
+			}
+		}
+		next, err := settings.PelicanSettings().NextRun(time.Now())
 		if err != nil {
 			return err
 		}
-		return tx.Model(&PelicanConfig{}).Where("cron_expression <> ?", settings.PelicanCronExpression).
-			Updates(map[string]any{"cron_expression": settings.PelicanCronExpression, "next_run_at": next}).Error
+		query := tx.Model(&PelicanConfig{})
+		if !scheduleWindowChanged {
+			query = query.Where("cron_expression <> ?", settings.PelicanCronExpression)
+		} else {
+			query = query.Where("1 = 1")
+		}
+		if err := query.Updates(map[string]any{"cron_expression": settings.PelicanCronExpression, "next_run_at": next}).Error; err != nil {
+			return err
+		}
+		groupQuery := tx.Model(&GroupPelicanConfig{})
+		if !scheduleWindowChanged {
+			groupQuery = groupQuery.Where("cron_expression <> ?", settings.PelicanCronExpression)
+		} else {
+			groupQuery = groupQuery.Where("1 = 1")
+		}
+		return groupQuery.Updates(map[string]any{"cron_expression": settings.PelicanCronExpression, "next_run_at": next}).Error
 	})
 }

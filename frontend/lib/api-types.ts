@@ -579,8 +579,10 @@ export interface PelicanConfig {
   lease_until?: string | null
 }
 export interface PelicanResult {
+	group_external_id?: number
   id: number
   relay_station_id: number
+  station_name?: string
   account_external_id: number
   account_name: string
   model: string
@@ -593,10 +595,66 @@ export interface PelicanResult {
   duration_ms: number
   started_at: string
   finished_at: string
+  upstream_group_name?: string
+  upstream_group_multiplier?: number | null
 }
 export interface PelicanGallery {
+  page_enabled?:boolean
   configs: PelicanConfig[]
   results: PelicanResult[]
+}
+export interface GroupPelicanConfig {
+ id:number
+ relay_station_id:number
+ group_external_id:number
+ enabled:boolean
+ next_run_at:string
+ lease_until?:string|null
+}
+export interface GroupPelicanGallery {
+ page_enabled?:boolean
+ configs:GroupPelicanConfig[]
+ results:PelicanResult[]
+}
+export interface PelicanSourceGroup {
+ id:string
+ kind:"pool_account"|"relay_group"
+ name:string
+ site_url:string
+ station_id:number
+ station_name:string
+ external_id:number
+ config:Omit<PelicanConfig,"account_external_id"> & {account_external_id?:number;group_external_id?:number}
+ results:PelicanResult[]
+}
+export interface PelicanSourcesGallery {groups:PelicanSourceGroup[]}
+export interface PelicanLibraryItem extends PelicanResult {
+  station_name: string
+}
+export interface PelicanLibraryPage {
+  results: PelicanLibraryItem[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface ChannelPelicanTarget {
+  relay_station_id: number
+  station_name: string
+  station_type: string
+  account_external_id: number
+  account_name: string
+  config: PelicanConfig
+}
+
+export interface ChannelPelicanGroup {
+  channel: Pick<Channel, "id" | "name" | "type" | "site_url">
+  targets: ChannelPelicanTarget[]
+  results: PelicanLibraryItem[]
+}
+
+export interface ChannelPelicanGallery {
+  groups: ChannelPelicanGroup[]
 }
 
 export interface RelayGroupTestResult {
@@ -1118,6 +1176,12 @@ export interface RelayOverview {
   usage_failed_accounts: number
 }
 
+export interface PelicanTestPlan {
+  model: string
+  prompt: string
+  reasoning_effort: string
+}
+
 export interface SystemSettings {
   operations_management_enabled: boolean
   channels_page_enabled: boolean
@@ -1129,11 +1193,19 @@ export interface SystemSettings {
   channels_show_stability: boolean
   channels_show_consumption: boolean
   recent_metrics_window_hours: number
+  pelican_page_enabled: boolean
+  pelican_tasks_enabled: boolean
+  pelican_history_count: number
+  pelican_plans: PelicanTestPlan[]
   pelican_model: string
   pelican_prompt: string
   pelican_reasoning_effort: string
   pelican_parallel_count: number
   pelican_cron_expression: string
+  pelican_active_timezone: string
+  pelican_active_start: string
+  pelican_active_end: string
+  pelican_active_weekdays: number[]
   iframe_embedding_enabled: boolean
   iframe_embedding_mode: "all" | "allowlist"
   iframe_embedding_allowlist: string[]

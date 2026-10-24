@@ -1,6 +1,9 @@
 package storage
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestUISettingsOperationsManagementDefaultsEnabled(t *testing.T) {
 	t.Parallel()
@@ -12,6 +15,9 @@ func TestUISettingsOperationsManagementDefaultsEnabled(t *testing.T) {
 	if got.RecentMetricsWindowHours != 1 {
 		t.Fatalf("recent metrics window hours = %d, want 1", got.RecentMetricsWindowHours)
 	}
+	if got.PelicanHistoryCount != PelicanHistoryLimit {
+		t.Fatalf("pelican history count = %d, want %d", got.PelicanHistoryCount, PelicanHistoryLimit)
+	}
 }
 
 func TestUISettingsPelicanDefaultsAreGlobal(t *testing.T) {
@@ -20,6 +26,20 @@ func TestUISettingsPelicanDefaultsAreGlobal(t *testing.T) {
 	got := defaultUISettings()
 	if got.PelicanModel != "" {
 		t.Fatalf("pelican model = %q, want empty until configured", got.PelicanModel)
+	}
+	if got.PelicanActiveStart != "08:00" || got.PelicanActiveEnd != "22:00" {
+		t.Fatalf("unexpected pelican window: %s-%s", got.PelicanActiveStart, got.PelicanActiveEnd)
+	}
+	if got.PelicanActiveTimezone != "Asia/Shanghai" {
+		t.Fatalf("pelican active timezone = %q, want Asia/Shanghai", got.PelicanActiveTimezone)
+	}
+	for day, gotDay := range got.PelicanActiveWeekdays {
+		if day != gotDay {
+			t.Fatalf("pelican active weekdays = %v, want all days 0 through 6", got.PelicanActiveWeekdays)
+		}
+	}
+	if len(got.PelicanActiveWeekdays) != 7 {
+		t.Fatalf("pelican active weekdays = %v, want all days 0 through 6", got.PelicanActiveWeekdays)
 	}
 	if got.PelicanPrompt == "" {
 		t.Fatal("pelican prompt must have a default")
@@ -49,11 +69,35 @@ func TestUISettingsValuesSerializeGlobalPelicanConfiguration(t *testing.T) {
 		SettingPelicanReasoningEffort: "high",
 		SettingPelicanParallelCount:   "2",
 		SettingPelicanCronExpression:  "0 * * * *",
+		SettingPelicanActiveStart:     "08:00",
+		SettingPelicanActiveEnd:       "22:00",
+		SettingPelicanActiveTimezone:  "Asia/Shanghai",
+		SettingPelicanActiveWeekdays:  "[0,1,2,3,4,5,6]",
+		SettingPelicanHistoryCount:    "30",
 	}
 	for key, expected := range want {
 		if got := values[key]; got != expected {
 			t.Errorf("setting %q = %q, want %q", key, got, expected)
 		}
+	}
+}
+
+func TestUISettingsValuesPersistIndependentPelicanPlans(t *testing.T) {
+	settings := defaultUISettings()
+	settings.PelicanPlans = []PelicanTestPlan{
+		{Model: "model-a,model-a-fallback", Prompt: "draw A", ReasoningEffort: "low"},
+		{Model: "model-a", Prompt: "draw B", ReasoningEffort: "high"},
+	}
+	values, err := uiSettingsValues(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []PelicanTestPlan
+	if err := json.Unmarshal([]byte(values[SettingPelicanPlans]), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Prompt != "draw A" || got[1].ReasoningEffort != "high" || values[SettingPelicanParallelCount] != "1" {
+		t.Fatalf("saved pelican plans = %#v, parallel compatibility setting = %q", got, values[SettingPelicanParallelCount])
 	}
 }
 

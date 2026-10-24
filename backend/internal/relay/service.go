@@ -24,6 +24,7 @@ import (
 
 	"github.com/guliansheng/gateway-ops/internal/crypto"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"github.com/guliansheng/gateway-ops/internal/tasklog"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -3397,7 +3398,7 @@ func (s *Service) TestGroup(ctx context.Context, stationID uint, groupID int64, 
 	return result, nil
 }
 
-func (s *Service) groupGatewayCredential(ctx context.Context, stationID uint, groupID int64) (*storage.RelayStation, string, error) {
+func (s *Service) groupGatewayCredential(ctx context.Context, stationID uint, groupID int64, exactGroup ...bool) (*storage.RelayStation, string, error) {
 	station, err := s.stations.FindByID(stationID)
 	if err != nil {
 		return nil, "", err
@@ -3419,18 +3420,24 @@ func (s *Service) groupGatewayCredential(ctx context.Context, stationID uint, gr
 		if err := s.get(ctx, endpoint, adminKey, &keys); err != nil {
 			return nil, "", fmt.Errorf("查询分组的管理员 API 密钥失败: %w", err)
 		}
-		if key := selectAdminGroupAPIKey(keys.Items, groupID); key != "" {
+		if key := selectAdminGroupAPIKey(keys.Items, groupID, exactGroup...); key != "" {
 			return station, key, nil
 		}
 		if len(keys.Items) == 0 || keys.Pages <= page {
 			break
 		}
 	}
+	if len(exactGroup) > 0 && exactGroup[0] {
+		return nil, "", errors.New("该分组没有已启用的专用管理员调用 Key，请在中转站为当前分组创建并绑定 Key 后再测试")
+	}
 	return nil, "", ErrGroupAdminAPIKeyMissing
 }
 
-func selectAdminGroupAPIKey(items []remoteGroupAPIKey, groupID int64) string {
+func selectAdminGroupAPIKey(items []remoteGroupAPIKey, groupID int64, exactGroup ...bool) string {
 	for _, item := range items {
+		if len(exactGroup) > 0 && exactGroup[0] && (item.GroupID == nil || *item.GroupID != groupID) {
+			continue
+		}
 		if strings.TrimSpace(item.Key) == "" || !strings.EqualFold(strings.TrimSpace(item.Status), "active") || item.User == nil || !strings.EqualFold(strings.TrimSpace(item.User.Role), "admin") {
 			continue
 		}
@@ -4018,10 +4025,12 @@ func (s *Service) syncAll(ctx context.Context, syncStation func(context.Context,
 	synced, failed := 0, 0
 	for _, station := range stations {
 		if err := syncStation(ctx, station.ID); err != nil {
+			tasklog.Add(ctx, "ERROR", "中转站 #%d %s 同步失败：%v", station.ID, station.Name, err)
 			failed++
 			continue
 		}
 		synced++
+		tasklog.Add(ctx, "INFO", "中转站 #%d %s 同步成功", station.ID, station.Name)
 	}
 	return synced, failed, nil
 }

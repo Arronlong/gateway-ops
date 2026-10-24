@@ -29,7 +29,24 @@ func TestPelicanRetentionIsPerStationAndAccount(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT .*relay_stations.*FOR UPDATE`).WithArgs(uint(7), 1).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 	mock.ExpectQuery(`INSERT INTO "relay_pelican_results"`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(31))
+	mock.ExpectQuery(`SELECT .*app_settings`).WithArgs(SettingPelicanHistoryCount, 1).WillReturnRows(sqlmock.NewRows([]string{"key", "value"}))
 	mock.ExpectExec(`DELETE FROM "relay_pelican_results" WHERE relay_station_id = \$1 AND account_external_id = \$2 AND id NOT IN`).WithArgs(uint(7), int64(20), uint(7), int64(20), 30).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	if err := repo.SavePelicanResult(&PelicanResult{RelayStationID: 7, AccountExternalID: 20}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPelicanRetentionUsesConfiguredHistoryCount(t *testing.T) {
+	repo, mock := pelicanDB(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*relay_stations.*FOR UPDATE`).WithArgs(uint(7), 1).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+	mock.ExpectQuery(`INSERT INTO "relay_pelican_results"`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(31))
+	mock.ExpectQuery(`SELECT .*app_settings`).WithArgs(SettingPelicanHistoryCount, 1).WillReturnRows(sqlmock.NewRows([]string{"key", "value"}).AddRow(SettingPelicanHistoryCount, "5"))
+	mock.ExpectExec(`DELETE FROM "relay_pelican_results" WHERE relay_station_id = \$1 AND account_external_id = \$2 AND id NOT IN`).WithArgs(uint(7), int64(20), uint(7), int64(20), 5).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 	if err := repo.SavePelicanResult(&PelicanResult{RelayStationID: 7, AccountExternalID: 20}); err != nil {
 		t.Fatal(err)
@@ -43,6 +60,7 @@ func TestPelicanRetentionFailureRollsBack(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT .*FOR UPDATE`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 	mock.ExpectQuery(`INSERT INTO "relay_pelican_results"`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+	mock.ExpectQuery(`SELECT .*app_settings`).WithArgs(SettingPelicanHistoryCount, 1).WillReturnRows(sqlmock.NewRows([]string{"key", "value"}))
 	mock.ExpectExec(`DELETE FROM "relay_pelican_results"`).WillReturnError(errors.New("retention failure"))
 	mock.ExpectRollback()
 	if repo.SavePelicanResult(&PelicanResult{RelayStationID: 7, AccountExternalID: 20}) == nil {

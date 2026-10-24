@@ -5,6 +5,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/guliansheng/gateway-ops/internal/relay"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -22,6 +23,35 @@ func pelicanIDs(c *gin.Context) (uint, int64, error) {
 	}
 	return stationID, accountID, nil
 }
+
+func pelicanRunPlan(c *gin.Context) (*storage.PelicanTestPlan, error) {
+	if c.Request.Body == nil || c.Request.Body == http.NoBody {
+		return nil, nil
+	}
+	var plan storage.PelicanTestPlan
+	if err := c.ShouldBindJSON(&plan); err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &plan, nil
+}
+
+func pelicanRequestedPlans(plan *storage.PelicanTestPlan) []storage.PelicanTestPlan {
+	if plan == nil {
+		return nil
+	}
+	return []storage.PelicanTestPlan{*plan}
+}
+
+func pelicanHistoryCount(d *Deps) (int, error) {
+	if d.Settings == nil {
+		return storage.PelicanHistoryLimit, nil
+	}
+	return d.Settings.PelicanHistoryCount()
+}
+
 func relayPelicanGallery(c *gin.Context, d *Deps) {
 	stationID, err := uintParam(c, "id")
 	if err != nil {
@@ -37,13 +67,71 @@ func relayPelicanGallery(c *gin.Context, d *Deps) {
 		fail(c, 500, err)
 		return
 	}
-	results, err := d.RelayStations.PelicanGallery(stationID)
+	historyCount, err := pelicanHistoryCount(d)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	var results []storage.PelicanResult
+	if c.Query("account_type") == "oauth" {
+		results, err = d.RelayStations.PoolPelicanGallery(stationID, 3)
+	} else {
+		results, err = d.RelayStations.PelicanGallery(stationID, historyCount)
+	}
 	if err != nil {
 		fail(c, 500, err)
 		return
 	}
 	c.JSON(200, gin.H{"data": gin.H{"configs": configs, "results": results}})
 }
+
+func pelicanLibrary(c *gin.Context, d *Deps) {
+	historyCount, err := pelicanHistoryCount(d)
+	if err != nil {
+		fail(c, 500, err)
+		return
+	}
+	filter := storage.PelicanLibraryFilter{Status: c.DefaultQuery("status", "all"), Search: c.Query("search"), Page: 1, PageSize: 60, HistoryCount: historyCount}
+	if value := c.Query("page"); value != "" {
+		page, err := strconv.Atoi(value)
+		if err != nil || page < 1 {
+			fail(c, http.StatusBadRequest, errors.New("invalid page"))
+			return
+		}
+		filter.Page = page
+	}
+	if value := c.Query("page_size"); value != "" {
+		pageSize, err := strconv.Atoi(value)
+		if err != nil || pageSize < 1 || pageSize > 100 {
+			fail(c, http.StatusBadRequest, errors.New("page_size must be between 1 and 100"))
+			return
+		}
+		filter.PageSize = pageSize
+	}
+	if value := c.Query("station_id"); value != "" {
+		stationID, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || stationID == 0 {
+			fail(c, http.StatusBadRequest, errors.New("invalid station_id"))
+			return
+		}
+		filter.StationID = uint(stationID)
+	}
+	if filter.Status != "all" && filter.Status != "success" && filter.Status != "failed" {
+		fail(c, http.StatusBadRequest, errors.New("status must be all, success, or failed"))
+		return
+	}
+	if len([]rune(filter.Search)) > 100 {
+		fail(c, http.StatusBadRequest, errors.New("search must be at most 100 characters"))
+		return
+	}
+	page, err := d.RelayStations.PelicanLibrary(filter)
+	if err != nil {
+		fail(c, http.StatusInternalServerError, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": page})
+}
+
 func saveRelayPelicanConfig(c *gin.Context, d *Deps) {
 	stationID, accountID, err := pelicanIDs(c)
 	if err != nil {
@@ -70,7 +158,12 @@ func startRelayPelican(c *gin.Context, d *Deps) {
 		fail(c, 400, err)
 		return
 	}
-	config, err := d.Relay.StartPelican(c.Request.Context(), stationID, accountID)
+	plan, err := pelicanRunPlan(c)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	config, err := d.Relay.StartPelican(c.Request.Context(), stationID, accountID, pelicanRequestedPlans(plan)...)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, relay.ErrPelicanRunning) {

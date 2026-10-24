@@ -17,6 +17,13 @@ import (
 
 func registerRelayStations(g *gin.RouterGroup, d *Deps) {
 	gp := g.Group("/relay-stations")
+	gp.GET("/pelican-sources", func(c *gin.Context) { pelicanSources(c, d) })
+	gp.GET("/:id/group-pelican", func(c *gin.Context) { groupPelicanGallery(c, d, false) })
+	gp.PUT("/:id/groups/:external_id/pelican", func(c *gin.Context) { saveGroupPelican(c, d) })
+	gp.POST("/:id/groups/:external_id/pelican/run", func(c *gin.Context) { startGroupPelican(c, d) })
+	gp.GET("/:id/groups/:external_id/pelican/results/:result_id", func(c *gin.Context) { groupPelicanResult(c, d, false) })
+	gp.DELETE("/:id/groups/:external_id/pelican/results/:result_id", func(c *gin.Context) { deleteGroupPelicanResult(c, d) })
+	gp.GET("/pelican-results", func(c *gin.Context) { pelicanLibrary(c, d) })
 	gp.GET("/:id/pelican", func(c *gin.Context) { relayPelicanGallery(c, d) })
 	gp.PUT("/:id/accounts/:external_id/pelican", func(c *gin.Context) { saveRelayPelicanConfig(c, d) })
 	gp.POST("/:id/accounts/:external_id/pelican/run", func(c *gin.Context) { startRelayPelican(c, d) })

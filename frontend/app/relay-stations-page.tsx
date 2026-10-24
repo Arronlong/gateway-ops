@@ -2,7 +2,7 @@
 
 import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react"
 import type { CSSProperties, ReactNode } from "react"
-import { Activity, Archive, ArrowDown, ArrowUp, ArrowUpDown, Bird, Box, Check, ChevronDown, CircleAlert, CircleDollarSign, CircleHelp, Cog, Columns3, Copy, ExternalLink, Gauge, GripVertical, History, KeyRound, Layers3, LayoutGrid, List, ListChecks, PencilLine, Play, Plus, Power, PowerOff, RefreshCw, RotateCcw, Save, Search, Server, Settings2, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, TrendingDown, Users, X } from "lucide-react"
+import { Activity, Archive, ArrowDown, ArrowUp, ArrowUpDown, Box, Check, ChevronDown, CircleAlert, CircleDollarSign, CircleHelp, Cog, Columns3, Copy, ExternalLink, Gauge, GripVertical, History, KeyRound, Layers3, LayoutGrid, List, ListChecks, PencilLine, Play, Plus, Power, PowerOff, RefreshCw, RotateCcw, Save, Search, Server, Settings2, ShieldAlert, ShieldCheck, SlidersHorizontal, Trash2, TrendingDown, Users, X } from "lucide-react"
 import { toast } from "sonner"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -20,7 +20,6 @@ import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api"
-import { PelicanProvider, PelicanAccountPanel, PelicanDashboard } from "@/components/relay/pelican"
 import { useRelayLatencyTrends, useSystemSettings } from "@/lib/queries"
 import { RecentRequestMetrics } from "@/components/monitor/recent-request-metrics"
 import { recentRequestMetrics } from "@/lib/recent-request-metrics"
@@ -29,6 +28,7 @@ import { useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelLaten
 import { RelayAdjustmentLog } from "@/components/monitor/relay-adjustment-log"
 import { UserManagement } from "@/components/relay/user-management"
 import { PlatformBadge } from "@/components/relay/platform-badge"
+import { GroupPelicanPanel } from "@/components/relay/pelican-target-panel"
 import { LatencyStabilityLane } from "@/components/monitor/latency-stability-lane"
 import { RelayDailyConsumptionTrend } from "@/components/monitor/relay-daily-consumption-trend"
 import { RelayAccountConsumptionTrend } from "@/components/monitor/relay-account-consumption-trend"
@@ -133,7 +133,7 @@ type SortDirection = "asc" | "desc"
 type GroupSortKey = "name" | "rate"
 type AccountSortKey = "score" | "cache_hit_rate" | "success_rate" | "recent_call" | "last_used" | "priority" | "cost" | "usage" | "name"
 type SortState<K extends string> = { key: K; direction: SortDirection } | null
-type RelayDetailModule = "usage" | "users" | "groups" | "accounts" | "pelican"
+type RelayDetailModule = "usage" | "users" | "groups" | "accounts"
 type AccountAdjustmentMode = "suggestion" | "downgrade"
 type AccountAdjustmentSelection = Record<number, number[]>
 type AccountAdjustmentDialogState = {
@@ -282,7 +282,7 @@ function usePersistedDetailModule(storageKey: string, defaultModule: RelayDetail
   const [module, setModule] = useState<RelayDetailModule>(() => {
     try {
       const stored = window.localStorage.getItem(storageKey)
-      if (stored === "usage" || stored === "users" || stored === "groups" || stored === "accounts" || stored === "pelican") return stored
+      if (stored === "usage" || stored === "users" || stored === "groups" || stored === "accounts") return stored
     } catch {
       // Keep the default module when localStorage is unavailable.
     }
@@ -1207,7 +1207,6 @@ function RiskRow({
           <TooltipContent side="top">删除账号</TooltipContent>
         </Tooltip>
       </div>
-      <PelicanAccountPanel account={account} />
     </div>
   );
 }
@@ -1333,7 +1332,6 @@ export function RelayAccountGalleryCard({
           <Tooltip delayDuration={250}><TooltipTrigger asChild><Button type="button" variant="outline" size="icon" className="size-8 border-danger/30 text-danger hover:bg-danger/10 hover:text-danger" aria-label={`删除账号${account.name}`} disabled={busy || deleting} onClick={onDelete}><Trash2 className={cn("size-3.5", deleting && "animate-pulse")} /></Button></TooltipTrigger><TooltipContent side="top">删除账号</TooltipContent></Tooltip>
         </div>
       </div>
-      <PelicanAccountPanel account={account} />
     </div>
   </Card>
 }
@@ -1356,7 +1354,7 @@ export function buildRelayGroupUpdates(type: RelayStationType, group: RelayGroup
   return updates
 }
 
-export function GroupManagementRow({ stationType = "sub2api", group, accounts, onUpdate, onTest, onDelete, testing, deleting, dragDisabled, dragging, onDragStart, onDragOver, onDrop }: { stationType?: RelayStationType; group: RelayGroupView; accounts: RelayAccountView[]; onUpdate: (groupID: number, patch: RelayGroupPatch) => Promise<void>; onTest: (group: RelayGroupView) => void; onDelete: (group: RelayGroupView) => void; testing: boolean; deleting: boolean; dragDisabled: boolean; dragging: boolean; onDragStart: (id: number) => void; onDragOver: (id: number) => void; onDrop: (id: number) => void }) {
+export function GroupManagementRow({ stationID, stationType = "sub2api", group, accounts, onUpdate, onTest, onDelete, testing, deleting, dragDisabled, dragging, onDragStart, onDragOver, onDrop }: { stationID?: number; stationType?: RelayStationType; group: RelayGroupView; accounts: RelayAccountView[]; onUpdate: (groupID: number, patch: RelayGroupPatch) => Promise<void>; onTest: (group: RelayGroupView) => void; onDelete: (group: RelayGroupView) => void; testing: boolean; deleting: boolean; dragDisabled: boolean; dragging: boolean; onDragStart: (id: number) => void; onDragOver: (id: number) => void; onDrop: (id: number) => void }) {
   const [expanded, setExpanded] = useState(false)
   const [name, setName] = useState(group.name)
   const [description, setDescription] = useState(group.description ?? "")
@@ -1418,6 +1416,7 @@ export function GroupManagementRow({ stationType = "sub2api", group, accounts, o
       <div className="flex items-center justify-between gap-2 text-xs lg:block"><span className="text-muted-foreground lg:hidden">账号</span><p className="font-mono text-sm font-semibold tabular-nums text-foreground">{accounts.length}</p></div>
       <div className="fixed-column-shadow-desktop fixed-column-shadow-right flex flex-nowrap justify-start gap-1.5 lg:sticky lg:right-0 lg:z-10 lg:self-stretch lg:items-center lg:justify-end lg:bg-card"><Tooltip delayDuration={250}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0 text-brand" aria-label={`快速测试${group.name}`} disabled={busy || testing || deleting} onClick={() => onTest(group)}><Play className={cn("size-3.5", testing && "animate-pulse")} /></TableActionButton></TooltipTrigger><TooltipContent side="top">快速测试</TooltipContent></Tooltip><Tooltip delayDuration={250}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0" aria-label={`保存${group.name}`} disabled={busy || testing || deleting || !changed} onClick={() => void save()}><Save className={cn("size-3.5", busy && "animate-pulse")} /></TableActionButton></TooltipTrigger><TooltipContent side="top">保存修改</TooltipContent></Tooltip><Tooltip delayDuration={250}><TooltipTrigger asChild><TableActionButton destructive type="button" className="shrink-0" aria-label={`删除分组${group.name}`} disabled={busy || testing || deleting} onClick={() => onDelete(group)}><Trash2 className={cn("size-3.5", deleting && "animate-pulse")} /></TableActionButton></TooltipTrigger><TooltipContent side="top">删除分组</TooltipContent></Tooltip></div>
     </div>
+    {stationID ? <GroupPelicanPanel stationID={stationID} group={group}/> : null}
     {expanded ? <div className="border-t border-border bg-muted/20 px-4 py-3"><div className="mb-2 flex items-center justify-between gap-3"><p className="text-xs font-medium text-foreground">分组账号</p><span className="text-[11px] text-muted-foreground">{accounts.length} 个</span></div>{accounts.length === 0 ? <p className="rounded-md border border-dashed border-border px-4 py-5 text-center text-xs text-muted-foreground">该分组暂未关联账号</p> : <div className="grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fill,minmax(260px,320px))] sm:justify-start">{accounts.map((account) => { const state = stateMeta[account.risk_state]; return <article key={account.external_id} className="rounded-md border border-border bg-card px-3 py-2.5 shadow-xs"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><AccountName account={account} /><div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground"><span>{account.platform || "-"} · {account.type || "-"}</span><span>#{account.external_id}</span>{account.model_type ? <span className="rounded bg-brand/10 px-1.5 py-0.5 font-medium text-brand">{account.model_type}</span> : null}</div></div><span className={cn("shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium", state.tone)}>{state.label}</span></div><div className="mt-2 flex items-center justify-between gap-3 border-t border-border pt-2 text-[11px]"><span className="text-muted-foreground">成本倍率 <strong className="ml-1 font-mono text-sm font-semibold tabular-nums text-foreground">{multiplier(account.cost_multiplier)}</strong></span><span className={cn("shrink-0 font-medium", account.schedulable ? "text-success" : "text-muted-foreground")}>{account.schedulable ? "调度已开启" : "调度已关闭"}</span></div></article> })}</div>}</div> : null}
   </div>
 }
@@ -1511,7 +1510,7 @@ actions={open ? <>
 </> : null}
           meta={<><div className="flex shrink-0 items-center gap-2">{open ? <span className="text-xs text-muted-foreground">{groups.length} / {tableOverview.groups.length} 个</span> : null}<Button type="button" variant="ghost" size="icon" className="size-11 sm:size-9" aria-label={open ? "收起分组管理" : "展开分组管理"} aria-expanded={open} onClick={() => setOpen((value) => !value)}><ChevronDown className={cn("size-4 transition-transform duration-200", open && "rotate-180")} /></Button></div></>}
         ></ListPanelHeader>
-    {open ? <CardContent className="border-t border-border p-0"><div className="relative h-[min(56vh,560px)]"><div className="h-full overflow-auto" onFocusCapture={(event) => { if (event.target instanceof HTMLInputElement) setInputFocused(true) }} onBlurCapture={(event) => { if (!(event.target instanceof HTMLInputElement)) return; if (event.relatedTarget instanceof HTMLInputElement && event.currentTarget.contains(event.relatedTarget)) return; setInputFocused(false) }}><div className="isolate"><div className="sticky top-0 z-30 hidden min-w-[1422px] grid-cols-[88px_minmax(152px,.8fr)_132px_minmax(172px,1fr)_114px_minmax(152px,.9fr)_128px_120px_144px_96px_144px] border-b border-border bg-muted text-[11px] text-foreground/90 font-medium lg:grid lg:[&>*]:px-4 lg:[&>*]:py-2"><span /><SortButton label="名称" active={sort?.key === "name"} direction={sort?.key === "name" ? sort.direction : undefined} onClick={() => toggleSort("name", "asc")} /><span>平台</span><span>描述</span><SortButton label="倍率" active={sort?.key === "rate"} direction={sort?.key === "rate" ? sort.direction : undefined} onClick={() => toggleSort("rate", "desc")} /><span className="inline-flex items-center gap-1">模型类型<ModelTypeHelp /></span><span>类型</span><span>监控</span><span>状态</span><span>账号</span><span className="fixed-column-shadow-desktop fixed-column-shadow-right sticky right-0 z-40 flex self-stretch items-center justify-center bg-muted">操作</span></div>{groups.length === 0 ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">当前筛选没有分组</p> : groups.map((group) => <GroupManagementRow stationType={overview.station.type} key={group.external_id} group={group} accounts={accountsByGroup.get(group.external_id) ?? []} onUpdate={onUpdate} onTest={onTest} onDelete={onDelete} testing={testingGroupID === group.external_id} deleting={deletingGroupID === group.external_id} dragDisabled={Boolean(sort) || savingOrder} dragging={draggingID === group.external_id} onDragStart={setDraggingID} onDragOver={() => undefined} onDrop={moveGroup} />)}</div></div>{busy || (refreshing && !inputFocused) ? <div className="pointer-events-none absolute inset-x-0 top-10 z-40 flex justify-center"><span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><RefreshCw className="size-3.5 animate-spin text-brand" />正在刷新分组列表</span></div> : null}</div></CardContent> : null}
+    {open ? <CardContent className="border-t border-border p-0"><div className="relative h-[min(56vh,560px)]"><div className="h-full overflow-auto" onFocusCapture={(event) => { if (event.target instanceof HTMLInputElement) setInputFocused(true) }} onBlurCapture={(event) => { if (!(event.target instanceof HTMLInputElement)) return; if (event.relatedTarget instanceof HTMLInputElement && event.currentTarget.contains(event.relatedTarget)) return; setInputFocused(false) }}><div className="isolate"><div className="sticky top-0 z-30 hidden min-w-[1422px] grid-cols-[88px_minmax(152px,.8fr)_132px_minmax(172px,1fr)_114px_minmax(152px,.9fr)_128px_120px_144px_96px_144px] border-b border-border bg-muted text-[11px] text-foreground/90 font-medium lg:grid lg:[&>*]:px-4 lg:[&>*]:py-2"><span /><SortButton label="名称" active={sort?.key === "name"} direction={sort?.key === "name" ? sort.direction : undefined} onClick={() => toggleSort("name", "asc")} /><span>平台</span><span>描述</span><SortButton label="倍率" active={sort?.key === "rate"} direction={sort?.key === "rate" ? sort.direction : undefined} onClick={() => toggleSort("rate", "desc")} /><span className="inline-flex items-center gap-1">模型类型<ModelTypeHelp /></span><span>类型</span><span>监控</span><span>状态</span><span>账号</span><span className="fixed-column-shadow-desktop fixed-column-shadow-right sticky right-0 z-40 flex self-stretch items-center justify-center bg-muted">操作</span></div>{groups.length === 0 ? <p className="px-4 py-10 text-center text-sm text-muted-foreground">当前筛选没有分组</p> : groups.map((group) => <GroupManagementRow stationID={overview.station.id} stationType={overview.station.type} key={group.external_id} group={group} accounts={accountsByGroup.get(group.external_id) ?? []} onUpdate={onUpdate} onTest={onTest} onDelete={onDelete} testing={testingGroupID === group.external_id} deleting={deletingGroupID === group.external_id} dragDisabled={Boolean(sort) || savingOrder} dragging={draggingID === group.external_id} onDragStart={setDraggingID} onDragOver={() => undefined} onDrop={moveGroup} />)}</div></div>{busy || (refreshing && !inputFocused) ? <div className="pointer-events-none absolute inset-x-0 top-10 z-40 flex justify-center"><span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><RefreshCw className="size-3.5 animate-spin text-brand" />正在刷新分组列表</span></div> : null}</div></CardContent> : null}
   </Card>
 }
 
@@ -2081,7 +2080,7 @@ export default function RelayStationsPage() {
   async function runFilteredAccountAction(path: string, schedulable: boolean | undefined, successLabel: string) { if (!selectedID || filteredAccounts.length === 0) { toast.info("当前筛选没有账号"); return } let accountGroupExternalIDs: AccountAdjustmentSelection | undefined; if (path === "apply-suggestions" || path === "add-downgrades") { const previewAccounts = path === "apply-suggestions" ? filteredSuggestionAccounts : filteredDowngradeAccounts; if (previewAccounts.length === 0) { toast.info(path === "apply-suggestions" ? "当前筛选没有可应用建议的账号" : "当前筛选没有可降价账号"); return } const selection = await openAccountAdjustmentDialog({ mode: path === "apply-suggestions" ? "suggestion" : "downgrade", title: path === "apply-suggestions" ? `接受 ${previewAccounts.length} 个账号的推荐调组？` : `接受 ${previewAccounts.length} 个账号的推荐降价？`, confirmLabel: path === "apply-suggestions" ? "接受推荐调组" : "接受推荐降价", accounts: previewAccounts, totalCount: filteredAccounts.length }); if (!selection) return; accountGroupExternalIDs = selection } setBusy(true); try { const result = await apiFetch<RelayAccountBatchActionResult>(`/relay-stations/${selectedID}/accounts/${path}`, { method: path === "schedulable" ? "PUT" : "POST", body: JSON.stringify({ account_external_ids: filteredAccounts.map((account) => account.external_id), ...(path === "schedulable" ? { schedulable } : {}), ...(accountGroupExternalIDs ? { account_group_external_ids: accountGroupExternalIDs } : {}) }) }); setSelected([]); await reload(); const detail = result.failed ? `，失败 ${result.failed} 个${result.errors?.[0] ? `：${result.errors[0]}` : ""}` : ""; const message = `${successLabel}：已处理 ${result.applied} 个，跳过 ${result.skipped} 个${detail}`; if (result.failed) toast.warning(message); else toast.success(message) } catch (error) { toast.error(error instanceof Error ? error.message : `${successLabel}失败`) } finally { setBusy(false) } }
   async function remove() { if (!selectedID || !selectedStation) return; const accepted = await confirm({ title: `删除中转站“${selectedStation.name}”？`, description: "将从系统真实删除该中转站及其账号快照、调整记录，操作不可恢复；历史使用记录不会被删除。", confirmLabel: "确认删除", destructive: true }); if (!accepted) return; setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}`, { method: "DELETE" }); setSelectedID(null); await reload(); toast.success("中转站已删除") } catch (error) { toast.error(error instanceof Error ? error.message : "删除失败") } finally { setBusy(false) } }
 
-  return <PelicanProvider key={selectedID ?? "none"} stationID={selectedID}><section className="space-y-4"><header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3"><div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><Server className="size-5 text-brand" />中转站管理</h1><p className="mt-1 text-xs text-muted-foreground">Sub2API 同步时自动探测上游倍率；New API 成本通过渠道关联或手工倍率配置。</p></div><div className="flex flex-wrap items-center gap-2"><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href="/settings#background-tasks" title="前往系统设置修改全部中转站的同步任务"><Settings2 className="size-3.5" />全局同步设置</a></Button><Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" onClick={openCreate}><Plus className="size-3.5" />添加中转站</Button>{stations.data?.length ? <Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy} onClick={() => void syncAll()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步全部</Button> : null}{selectedStation ? <><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/relay-monitor/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><Activity className="size-3.5" />分组监控</a></Button><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/model-pricing/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><CircleDollarSign className="size-3.5" />模型价格</a></Button><Button variant="outline" size="sm" className="h-11 sm:h-9" onClick={openEdit}>编辑</Button><Button size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy || !selectedStation.api_key_configured} onClick={() => void sync()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />实时同步</Button><Button variant="ghost" size="icon" className="size-11 sm:size-9" aria-label="删除中转站" disabled={busy} onClick={() => void remove()}><Trash2 className="size-4 text-danger" /></Button></> : null}</div></header>
+  return <section className="space-y-4"><header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3"><div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><Server className="size-5 text-brand" />中转站管理</h1><p className="mt-1 text-xs text-muted-foreground">Sub2API 同步时自动探测上游倍率；New API 成本通过渠道关联或手工倍率配置。</p></div><div className="flex flex-wrap items-center gap-2"><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href="/settings#background-tasks" title="前往系统设置修改全部中转站的同步任务"><Settings2 className="size-3.5" />全局同步设置</a></Button><Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" onClick={openCreate}><Plus className="size-3.5" />添加中转站</Button>{stations.data?.length ? <Button variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy} onClick={() => void syncAll()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步全部</Button> : null}{selectedStation ? <><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/relay-monitor/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><Activity className="size-3.5" />分组监控</a></Button><Button asChild variant="outline" size="sm" className="h-11 gap-1.5 sm:h-9"><a href={`/public/model-pricing/${selectedStation.id}`} target="_blank" rel="noopener noreferrer"><CircleDollarSign className="size-3.5" />模型价格</a></Button><Button variant="outline" size="sm" className="h-11 sm:h-9" onClick={openEdit}>编辑</Button><Button size="sm" className="h-11 gap-1.5 sm:h-9" disabled={busy || !selectedStation.api_key_configured} onClick={() => void sync()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />实时同步</Button><Button variant="ghost" size="icon" className="size-11 sm:size-9" aria-label="删除中转站" disabled={busy} onClick={() => void remove()}><Trash2 className="size-4 text-danger" /></Button></> : null}</div></header>
 
     {showForm ? <RelayStationEditor key={editingID ?? "new"} station={stations.data?.find((station) => station.id === editingID)} busy={busy} onSave={saveStation} onCancel={() => setShowForm(false)} /> : null}
 
@@ -2114,7 +2113,6 @@ export default function RelayStationsPage() {
         <div className="flex min-w-0 items-center gap-1 overflow-x-auto" role="tablist" aria-label="中转站详情模块">
           {([
             ["accounts", ShieldAlert, "账号列表"],
-            ["pelican", Bird, "鹈鹕测智"],
             ["usage", History, "最近使用记录"],
             ["users", Users, "用户管理"],
             ["groups", Layers3, "分组管理"],
@@ -2157,7 +2155,6 @@ export default function RelayStationsPage() {
 
       {detailModule === "groups" ? <GroupManagement overview={currentOverview} busy={busy} refreshing={overview.refreshing} testingGroupID={testingGroupID} deletingGroupID={deletingGroupID} onUpdate={updateGroup} onOrderChange={updateGroupOrder} onTest={(group) => void openGroupTest(group)} onDelete={(group) => void deleteGroup(group)} onRefresh={() => void refreshGroups()} /> : null}
 
-      {detailModule === "pelican" ? <PelicanDashboard accounts={currentOverview.accounts} /> : null}
 
       {detailModule === "accounts" ? <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none">
         <ListPanelHeader
@@ -2224,5 +2221,5 @@ export default function RelayStationsPage() {
     </Dialog>
     <AccountAdjustmentSelectionDialog state={accountAdjustmentDialog} selections={accountAdjustmentSelections} busy={busy} groupsByID={groupsByID} onSelectionChange={updateAccountAdjustmentSelection} onCancel={() => finishAccountAdjustmentDialog(null)} onConfirm={() => finishAccountAdjustmentDialog(accountAdjustmentSelections)} />
     {confirmDialog}
-  </section></PelicanProvider>
+  </section>
 }

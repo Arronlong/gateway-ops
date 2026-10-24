@@ -12,6 +12,9 @@ import type { LatencyBucket, PublicGroupMonitorGroup, PublicGroupMonitorStatus, 
 import { defaultPublicRelayMonitorRange, isPublicRelayMonitorViewForSelection, publicRelayMonitorCacheKey, publicRelayMonitorCacheVersion, publicRelayMonitorPath, publicRelayMonitorRanges, resolvePublicRelayMonitorSelection, type PublicRelayMonitorRange, type PublicRelayMonitorStationOption } from "@/lib/public-relay-monitor"
 import { cn } from "@/lib/utils"
 import { PlatformBadge } from "@/components/relay/platform-badge"
+import { PublicGroupPelicanResults } from "@/components/relay/pelican-target-panel"
+import { useGroupPelicanGallery, type QueryState } from "@/lib/queries"
+import type { PelicanGallery } from "@/lib/api-types"
 import { LatencyStabilityLane } from "@/components/monitor/latency-stability-lane"
 
 const refreshIntervalSeconds = 30
@@ -79,7 +82,7 @@ function successRate(group: PublicGroupMonitorGroup) {
   return total > 0 ? `${((group.success_count / total) * 100).toFixed(1)}%` : "-"
 }
 
-function MonitorRow({ group, range }: { group: PublicGroupMonitorGroup; range: PublicRelayMonitorRange }) {
+function MonitorRow({ group, range, stationID, pelican }: { group: PublicGroupMonitorGroup; range: PublicRelayMonitorRange; stationID:number; pelican:QueryState<PelicanGallery> }) {
   return <article className="group overflow-hidden rounded-[5px] border border-border/80 bg-card shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-brand/40 hover:shadow-md">
     <div className="p-4 sm:p-5">
       <div className="flex min-w-0 flex-wrap items-start justify-between gap-4">
@@ -134,6 +137,7 @@ function MonitorRow({ group, range }: { group: PublicGroupMonitorGroup; range: P
         />
       </div>
 
+      <PublicGroupPelicanResults stationID={stationID} groupID={group.external_id} query={pelican}/>
     </div>
   </article>
 }
@@ -152,6 +156,9 @@ export default function PublicRelayMonitorPage() {
   const [stationsError, setStationsError] = useState<string | null>(null)
   const selection = useMemo(() => resolvePublicRelayMonitorSelection(stations, routeStationID), [routeStationID, stations])
   const numericStationID = selection.mode === "selected" ? selection.stationID : 0
+  const pelican = useGroupPelicanGallery(numericStationID || null,true)
+  const pelicanRefetch=useRef(pelican.refetch)
+  pelicanRefetch.current=pelican.refetch
   const [range, setRange] = useState<PublicRelayMonitorRange>(defaultPublicRelayMonitorRange)
   const initialCache = useMemo(() => readMonitorBrowserCache(numericStationID, range), [numericStationID, range])
   const requestIDRef = useRef(0)
@@ -190,6 +197,7 @@ export default function PublicRelayMonitorPage() {
           : "监控数据的时间范围不匹配")
       }
       setData(next)
+      if(!document.hidden)void pelicanRefetch.current().catch(()=>{})
       writeMonitorBrowserCache(numericStationID, range, next)
       setError(null)
     } catch (requestError) {
@@ -292,7 +300,7 @@ export default function PublicRelayMonitorPage() {
       <section className="mt-5" aria-label="监控分组列表">
         {stationsError && !routeStationID ? <Alert variant="destructive" className="mb-4"><TriangleAlert /><AlertTitle>中转站列表读取失败</AlertTitle><AlertDescription>{stationsError}</AlertDescription></Alert> : null}
         {error ? <Alert variant="destructive" className="mb-4"><TriangleAlert /><AlertTitle>数据更新失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert> : null}
-        {stationsLoading && !routeStationID ? <LoadingCards /> : selection.mode === "auto" ? <LoadingCards /> : selection.mode === "choose" ? <div className="flex min-h-[420px] flex-col items-center justify-center border border-dashed border-border px-6 text-center"><Activity className="size-8 text-brand" /><p className="mt-3 text-sm font-semibold text-foreground">请选择要查看的中转站</p><p className="mt-1 text-xs text-muted-foreground">检测到多个中转站，请使用右上角的站点选择器进入对应的分组监控。</p></div> : selection.mode === "empty" && !stationsError ? <div className="flex min-h-[420px] items-center justify-center border border-dashed border-border px-6 text-center text-sm text-muted-foreground">当前还没有配置中转站</div> : loading && !data ? <LoadingCards /> : data ? data.groups.length ? <div className="grid min-h-[420px] gap-3 min-[1150px]:grid-cols-2">{data.groups.map((group) => <MonitorRow key={`${numericStationID}:${range}:${group.external_id}`} group={group} range={range} />)}</div> : <div className="flex min-h-[420px] items-center justify-center border border-border px-6 text-center text-sm text-muted-foreground">当前没有开启监控的分组</div> : <div className="flex min-h-[420px] items-center justify-center border border-border px-6 text-sm text-muted-foreground">暂无监控数据</div>}
+        {stationsLoading && !routeStationID ? <LoadingCards /> : selection.mode === "auto" ? <LoadingCards /> : selection.mode === "choose" ? <div className="flex min-h-[420px] flex-col items-center justify-center border border-dashed border-border px-6 text-center"><Activity className="size-8 text-brand" /><p className="mt-3 text-sm font-semibold text-foreground">请选择要查看的中转站</p><p className="mt-1 text-xs text-muted-foreground">检测到多个中转站，请使用右上角的站点选择器进入对应的分组监控。</p></div> : selection.mode === "empty" && !stationsError ? <div className="flex min-h-[420px] items-center justify-center border border-dashed border-border px-6 text-center text-sm text-muted-foreground">当前还没有配置中转站</div> : loading && !data ? <LoadingCards /> : data ? data.groups.length ? <div className="grid min-h-[420px] gap-3 min-[1150px]:grid-cols-2">{data.groups.map((group) => <MonitorRow key={`${numericStationID}:${range}:${group.external_id}`} group={group} range={range} stationID={numericStationID} pelican={pelican} />)}</div> : <div className="flex min-h-[420px] items-center justify-center border border-border px-6 text-center text-sm text-muted-foreground">当前没有开启监控的分组</div> : <div className="flex min-h-[420px] items-center justify-center border border-border px-6 text-sm text-muted-foreground">暂无监控数据</div>}
       </section>
       <span className="sr-only" aria-live="polite">{refreshing ? "正在刷新监控数据" : error ? "监控数据刷新失败" : "监控数据已更新"}</span>
     </div>

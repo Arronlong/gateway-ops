@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useContext, useEffect, useRef, useState } from "react"
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 import { SyncSettingsContext, SystemSettingsContext } from "@/lib/settings-context"
 import { apiFetch } from "@/lib/api"
 import { createSharedRequestRegistry } from "@/lib/shared-request"
@@ -37,6 +37,7 @@ import type {
   RelayUserBalanceHistory,
   RelayStation,
   PelicanGallery,
+  PelicanLibraryPage,
   DashboardRange,
   RelayUsageRange,
   LatencyBucketGranularity,
@@ -327,6 +328,33 @@ export function useCaptchaConfigs() {
 
 export function usePelicanGallery(stationID: number | null) {
   return useApi<PelicanGallery>(stationID == null ? null : `/relay-stations/${stationID}/pelican`)
+}
+export function usePelicanSources(sourceID="all") {
+ return useApi<import("./api-types").PelicanSourcesGallery>(`/relay-stations/pelican-sources${sourceID==="all"?"":`?source_id=${encodeURIComponent(sourceID)}`}`)
+}
+export function usePoolPelicanGallery(stationID:number|null) {
+ return useApi<PelicanGallery>(stationID==null?null:`/relay-stations/${stationID}/pelican?account_type=oauth`)
+}
+export function useGroupPelicanGallery(stationID:number|null,readOnly=false):QueryState<PelicanGallery> {
+ const query=useApi<import("./api-types").GroupPelicanGallery>(stationID==null?null:`${readOnly?"/public":""}/relay-stations/${stationID}/group-pelican?limit=3`)
+ const data=useMemo(()=>query.data?{page_enabled:query.data.page_enabled,configs:query.data.configs.map(config=>({...config,account_external_id:config.group_external_id})),results:query.data.results}:null,[query.data])
+ return {...query,data}
+}
+export function useChannelPelicanGallery(enabled = true) {
+  const query=useApi<import("./api-types").ChannelPelicanGallery>(enabled ? "/channels/pelican" : null)
+  const anyRunning=enabled&&query.data?.groups.some(group=>group.targets.some(target=>target.config.lease_until&&Date.parse(target.config.lease_until)>Date.now()))
+  const refetch=useRef(query.refetch)
+  refetch.current=query.refetch
+  useEffect(()=>{
+    if(!anyRunning)return
+    const timer=window.setInterval(()=>{if(!document.hidden)void refetch.current().catch(()=>{})},5000)
+    return()=>window.clearInterval(timer)
+  },[anyRunning])
+  return query
+}
+
+export function usePelicanLibrary(path: string | null) {
+  return useApi<PelicanLibraryPage>(path)
 }
 export function useRelayStations() {
   return useApi<RelayStation[]>("/relay-stations")

@@ -750,24 +750,32 @@ const (
 	IframeEmbeddingModeAllowlist = "allowlist"
 )
 
-// UISettings 控制管理界面的可选信息密度和系统级 UI 安全策略，不影响采集逻辑。
+// UISettings 保存管理界面、测智任务与系统级 UI 安全策略。
 type UISettings struct {
-	OperationsManagementEnabled bool     `json:"operations_management_enabled"`
-	ChannelsPageEnabled         bool     `json:"channels_page_enabled"`
-	ChannelsShowRateChanges     bool     `json:"channels_show_rate_changes"`
-	ChannelsShowChannelInfo     bool     `json:"channels_show_channel_info"`
-	ChannelsShowRecentLatency   bool     `json:"channels_show_recent_latency"`
-	ChannelsShowGroups          bool     `json:"channels_show_groups"`
-	ChannelsGroupsExpanded      bool     `json:"channels_groups_expanded"`
-	ChannelsShowStability       bool     `json:"channels_show_stability"`
-	ChannelsShowConsumption     bool     `json:"channels_show_consumption"`
-	RecentMetricsWindowHours    int      `json:"recent_metrics_window_hours"`
-	PelicanModel                string   `json:"pelican_model"`
-	PelicanPrompt               string   `json:"pelican_prompt"`
-	PelicanReasoningEffort      string   `json:"pelican_reasoning_effort"`
-	PelicanParallelCount        int      `json:"pelican_parallel_count"`
-	PelicanCronExpression       string   `json:"pelican_cron_expression"`
-	IframeEmbeddingEnabled      bool     `json:"iframe_embedding_enabled"`
-	IframeEmbeddingMode         string   `json:"iframe_embedding_mode"`
-	IframeEmbeddingAllowlist    []string `json:"iframe_embedding_allowlist"`
+	OperationsManagementEnabled bool              `json:"operations_management_enabled"`
+	ChannelsPageEnabled         bool              `json:"channels_page_enabled"`
+	ChannelsShowRateChanges     bool              `json:"channels_show_rate_changes"`
+	ChannelsShowChannelInfo     bool              `json:"channels_show_channel_info"`
+	ChannelsShowRecentLatency   bool              `json:"channels_show_recent_latency"`
+	ChannelsShowGroups          bool              `json:"channels_show_groups"`
+	ChannelsGroupsExpanded      bool              `json:"channels_groups_expanded"`
+	ChannelsShowStability       bool              `json:"channels_show_stability"`
+	ChannelsShowConsumption     bool              `json:"channels_show_consumption"`
+	RecentMetricsWindowHours    int               `json:"recent_metrics_window_hours"`
+	PelicanPageEnabled          bool              `json:"pelican_page_enabled"`
+	PelicanTasksEnabled         bool              `json:"pelican_tasks_enabled"`
+	PelicanHistoryCount         int               `json:"pelican_history_count"`
+	PelicanModel                string            `json:"pelican_model"`
+	PelicanPrompt               string            `json:"pelican_prompt"`
+	PelicanReasoningEffort      string            `json:"pelican_reasoning_effort"`
+	PelicanParallelCount        int               `json:"pelican_parallel_count"`
+	PelicanCronExpression       string            `json:"pelican_cron_expression"`
+	PelicanActiveTimezone       string            `json:"pelican_active_timezone"`
+	PelicanActiveStart          string            `json:"pelican_active_start"`
+	PelicanActiveEnd            string            `json:"pelican_active_end"`
+	PelicanActiveWeekdays       []int             `json:"pelican_active_weekdays"`
+	PelicanPlans                []PelicanTestPlan `json:"pelican_plans"`
+	IframeEmbeddingEnabled      bool              `json:"iframe_embedding_enabled"`
+	IframeEmbeddingMode         string            `json:"iframe_embedding_mode"`
+	IframeEmbeddingAllowlist    []string          `json:"iframe_embedding_allowlist"`
 }

@@ -3,9 +3,11 @@
 import { memo, startTransition, useEffect, useMemo, useRef, useState } from "react"
 import type { CSSProperties } from "react"
 import { toast } from "sonner"
+import { Link } from "react-router-dom"
 import {
   ArrowDown,
   ArrowUp,
+  Bird,
   CircleAlert,
   CheckCircle2,
   ChevronDown,
@@ -51,7 +53,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip"
 import { useConfirm } from "@/components/ui/confirm-dialog"
-import { useChannels, useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelLatencyTrends, useChannelMetrics, useChannelModelCatalog, useChannelRates, useChannelRelayAssociations, useRelayLatencyTrends } from "@/lib/queries"
+import { useChannels, useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelLatencyTrends, useChannelMetrics, useChannelModelCatalog, useChannelRates, useChannelRelayAssociations, useRelayLatencyTrends, useChannelPelicanGallery } from "@/lib/queries"
 import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { channelTypeLabel, money, relativeTime } from "@/lib/format"
@@ -61,6 +63,7 @@ import { RecentRequestMetrics } from "@/components/monitor/recent-request-metric
 import { recentRequestMetrics } from "@/lib/recent-request-metrics"
 import type { Channel, ChannelAccount, ChannelType, ChannelUsageSample, LatencyBucketGranularity, RateBoundAccount, RateSnapshot, RelayUsageRange, SystemSettings } from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
+import { ChannelPelicanPanel } from "@/components/monitor/channel-pelican-panel"
 import { linkedStationsByChannel as buildLinkedStationsByChannel, relayAccountComparisonKey, relayComparisonsByChannel } from "@/lib/channel-relay-association"
 import { RateChangeDot, RateTooltipBody } from "@/components/monitor/rate-change"
 import { LatencyStabilityLane } from "@/components/monitor/latency-stability-lane"
@@ -545,7 +548,7 @@ function ManualRatesEditor({ channelID, showRateChanges, defaultExpanded }: { ch
   }
 
   return (
-    <div className="mt-3 flex-1 border-t border-border pt-3">
+    <div className="mt-3 border-t border-border pt-3">
       <button type="button" className="mb-2.5 flex w-full items-center justify-between gap-2 text-left" onClick={() => setExpanded((value) => !value)} aria-expanded={expanded}>
         <div className="flex min-w-0 items-center gap-2">
           <p className="text-xs font-semibold text-foreground">渠道分组</p>
@@ -723,6 +726,7 @@ const DebouncedChannelSearchInput = memo(function DebouncedChannelSearchInput({ 
 export function ChannelCards({ usageRange = "today", latencyGranularity = "auto", uiSettings }: { usageRange?: RelayUsageRange; latencyGranularity?: LatencyBucketGranularity; uiSettings: SystemSettings }) {
   const { data: channels, loading, error, refetch } = useChannels()
   const associations = useChannelRelayAssociations()
+  const pelican = useChannelPelicanGallery(uiSettings.pelican_page_enabled)
   const modelCatalog = useChannelModelCatalog()
   const [monitorStatus, setMonitorStatus] = useState<MonitorStatusFilter>("enabled")
   const [managementMode, setManagementMode] = useState<ManagementModeFilter>("all")
@@ -1221,7 +1225,7 @@ actions={<>
           </Button>
         </div>
       ) : viewMode === "gallery" ? (
-        <div className="grid grid-cols-1 items-stretch gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+        <div className="grid grid-cols-1 items-start gap-3 p-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
           {filteredChannels.map((c) => {
             const metric = metricByChannel.get(c.id)
             const currentBalance = c.balance_mode === "manual" ? (metric?.current_balance ?? c.manual_balance) : c.last_balance
@@ -1231,7 +1235,7 @@ actions={<>
             const healthScore = healthScoreByChannel.get(c.id)
             const scoreTitle = healthScoreDescription(healthScore ?? null)
             return (
-              <Card key={c.id} className="@container flex h-full flex-col gap-0 border border-border p-4 shadow-none">
+              <Card key={c.id} className="@container flex flex-col gap-0 border border-border p-4 shadow-none">
                 <div className="flex flex-wrap items-center gap-2 border-b border-border pb-3">
                   <a
                     href={c.site_url}
@@ -1342,8 +1346,9 @@ actions={<>
                   loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")}
                 /> : null}
                 {channelSectionVisible(uiSettings, "consumption_trend") ? <ChannelConsumptionTrend buckets={consumptionBucketsByChannel.get(c.id) ?? []} loading={consumptionBuckets.loading} granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无消费数据`} /> : null}
-                {channelSectionVisible(uiSettings, "groups") ? (c.balance_mode !== "manual" ? <div className="mt-3 flex-1 border-t border-border"><InlineRates channelID={c.id} showRateChanges={channelSectionVisible(uiSettings, "rate_changes")} defaultExpanded={uiSettings.channels_groups_expanded} /></div> : <ManualRatesEditor channelID={c.id} showRateChanges={channelSectionVisible(uiSettings, "rate_changes")} defaultExpanded={uiSettings.channels_groups_expanded} />) : null}
+                {channelSectionVisible(uiSettings, "groups") ? (c.balance_mode !== "manual" ? <div className="mt-3 border-t border-border"><InlineRates channelID={c.id} showRateChanges={channelSectionVisible(uiSettings, "rate_changes")} defaultExpanded={uiSettings.channels_groups_expanded} /></div> : <ManualRatesEditor channelID={c.id} showRateChanges={channelSectionVisible(uiSettings, "rate_changes")} defaultExpanded={uiSettings.channels_groups_expanded} />) : null}
 
+                {uiSettings.pelican_page_enabled ? <ChannelPelicanPanel channel={c} query={pelican} limit={3}/> : null}
 				<div className="mt-3 grid grid-cols-3 gap-2">
 				  <Button
                     variant="outline"
@@ -1483,6 +1488,7 @@ actions={<>
               {visibleColumns.has("remark") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">渠道备注</p><p className="line-clamp-2 text-xs text-muted-foreground" title={c.remark || "未填写渠道备注"}>{c.remark || "未填写"}</p></div> : null}
 
               <div className="flex min-w-0 flex-nowrap justify-start gap-1.5 lg:sticky lg:right-0 lg:z-30 lg:self-stretch lg:items-center lg:justify-end lg:bg-card">
+                {uiSettings.pelican_page_enabled ? <Tooltip delayDuration={200}><TooltipTrigger asChild><TableActionButton asChild className="shrink-0"><Link to={`/pelican?channel_id=${c.id}`} aria-label={`${c.name}\u9e48\u9e55\u6d4b\u667a`}><Bird className="size-3.5 text-teal-600" /></Link></TableActionButton></TooltipTrigger><TooltipContent side="top">{"\u9e48\u9e55\u6d4b\u667a"}</TooltipContent></Tooltip> : null}
                 <Tooltip delayDuration={200}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0" aria-label={c.balance_mode === "manual" ? "计算余额" : "同步渠道"} disabled={!!syncState[c.id]?.running} onClick={() => startStream(c, "sync")}><RefreshCw className={cn("size-3.5", syncState[c.id]?.running && "animate-spin")} /></TableActionButton></TooltipTrigger><TooltipContent side="top">{c.balance_mode === "manual" ? "计算余额" : "同步"}</TooltipContent></Tooltip>
                 <Tooltip delayDuration={200}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0" aria-label="测试登录" disabled={c.balance_mode === "manual" || !!syncState[c.id]?.running} onClick={() => startStream(c, "test-login")}><LogIn className="size-3.5" /></TableActionButton></TooltipTrigger><TooltipContent side="top">{c.balance_mode === "manual" ? "手动渠道无需登录" : "测试登录"}</TooltipContent></Tooltip>
                 <Tooltip delayDuration={200}><TooltipTrigger asChild><TableActionButton type="button" className="shrink-0" aria-label="编辑渠道" onClick={() => { setEditing(c); setCreating(true) }}><Pencil className="size-3.5" /></TableActionButton></TooltipTrigger><TooltipContent side="top">{c.balance_mode === "auto" ? "渠道 / 账号" : "编辑"}</TooltipContent></Tooltip>

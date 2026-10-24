@@ -197,7 +197,8 @@ test('\u5217\u8868\u548c\u56fe\u518c\u4ec5\u5c55\u793a\u5f53\u524d\u7ad9\u70b9\u
   assert.equal(typeof page.RelayAccountGalleryCard, 'function')
   const account = { external_id: 1, name: 'channel', platform: 'newapi', type: 'apikey', risk_state: 'cost_unknown', schedulable: true, priority: 5, pool_mode_retry_count: 3, concurrency: 9, current_concurrency: 1, current_groups: [], suggestions: [], downgrade_groups: [], latency_samples: [], candidate_groups: [] }
   const html = renderToStaticMarkup(React.createElement(page.RelayAccountGalleryCard, { account, overview, allowProbe: false, healthScore: null, stabilityBuckets: [], consumptionBuckets: [], channelLinks: [], channelLatencyBucketsByChannel: new Map(), channelRecentSamplesByChannel: new Map(), channelConsumptionBucketsByChannel: new Map(), onToggle() {}, onSchedulableChange() {}, onApply() {}, onAddDowngrade() {}, onEditGroups() {}, onProbe() {}, onTest() {}, onDelete() {} }))
-  assert.doesNotMatch(html, /\u91cd\u8bd5|\u5e76\u53d1|\u5bb9\u91cf/)
+  assert.doesNotMatch(html, /\u91cd\u8bd5\u6b21\u6570|\u6c60\u6a21\u5f0f|\u5e76\u53d1|\u5bb9\u91cf/)
+  assert.match(html, /\u91cd\u8bd5\u611f\u77e5\u6210\u529f\u7387/)
   assert.doesNotMatch(html, /aria-label="\u63a2\u6d4b\u500d\u7387"/)
   assert.match(html, /\u4f18\u5148\u7ea7/)
   assert.match(html, /\u5f00\u542f.*\u8c03\u5ea6|\u5173\u95ed.*\u8c03\u5ea6/)

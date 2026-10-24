@@ -11,6 +11,8 @@ import (
 )
 
 func registerPublicRelayStations(g *gin.RouterGroup, d *Deps) {
+	g.GET("/relay-stations/:id/group-pelican", func(c *gin.Context) { groupPelicanGallery(c, d, true) })
+	g.GET("/relay-stations/:id/groups/:external_id/pelican/results/:result_id", func(c *gin.Context) { groupPelicanResult(c, d, true) })
 	g.GET("/relay-stations", func(c *gin.Context) {
 		publicRelayStations(c, d)
 	})

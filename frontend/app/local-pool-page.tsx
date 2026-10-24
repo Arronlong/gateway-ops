@@ -13,6 +13,8 @@ import { apiFetch } from "@/lib/api"
 import type { DashboardRange, RelayAccountView } from "@/lib/api-types"
 import { useRelayOverview, useRelayStations, useRelayUsage } from "@/lib/queries"
 import { cn } from "@/lib/utils"
+import { PelicanTargetPanel } from "@/components/relay/pelican-target-panel"
+import { usePoolPelicanGallery, useSystemSettings } from "@/lib/queries"
 
 type ViewMode = "aggregate" | "accounts"
 type AccountSortKey = "expires_at" | "name"
@@ -58,6 +60,8 @@ export default function LocalPoolPage() {
   const [busy, setBusy] = useState(false)
   const overview = useRelayOverview(stationID)
   const usage = useRelayUsage(stationID, range)
+  const settings=useSystemSettings()
+  const pelican = usePoolPelicanGallery(settings.data?.pelican_page_enabled?stationID:null)
 
   useEffect(() => { if (stationID == null && stations.data?.[0]) setStationID(stations.data[0].id) }, [stationID, stations.data])
 
@@ -123,7 +127,7 @@ export default function LocalPoolPage() {
 
   return <section className="space-y-4">
     <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
-      <div><h1 className="flex items-center gap-2 text-xl font-bold"><UsersRound className="size-5 text-brand" />本地号池</h1><p className="mt-1 text-xs text-muted-foreground">同步中转站 OAuth 账号，汇总账号状态、用户扣费、请求和 Token；仅作统计展示。</p></div>
+      <div><h1 className="flex items-center gap-2 text-xl font-bold"><UsersRound className="size-5 text-brand" />本地号池</h1><p className="mt-1 text-xs text-muted-foreground">同步中转站 OAuth 账号，查看账号状态和用量，按账号配置鹈鹕测智。</p></div>
       <Button size="sm" className="h-9 gap-1.5" disabled={!stationID || busy} onClick={() => void syncOAuth()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步 OAuth 号池</Button>
     </header>
 
@@ -160,5 +164,17 @@ actions={<>
         {view === "aggregate" ? <div className="min-w-[900px]"><div className="sticky top-0 z-30 grid grid-cols-[150px_100px_100px_130px_130px_150px_minmax(180px,1fr)] gap-0 border-b border-border bg-muted text-[11px] text-foreground/90 font-medium [&>*]:px-4 [&>*]:py-2"><span>账号类型</span><span>账号数</span><span>正常</span><span>用户扣费</span><span>请求</span><span>Token</span><span>状态分布</span></div>{groups.length ? groups.map((group) => <div key={group.plan} className="grid grid-cols-[150px_100px_100px_130px_130px_150px_minmax(180px,1fr)] items-center gap-0 border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-2.5"><span className="font-semibold capitalize">{group.plan}</span><span className="font-mono tabular-nums">{integer(group.accounts.length)}</span><span className="font-mono text-success">{group.accounts.filter((account) => statusName(account) === "正常").length}</span><span className="font-mono font-semibold text-brand">{money(group.charge)}</span><span className="font-mono">{integer(group.requests)}</span><span className="font-mono">{integer(group.tokens)}</span><span className="text-muted-foreground">正常 {group.accounts.filter((account) => statusName(account) === "正常").length} · 未调度 {group.accounts.filter((account) => statusName(account) === "未调度").length} · 异常 {group.accounts.filter((account) => statusName(account) === "异常").length}</span></div>) : <p className="py-12 text-center text-sm text-muted-foreground">当前中转站没有符合条件的 OAuth 账号</p>}</div> : <div className="min-w-[1250px]"><div className="sticky top-0 z-30 grid grid-cols-[80px_minmax(190px,1fr)_100px_100px_90px_90px_150px_120px_130px_150px] gap-0 border-b border-border bg-muted text-[11px] text-foreground/90 font-medium [&>*]:px-4 [&>*]:py-2"><span>ID</span><span>账号</span><span>平台</span><span>订阅类型</span><span>状态</span><span>优先级</span><span>到期时间</span><span>用户扣费</span><span>请求</span><span>Token</span></div>{sortedFiltered.length ? sortedFiltered.map((account) => <div key={account.external_id} className="grid grid-cols-[80px_minmax(190px,1fr)_100px_100px_90px_90px_150px_120px_130px_150px] items-center gap-0 border-b border-border text-xs last:border-0 [&>*]:px-4 [&>*]:py-2.5"><span className="font-mono text-muted-foreground">#{account.external_id}</span><div className="min-w-0"><p className="truncate font-medium" title={account.name}>{account.name}</p><p className="mt-0.5 text-[11px] text-muted-foreground">最近调用 {account.last_used_at ? new Date(account.last_used_at).toLocaleString("zh-CN") : "暂无"}</p></div><span>{account.platform || "-"}</span><span>{account.plan}</span><span className={cn(statusName(account) === "正常" ? "text-success" : statusName(account) === "异常" ? "text-danger" : "text-warning")}>{statusName(account)}</span><span className="font-mono">{account.priority}</span><span className="text-xs">{expiryName(account.expires_at)}</span><span className="font-mono font-semibold text-brand">{money(account.charge)}</span><span className="font-mono">{integer(account.requestCount)}</span><span className="font-mono">{integer(account.tokens)}</span></div>) : <p className="py-12 text-center text-sm text-muted-foreground">当前筛选没有账号</p>}</div>}
       </div></CardContent>
     </Card>
+    {stationID&&settings.data?.pelican_page_enabled ? <Card className="min-w-0">
+      <ListPanelHeader title={<CardTitle className="text-sm font-semibold">账号鹈鹕测智</CardTitle>} meta={<span className="text-xs text-muted-foreground">{sortedFiltered.length} 个账号 · 独立控制自动测智</span>}/>
+      <CardContent className="max-h-[70vh] overflow-y-auto border-t border-border p-3">
+        <div className="grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2 2xl:grid-cols-3">
+          {sortedFiltered.map(account=><section key={account.external_id} className="min-w-0 rounded-lg border border-border p-3" data-pelican-pool-account={account.external_id}>
+            <h3 className="truncate text-sm font-semibold" title={account.name}>{account.name}</h3>
+            <p className="mt-1 text-[10px] text-muted-foreground">{account.platform} · #{account.external_id}</p>
+            <PelicanTargetPanel stationID={stationID} externalID={account.external_id} name={account.name} scope="account" query={pelican}/>
+          </section>)}
+        </div>
+      </CardContent>
+    </Card> : null}
   </section>
 }

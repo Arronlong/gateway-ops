@@ -22,6 +22,7 @@ import SystemSettingsPage from '@/app/system-settings-page'
 import RelayStationsPage from '@/app/relay-stations-page'
 import OperationsCostsPage from '@/app/operations-costs-page'
 import LocalPoolPage from '@/app/local-pool-page'
+import PelicanLibraryPage from '@/app/pelican-library-page'
 import PublicRelayMonitorPage from '@/app/public-relay-monitor-page'
 import PublicModelPricingPage from '@/app/public-model-pricing-page'
 import PublicServiceStatusPage from '@/app/public-service-status-page'
@@ -62,6 +63,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="settings" element={<SystemSettingsPage />} />
             <Route path="relay-stations" element={<RelayStationsPage />} />
+            <Route path="pelican" element={<PelicanLibraryPage />} />
             <Route path="operations/costs" element={<OperationsCostsPage />} />
             <Route path="operations/local-pool" element={<LocalPoolPage />} />
           </Route>

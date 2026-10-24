@@ -1,66 +1,133 @@
 package storage
 
 import (
+	"encoding/json"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"time"
-	_ "time/tzdata"
 
-	"github.com/robfig/cron/v3"
 	"gorm.io/gorm"
 )
 
 const DefaultPelicanPrompt = "\u521b\u5efa\u4e00\u4e2a HTML\uff0c\u5185\u5bb9\u662f SVG \u7ed8\u5236\u4e00\u4e2a\u9e48\u9e55\u9a91\u81ea\u884c\u8f66\u7684 2D \u52a8\u753b\uff0c\u4f60\u4e0d\u9700\u8981\u4efb\u4f55\u6d4b\u8bd5\u3002"
 
 type PelicanSettings struct {
+	PageEnabled     bool
+	TasksEnabled    bool
+	HistoryCount    int
 	Model           string
 	Prompt          string
 	ReasoningEffort string
 	ParallelCount   int
 	CronExpression  string
+	ActiveTimezone  string
+	ActiveStart     string
+	ActiveEnd       string
+	ActiveWeekdays  []int
+	Plans           []PelicanTestPlan
+}
+
+type PelicanTestPlan struct {
+	Model           string `json:"model"`
+	Prompt          string `json:"prompt"`
+	ReasoningEffort string `json:"reasoning_effort"`
+}
+
+func normalizedPelicanPlans(plans []PelicanTestPlan, legacyModel, legacyPrompt, legacyEffort string) []PelicanTestPlan {
+	if plans != nil && len(plans) == 0 {
+		return []PelicanTestPlan{{Prompt: DefaultPelicanPrompt, ReasoningEffort: "medium"}}
+	}
+	if len(plans) > 0 {
+		return append([]PelicanTestPlan(nil), plans...)
+	}
+	return []PelicanTestPlan{{Model: legacyModel, Prompt: legacyPrompt, ReasoningEffort: legacyEffort}}
+}
+
+func ConfiguredPelicanPlans(plans []PelicanTestPlan) []PelicanTestPlan {
+	configured := make([]PelicanTestPlan, 0, len(plans))
+	for _, plan := range plans {
+		if len(PelicanModelPriorityList(plan.Model)) > 0 {
+			configured = append(configured, plan)
+		}
+	}
+	return configured
+}
+
+func PelicanModelPriorityList(value string) []string {
+	fields := strings.FieldsFunc(value, func(r rune) bool {
+		return r == ',' || r == '\uFF0C' || r == ';' || r == '\uFF1B' || r == '\n' || r == '\r'
+	})
+	models := make([]string, 0, len(fields))
+	seen := make(map[string]struct{}, len(fields))
+	for _, field := range fields {
+		model := strings.TrimSpace(field)
+		if model == "" {
+			continue
+		}
+		if _, exists := seen[model]; exists {
+			continue
+		}
+		seen[model] = struct{}{}
+		models = append(models, model)
+	}
+	return models
 }
 
 func (s UISettings) PelicanSettings() PelicanSettings {
+	plans := normalizedPelicanPlans(s.PelicanPlans, s.PelicanModel, s.PelicanPrompt, s.PelicanReasoningEffort)
 	return PelicanSettings{
-		Model: s.PelicanModel, Prompt: s.PelicanPrompt, ReasoningEffort: s.PelicanReasoningEffort,
-		ParallelCount: s.PelicanParallelCount, CronExpression: s.PelicanCronExpression,
+		PageEnabled: s.PelicanPageEnabled, TasksEnabled: s.PelicanTasksEnabled, HistoryCount: s.PelicanHistoryCount,
+		Model: plans[0].Model, Prompt: plans[0].Prompt, ReasoningEffort: plans[0].ReasoningEffort,
+		ParallelCount: s.PelicanParallelCount, CronExpression: s.PelicanCronExpression, Plans: plans,
+		ActiveTimezone: normalizePelicanTimezone(s.PelicanActiveTimezone),
+		ActiveStart:    s.PelicanActiveStart, ActiveEnd: s.PelicanActiveEnd,
+		ActiveWeekdays: normalizedPelicanWeekdays(s.PelicanActiveWeekdays),
 	}
 }
 
 func NextPelicanRun(expression string, now time.Time) (time.Time, error) {
-	parser := cron.NewParser(cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow)
-	schedule, err := parser.Parse("CRON_TZ=Asia/Shanghai " + expression)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("\u9891\u7387\u5fc5\u987b\u662f\u6709\u6548\u7684\u4e94\u6bb5 Cron: %w", err)
-	}
-	next := schedule.Next(now)
-	if next.IsZero() {
-		return time.Time{}, errors.New("\u9891\u7387\u6ca1\u6709\u53ef\u6267\u884c\u7684\u4e0b\u6b21\u65f6\u95f4")
-	}
-	return next.UTC(), nil
+	return (PelicanSettings{CronExpression: expression, ActiveStart: "00:00", ActiveEnd: "00:00"}).NextRun(now)
 }
 
 func ValidatePelicanSettings(s PelicanSettings) error {
-	if len(s.Model) > 256 || s.Model != strings.TrimSpace(s.Model) {
-		return errors.New("\u8bf7\u586b\u5199\u6709\u6548\u6a21\u578b\uff0c\u6700\u957f 256 \u5b57\u8282")
+	if s.HistoryCount < 1 || s.HistoryCount > PelicanHistoryLimitMax {
+		return errors.New("作品保留数量必须是 1 到 100")
 	}
-	if len(s.Prompt) > 32000 || strings.TrimSpace(s.Prompt) == "" {
-		return errors.New("\u9898\u76ee\u4e0d\u80fd\u4e3a\u7a7a\uff0c\u6700\u957f 32000 \u5b57\u8282")
+	plans := normalizedPelicanPlans(s.Plans, s.Model, s.Prompt, s.ReasoningEffort)
+	if len(plans) > 8 {
+		return errors.New("测智方案数量必须是 1 到 8 个")
 	}
-	switch s.ReasoningEffort {
-	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
-	default:
-		return errors.New("\u601d\u8003\u5f3a\u5ea6\u65e0\u6548")
+	for _, plan := range plans {
+		if len(plan.Model) > 256 {
+			return errors.New("请填写有效模型，最长 256 字节")
+		}
+		if len(plan.Prompt) > 32000 || strings.TrimSpace(plan.Prompt) == "" {
+			return errors.New("题目不能为空，最长 32000 字节")
+		}
+		switch plan.ReasoningEffort {
+		case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
+		default:
+			return errors.New("思考强度无效")
+		}
+	}
+	if len(plans) > 1 {
+		for _, plan := range plans {
+			if len(PelicanModelPriorityList(plan.Model)) == 0 {
+				return errors.New("每个测智方案都必须配置模型优先列表")
+			}
+		}
 	}
 	if s.ParallelCount < 1 || s.ParallelCount > 8 {
-		return errors.New("\u5e76\u884c\u4efd\u6570\u5fc5\u987b\u662f 1 \u5230 8")
+		return errors.New("并行份数必须是 1 到 8")
 	}
 	if len(s.CronExpression) > 128 {
-		return errors.New("Cron \u8868\u8fbe\u5f0f\u8fc7\u957f")
+		return errors.New("Cron 表达式过长")
 	}
-	_, err := NextPelicanRun(s.CronExpression, time.Now())
+	if err := validatePelicanWeekdays(s.ActiveWeekdays); err != nil {
+		return err
+	}
+	_, err := s.NextRun(time.Now())
 	return err
 }
 
@@ -72,6 +139,8 @@ func (s *Settings) PelicanSettings() (PelicanSettings, error) {
 	}{
 		{SettingPelicanModel, &settings.Model}, {SettingPelicanPrompt, &settings.Prompt},
 		{SettingPelicanReasoningEffort, &settings.ReasoningEffort}, {SettingPelicanCronExpression, &settings.CronExpression},
+		{SettingPelicanActiveTimezone, &settings.ActiveTimezone},
+		{SettingPelicanActiveStart, &settings.ActiveStart}, {SettingPelicanActiveEnd, &settings.ActiveEnd},
 	} {
 		value, found, err := s.Get(field.key)
 		if err != nil {
@@ -81,7 +150,18 @@ func (s *Settings) PelicanSettings() (PelicanSettings, error) {
 			*field.target = value
 		}
 	}
-	value, found, err := s.Get(SettingPelicanParallelCount)
+	settings.ActiveTimezone = normalizePelicanTimezone(settings.ActiveTimezone)
+	value, found, err := s.Get(SettingPelicanActiveWeekdays)
+	if err != nil {
+		return settings, err
+	}
+	if found {
+		if err := json.Unmarshal([]byte(value), &settings.ActiveWeekdays); err != nil {
+			return settings, err
+		}
+	}
+	settings.ActiveWeekdays = normalizedPelicanWeekdays(settings.ActiveWeekdays)
+	value, found, err = s.Get(SettingPelicanParallelCount)
 	if err != nil {
 		return settings, err
 	}
@@ -91,7 +171,59 @@ func (s *Settings) PelicanSettings() (PelicanSettings, error) {
 			return settings, err
 		}
 	}
+	value, found, err = s.Get(SettingPelicanPlans)
+	if err != nil {
+		return settings, err
+	}
+	if found {
+		if err := json.Unmarshal([]byte(value), &settings.Plans); err != nil {
+			return settings, err
+		}
+	} else {
+		settings.Plans = normalizedPelicanPlans(nil, settings.Model, settings.Prompt, settings.ReasoningEffort)
+	}
+	if len(settings.Plans) == 0 {
+		settings.Plans = normalizedPelicanPlans(settings.Plans, settings.Model, settings.Prompt, settings.ReasoningEffort)
+	}
+	settings.HistoryCount, err = s.PelicanHistoryCount()
+	if err != nil {
+		return settings, err
+	}
+	settings.Model, settings.Prompt, settings.ReasoningEffort = settings.Plans[0].Model, settings.Plans[0].Prompt, settings.Plans[0].ReasoningEffort
+	for _, field := range []struct {
+		key    string
+		target *bool
+	}{
+		{SettingPelicanPageEnabled, &settings.PageEnabled},
+		{SettingPelicanTasksEnabled, &settings.TasksEnabled},
+	} {
+		value, found, err := s.Get(field.key)
+		if err != nil {
+			return settings, err
+		}
+		if found {
+			*field.target, err = strconv.ParseBool(strings.TrimSpace(value))
+			if err != nil {
+				return settings, err
+			}
+		}
+	}
 	return settings, ValidatePelicanSettings(settings)
+}
+
+func (s *Settings) PelicanHistoryCount() (int, error) {
+	value, found, err := s.Get(SettingPelicanHistoryCount)
+	if err != nil {
+		return 0, err
+	}
+	if !found {
+		return PelicanHistoryLimit, nil
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || count < 1 || count > PelicanHistoryLimitMax {
+		return 0, errors.New("invalid pelican history count")
+	}
+	return count, nil
 }
 
 func (s *Settings) MigratePelicanSettings() error {
@@ -121,12 +253,12 @@ func (s *Settings) MigratePelicanSettings() error {
 		if err != nil {
 			return err
 		}
-		for _, key := range []string{SettingPelicanModel, SettingPelicanPrompt, SettingPelicanReasoningEffort, SettingPelicanParallelCount, SettingPelicanCronExpression} {
+		for _, key := range []string{SettingPelicanModel, SettingPelicanPrompt, SettingPelicanReasoningEffort, SettingPelicanParallelCount, SettingPelicanCronExpression, SettingPelicanPlans} {
 			if err := store.Set(key, values[key]); err != nil {
 				return err
 			}
 		}
-		next, err := NextPelicanRun(settings.PelicanCronExpression, time.Now())
+		next, err := settings.PelicanSettings().NextRun(time.Now())
 		if err != nil {
 			return err
 		}

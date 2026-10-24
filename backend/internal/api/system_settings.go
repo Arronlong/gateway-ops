@@ -38,6 +38,11 @@ func registerSystemSettings(g *gin.RouterGroup, d *Deps) {
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
+		pelican := settings.PelicanSettings()
+		settings.PelicanPlans = pelican.Plans
+		settings.PelicanModel = pelican.Model
+		settings.PelicanPrompt = pelican.Prompt
+		settings.PelicanReasoningEffort = pelican.ReasoningEffort
 		if err := validateSystemSettings(settings); err != nil {
 			fail(c, http.StatusBadRequest, err)
 			return

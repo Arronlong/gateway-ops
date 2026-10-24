@@ -27,6 +27,7 @@ func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp.GET("/latency-buckets", func(c *gin.Context) { channelLatencyBuckets(c, d) })
 	gp.GET("/consumption-buckets", func(c *gin.Context) { channelConsumptionBuckets(c, d) })
 	gp.GET("/associations", func(c *gin.Context) { channelRelayAssociations(c, d) })
+	gp.GET("/pelican", func(c *gin.Context) { channelPelicanGallery(c, d) })
 	gp.GET("/model-catalog", func(c *gin.Context) { channelModelCatalog(c, d) })
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllChannels(c, d) })
 	gp.POST("", func(c *gin.Context) { createChannel(c, d) })

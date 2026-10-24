@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useTheme } from "next-themes"
-import { Activity, Bell, BookOpen, ChevronDown, ExternalLink, Github, Home, LayoutList, LogOut, RefreshCw, Server, Settings2, ShieldCheck, Sun, Moon, WalletCards, UsersRound } from "lucide-react"
+import { Activity, Bell, Bird, BookOpen, ChevronDown, ExternalLink, Github, Home, LayoutList, LogOut, RefreshCw, Server, Settings2, ShieldCheck, Sun, Moon, WalletCards, UsersRound } from "lucide-react"
 import { Link, NavLink, useLocation } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import {
@@ -66,6 +66,7 @@ export function MonitorHeader() {
     { to: "/", label: "首页", icon: Home, end: true },
     ...(channelPageEnabled ? [{ to: "/channels", label: "渠道管理", icon: LayoutList }] : []),
     { to: "/relay-stations", label: "中转站管理", icon: Server },
+    ...(systemSettings.data?.pelican_page_enabled === true ? [{ to: "/pelican", label: "鹈鹕测智", icon: Bird }] : []),
   ]
 
   const operationItems = [
