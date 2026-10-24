@@ -10,9 +10,5 @@ func (s *Scheduler) runPelicans() {
 	if root == nil {
 		root = context.Background()
 	}
-	ctx, cancel := context.WithTimeout(root, 11*time.Minute)
-	defer cancel()
-	if err := s.relay.RunDuePelicans(ctx); err != nil {
-		s.log.Error("scheduled pelican tests failed", "error", err)
-	}
+	s.track(root, "pelican", 11*time.Minute, s.relay.RunDuePelicans)
 }

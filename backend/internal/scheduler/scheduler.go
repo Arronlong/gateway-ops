@@ -13,6 +13,7 @@ import (
 	"github.com/guliansheng/gateway-ops/internal/monitor"
 	"github.com/guliansheng/gateway-ops/internal/relay"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"github.com/guliansheng/gateway-ops/internal/tasklog"
 	"github.com/robfig/cron/v3"
 )
 
@@ -34,6 +35,9 @@ type Scheduler struct {
 	relayRateSyncID      cron.EntryID
 	relaySnapshotSyncID  cron.EntryID
 	dailyBalanceID       cron.EntryID
+	retryTaskRunsWG      sync.WaitGroup
+	pendingTaskRunsMu    sync.Mutex
+	pendingTaskRuns      map[uint]pendingTaskRun
 	jobsMu               sync.Mutex
 	channelSyncMu        sync.Mutex
 	relaySyncMu          sync.Mutex
@@ -68,13 +72,10 @@ func New(
 }
 
 func (s *Scheduler) Start() error {
-	// Recover today's row before cron starts. ON CONFLICT keeps this harmless
-	// when the midnight job already ran.
-	if rows, err := s.rates.CaptureDailyBalances(time.Now()); err != nil {
-		s.log.Warn("capture startup daily channel balances failed", "err", err)
-	} else if rows > 0 {
-		s.log.Info("captured startup daily channel balances", "rows", rows)
+	if err := s.settings.TaskRuns().InterruptRunning(time.Now().UTC()); err != nil {
+		return fmt.Errorf("recover task runs: %w", err)
 	}
+	s.runDailyBalances()
 	entryID, err := s.cron.AddFunc("0 0 0 * * *", s.runDailyBalances)
 	if err != nil {
 		return err
@@ -108,6 +109,8 @@ func (s *Scheduler) Start() error {
 		}
 	}
 	s.cron.Start()
+	s.retryTaskRunsWG.Add(1)
+	go func() { defer s.retryTaskRunsWG.Done(); s.retryTaskRuns() }()
 	if settings, settingsErr := s.settings.SyncSettings(); settingsErr == nil && settings.ChannelConfigured && settings.ChannelEnabled {
 		// Populate channel-owned usage immediately after startup. This runs
 		// asynchronously so API startup is not blocked by remote channel I/O.
@@ -124,12 +127,13 @@ func (s *Scheduler) Start() error {
 }
 
 func (s *Scheduler) runDailyBalances() {
-	rows, err := s.rates.CaptureDailyBalances(time.Now())
-	if err != nil {
-		s.log.Warn("capture daily channel balances failed", "err", err)
-		return
-	}
-	s.log.Info("captured daily channel balances", "rows", rows)
+	s.track(context.Background(), "daily_balances", 5*time.Minute, func(ctx context.Context) error {
+		rows, err := s.rates.CaptureDailyBalances(time.Now())
+		if err == nil {
+			tasklog.Add(ctx, "INFO", "已保存 %d 条每日余额快照", rows)
+		}
+		return err
+	})
 }
 
 func (s *Scheduler) SyncSettings() (storage.SyncSettings, error) {
@@ -204,18 +208,18 @@ func (s *Scheduler) Stop() {
 	if s.cron != nil {
 		<-s.cron.Stop().Done()
 	}
+	s.retryTaskRunsWG.Wait()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	s.flushTaskRunsContext(ctx)
 }
 
 func (s *Scheduler) runBalance() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	s.monitor.ScanAllBalances(ctx)
+	s.track(context.Background(), "legacy_balance", 5*time.Minute, func(ctx context.Context) error { s.monitor.ScanAllBalances(ctx); return ctx.Err() })
 }
 
 func (s *Scheduler) runRates() {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
-	defer cancel()
-	s.monitor.ScanAllRates(ctx)
+	s.track(context.Background(), "legacy_rates", 5*time.Minute, func(ctx context.Context) error { s.monitor.ScanAllRates(ctx); return ctx.Err() })
 }
 
 func (s *Scheduler) runChannelSync() {
@@ -224,10 +228,14 @@ func (s *Scheduler) runChannelSync() {
 		return
 	}
 	defer s.channelSyncMu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Minute)
-	defer cancel()
-	s.monitor.SyncAll(ctx, false)
+	s.track(context.Background(), "channel_sync", 20*time.Minute, func(ctx context.Context) error {
+		result := s.monitor.SyncAll(ctx, false)
+		tasklog.Add(ctx, "INFO", "渠道同步：总数 %d，成功 %d，失败 %d", result.Total, result.Succeeded, result.Failed)
+		if result.Failed > 0 {
+			return fmt.Errorf("%d 个渠道同步失败", result.Failed)
+		}
+		return ctx.Err()
+	})
 }
 
 func (s *Scheduler) runRelayRateSync() {
@@ -238,12 +246,14 @@ func (s *Scheduler) runRelayRateSync() {
 	defer s.relayRateRunning.Store(false)
 	s.relaySyncMu.Lock()
 	defer s.relaySyncMu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	if _, _, err := s.relay.SyncAllRates(ctx); err != nil {
-		s.log.Warn("sync relay station rates failed", "err", err)
-	}
+	s.track(context.Background(), "relay_rate_sync", 10*time.Minute, func(ctx context.Context) error {
+		succeeded, failed, err := s.relay.SyncAllRates(ctx)
+		tasklog.Add(ctx, "INFO", "中转站同步：成功 %d，失败 %d", succeeded, failed)
+		if err == nil && failed > 0 {
+			err = fmt.Errorf("%d 个中转站同步失败", failed)
+		}
+		return err
+	})
 }
 
 func (s *Scheduler) runRelaySnapshotSync() {
@@ -254,12 +264,14 @@ func (s *Scheduler) runRelaySnapshotSync() {
 	defer s.relaySnapshotRunning.Store(false)
 	s.relaySyncMu.Lock()
 	defer s.relaySyncMu.Unlock()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-	defer cancel()
-	if _, _, err := s.relay.SyncAllSnapshots(ctx); err != nil {
-		s.log.Warn("sync relay station snapshots failed", "err", err)
-	}
+	s.track(context.Background(), "relay_snapshot_sync", 10*time.Minute, func(ctx context.Context) error {
+		succeeded, failed, err := s.relay.SyncAllSnapshots(ctx)
+		tasklog.Add(ctx, "INFO", "中转站同步：成功 %d，失败 %d", succeeded, failed)
+		if err == nil && failed > 0 {
+			err = fmt.Errorf("%d 个中转站同步失败", failed)
+		}
+		return err
+	})
 }
 
 func (s *Scheduler) hasRetention() bool {
@@ -269,6 +281,10 @@ func (s *Scheduler) hasRetention() bool {
 
 // runRetention 按配置删除过期历史。任一表失败不影响其它，全部错误写日志。
 func (s *Scheduler) runRetention() {
+	s.track(context.Background(), "retention", 10*time.Minute, s.retainHistory)
+}
+
+func (s *Scheduler) retainHistory(ctx context.Context) error {
 	r := s.cfg.Retention
 	now := time.Now()
 
@@ -276,9 +292,9 @@ func (s *Scheduler) runRetention() {
 		cutoff := now.AddDate(0, 0, -r.MonitorLogsDays)
 		n, err := s.monLogs.DeleteBefore(cutoff)
 		if err != nil {
-			s.log.Warn("retention monitor_logs failed", "err", err)
+			tasklog.Add(ctx, "ERROR", "monitor_logs: %v", err)
 		} else if n > 0 {
-			s.log.Info("retention monitor_logs deleted", "rows", n, "before", cutoff)
+			tasklog.Add(ctx, "INFO", "monitor_logs: deleted=%d before=%s", n, cutoff.Format(time.RFC3339))
 		}
 	}
 
@@ -286,9 +302,9 @@ func (s *Scheduler) runRetention() {
 		cutoff := now.AddDate(0, 0, -r.BalanceSnapshotsDays)
 		n, err := s.rates.DeleteBalanceSnapshotsBefore(cutoff)
 		if err != nil {
-			s.log.Warn("retention balance_snapshots failed", "err", err)
+			tasklog.Add(ctx, "ERROR", "balance_snapshots: %v", err)
 		} else if n > 0 {
-			s.log.Info("retention balance_snapshots deleted", "rows", n, "before", cutoff)
+			tasklog.Add(ctx, "INFO", "balance_snapshots: deleted=%d before=%s", n, cutoff.Format(time.RFC3339))
 		}
 	}
 
@@ -296,9 +312,10 @@ func (s *Scheduler) runRetention() {
 		cutoff := now.AddDate(0, 0, -r.NotificationLogsDays)
 		n, err := s.notifies.DeleteLogsBefore(cutoff)
 		if err != nil {
-			s.log.Warn("retention notification_logs failed", "err", err)
+			tasklog.Add(ctx, "ERROR", "notification_logs: %v", err)
 		} else if n > 0 {
-			s.log.Info("retention notification_logs deleted", "rows", n, "before", cutoff)
+			tasklog.Add(ctx, "INFO", "notification_logs: deleted=%d before=%s", n, cutoff.Format(time.RFC3339))
 		}
 	}
+	return ctx.Err()
 }

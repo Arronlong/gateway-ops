@@ -16,6 +16,7 @@ import (
 	"github.com/guliansheng/gateway-ops/internal/notify"
 	"github.com/guliansheng/gateway-ops/internal/progress"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"github.com/guliansheng/gateway-ops/internal/tasklog"
 )
 
 // Service 监控扫描服务。
@@ -61,12 +62,14 @@ func (s *Service) ScanAllBalances(ctx context.Context) {
 	list, err := s.channels.ListMonitorEnabled()
 	if err != nil {
 		s.log.Error("list channels", "err", err)
+		tasklog.Add(ctx, "ERROR", "读取渠道列表失败：%v", err)
 		return
 	}
 	for i := range list {
 		c := list[i]
 		if err := s.RefreshBalance(ctx, &c); err != nil {
 			s.log.Warn("refresh balance failed", "channel", c.Name, "err", err)
+			tasklog.Add(ctx, "ERROR", "渠道 #%d %s 余额同步失败：%v", c.ID, c.Name, err)
 		}
 	}
 }
@@ -76,12 +79,14 @@ func (s *Service) ScanAllRates(ctx context.Context) {
 	list, err := s.channels.ListMonitorEnabled()
 	if err != nil {
 		s.log.Error("list channels", "err", err)
+		tasklog.Add(ctx, "ERROR", "读取渠道列表失败：%v", err)
 		return
 	}
 	for i := range list {
 		c := list[i]
 		if err := s.RefreshRates(ctx, &c); err != nil {
 			s.log.Warn("refresh rates failed", "channel", c.Name, "err", err)
+			tasklog.Add(ctx, "ERROR", "渠道 #%d %s 倍率同步失败：%v", c.ID, c.Name, err)
 		}
 	}
 }
@@ -96,6 +101,7 @@ func (s *Service) SyncAll(ctx context.Context, includeDisabled bool) SyncAllResu
 	result := SyncAllResult{Total: len(list)}
 	if err != nil {
 		s.log.Error("list channels for full sync", "err", err)
+		tasklog.Add(ctx, "ERROR", "读取渠道列表失败：%v", err)
 		result.Failed = result.Total
 		return result
 	}
@@ -110,8 +116,10 @@ func (s *Service) SyncAll(ctx context.Context, includeDisabled bool) SyncAllResu
 		usageErr := s.RefreshUsage(ctx, channel)
 		if balanceErr == nil && rateErr == nil && usageErr == nil {
 			result.Succeeded++
+			tasklog.Add(ctx, "INFO", "渠道 #%d %s 同步成功", channel.ID, channel.Name)
 		} else {
 			result.Failed++
+			tasklog.Add(ctx, "ERROR", "渠道 #%d %s 同步失败：余额=%v；倍率=%v；用量=%v", channel.ID, channel.Name, balanceErr, rateErr, usageErr)
 		}
 	}
 	return result
@@ -451,6 +459,7 @@ func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 	changes := make([]notify.RateChange, 0, len(results))
 	seenNames := make([]string, 0, len(results))
 	upsertFailed := false
+	var persistErr error
 	for _, r := range results {
 		prev, err := s.rates.Upsert(&storage.RateSnapshot{
 			ChannelID:       c.ID,
@@ -464,6 +473,8 @@ func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 		if err != nil {
 			upsertFailed = true
 			s.log.Warn("rate upsert failed", "channel", c.Name, "model", r.ModelName, "err", err)
+			persistErr = errors.Join(persistErr, fmt.Errorf("保存分组 %s 倍率失败：%w", r.ModelName, err))
+			tasklog.Add(ctx, "ERROR", "渠道 #%d %s 保存分组 %s 失败：%v", c.ID, c.Name, r.ModelName, err)
 			continue
 		}
 		seenNames = append(seenNames, r.ModelName)
@@ -490,6 +501,8 @@ func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 	if !upsertFailed {
 		if removed, err := s.rates.DeleteMissing(c.ID, seenNames); err != nil {
 			s.log.Warn("remove stale rate snapshots failed", "channel", c.Name, "err", err)
+			persistErr = errors.Join(persistErr, fmt.Errorf("清理过期倍率快照失败：%w", err))
+			tasklog.Add(ctx, "ERROR", "渠道 #%d %s 清理过期倍率失败：%v", c.ID, c.Name, err)
 		} else if removed > 0 {
 			s.log.Info("removed stale rate snapshots", "channel", c.Name, "count", removed)
 		}
@@ -497,6 +510,10 @@ func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
 	// 一次扫描的所有变化打包推送：去抖策略（合并 / 涨跌幅过滤）由 Dispatcher.Policy 决定。
 	if len(changes) > 0 {
 		_ = s.dispatcher.DispatchRateBatch(ctx, c, changes)
+	}
+	if persistErr != nil {
+		progress.Fail(ctx, progress.StageRates, persistErr.Error())
+		return persistErr
 	}
 	progress.OK(ctx, progress.StageRates, fmt.Sprintf("拉到 %d 个分组", len(results)),
 		map[string]any{"count": len(results)})

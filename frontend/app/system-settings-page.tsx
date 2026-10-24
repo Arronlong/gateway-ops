@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { useLocation } from "react-router-dom"
 import { Clock3, Eye, LayoutList, Save, Settings2, ShieldCheck, WalletCards } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -14,6 +15,7 @@ import { ConfigurationLoading } from "@/components/ui/configuration-loading"
 import { VersionCard } from "@/components/system/version-card"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { cn } from "@/lib/utils"
+import { TaskHistoryButton } from "@/components/system/task-history"
 import { PelicanSettingsCard } from "@/components/system/pelican-settings-card"
 
 const channelSyncIntervals = [5, 10, 15, 30, 60, 180, 360, 720, 1440]
@@ -35,6 +37,7 @@ function formatSeconds(value: number) {
 }
 
 function SyncTaskRow({
+  task,
   title,
   description,
   checked,
@@ -45,6 +48,7 @@ function SyncTaskRow({
   onCheckedChange,
   onValueChange,
 }: {
+  task: string
   title: string
   description: string
   checked: boolean
@@ -60,7 +64,8 @@ function SyncTaskRow({
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <p className="text-sm font-medium text-foreground">{title}</p>
-          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", checked ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{checked ? "运行中" : "已关闭"}</span>
+          <span className={cn("rounded px-1.5 py-0.5 text-[10px] font-medium", checked ? "bg-success/10 text-success" : "bg-muted text-muted-foreground")}>{checked ? "已启用" : "已关闭"}</span>
+          <TaskHistoryButton task={task} title={title} />
         </div>
         <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
       </div>
@@ -140,6 +145,7 @@ function SettingRow({
 }
 
 export default function SystemSettingsPage() {
+  const { hash } = useLocation()
   const query = useSystemSettings()
   const syncQuery = useSyncSettings()
   const refreshAll = useTriggerRefresh()
@@ -160,6 +166,12 @@ export default function SystemSettingsPage() {
     if (!syncQuery.data) return
     setSyncSettingsDraft((current) => current ?? syncQuery.data)
   }, [syncQuery.data])
+
+  const settingsLoaded = Boolean(query.data)
+  useEffect(() => {
+    if (!hash || !settingsLoaded) return
+    document.getElementById(hash.slice(1))?.scrollIntoView({ block: "start" })
+  }, [hash, settingsLoaded])
 
   const settings = settingsDraft ?? query.data
   const syncSettings = syncSettingsDraft ?? syncQuery.data
@@ -260,7 +272,7 @@ export default function SystemSettingsPage() {
 
       <PelicanSettingsCard settings={settings} saving={saving} onChange={updateSettings} onSave={() => void save()} />
 
-      <Card id="background-tasks" className="scroll-mt-4 gap-0 border border-border py-0 shadow-none">
+      <Card id="background-tasks" className="scroll-mt-20 gap-0 border border-border py-0 shadow-none">
         <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border px-4 py-3">
           <div className="min-w-0">
             <CardTitle className="flex items-center gap-2 text-sm font-semibold">
@@ -282,6 +294,7 @@ export default function SystemSettingsPage() {
             </div>
             {
               <SyncTaskRow
+                task="channel_sync"
                 title="渠道余额与倍率同步"
                 description="按设定间隔同步全部启用监控渠道的余额与分组倍率；暂停监控的渠道不会自动执行。"
                 checked={syncSettings.channel_enabled}
@@ -302,7 +315,8 @@ export default function SystemSettingsPage() {
             {
               <div className="divide-y divide-border">
                 <SyncTaskRow
-                  title="API Key 倍率探测"
+                  task="relay_rate_sync"
+                title="API Key 倍率探测"
                   description="定期读取账号上游成本倍率，更新成本统计，并作为利润判断和自动调组的依据。"
                   checked={syncSettings.relay_rate_enabled}
                   value={syncSettings.relay_rate_interval_seconds || 10}
@@ -312,7 +326,8 @@ export default function SystemSettingsPage() {
                    onValueChange={(value) => updateSyncSettings((current) => ({ ...current, relay_rate_interval_seconds: value }))}
                 />
                 <SyncTaskRow
-                  title="中转站快照同步"
+                  task="relay_snapshot_sync"
+                title="中转站快照同步"
                   description="定期刷新全部中转站的账号、分组和关联关系快照，仅同步配置与状态，不执行倍率探测。"
                   checked={syncSettings.relay_snapshot_enabled}
                   value={syncSettings.relay_snapshot_interval_seconds || 3600}
@@ -323,6 +338,17 @@ export default function SystemSettingsPage() {
                 />
               </div>
             }
+          </div>
+          <div className="border-t border-border pt-3">
+            <p className="text-xs font-semibold">{"\u5176\u4ed6\u540e\u53f0\u4efb\u52a1"}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{"\u4ee5\u4e0b\u4efb\u52a1\u7531\u7cfb\u7edf\u6216\u670d\u52a1\u7aef\u914d\u7f6e\u8c03\u5ea6\uff1b\u9e48\u9e55\u8bb0\u5f55\u8868\u793a\u8c03\u5ea6\u68c0\u67e5\uff0c\u65e5\u5fd7\u5305\u542b\u672c\u6b21\u5b9e\u9645\u89e6\u53d1\u7684\u8d26\u53f7\u6267\u884c\u3002"}</p>
+            <div data-slot="other-background-tasks" className="mt-2 grid gap-x-6 sm:grid-cols-2">{[
+              ["daily_balances", "\u6bcf\u65e5\u4f59\u989d\u5feb\u7167"],
+              ["retention", "\u5386\u53f2\u6570\u636e\u6e05\u7406"],
+              ["pelican", "\u9e48\u9e55\u5b9a\u65f6\u8c03\u5ea6\u68c0\u67e5"],
+              ["legacy_balance", "\u6e20\u9053\u4f59\u989d\u626b\u63cf\uff08\u517c\u5bb9\uff09"],
+              ["legacy_rates", "\u6e20\u9053\u500d\u7387\u626b\u63cf\uff08\u517c\u5bb9\uff09"],
+            ].map(([task, title]) => <div key={task} className="flex min-w-0 flex-wrap items-center gap-2 border-b border-border py-2"><span className="text-xs">{title}</span><TaskHistoryButton task={task} title={title} /></div>)}</div>
           </div>
         </CardContent>}
       </Card>

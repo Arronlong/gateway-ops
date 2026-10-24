@@ -85,6 +85,7 @@ func Register(r *gin.Engine, d *Deps) {
 		registerDashboard(api, d)
 		registerRelayStations(api, d)
 		registerSyncSettings(api, d)
+		registerTaskRuns(api, d)
 		registerSystemSettings(api, d)
 		registerOperations(api, d)
 	}
