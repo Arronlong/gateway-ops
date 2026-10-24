@@ -22,6 +22,11 @@ const (
 	SettingRelaySnapshotEnabled          = "sync.relay.snapshot.enabled"
 	SettingRelaySnapshotInterval         = "sync.relay.snapshot.interval_minutes"
 	SettingRelaySnapshotIntervalSeconds  = "sync.relay.snapshot.interval_seconds"
+	SettingAlertsEnabled                 = "alerts.enabled"
+	SettingAlertEvaluationInterval       = "alerts.evaluation.interval_seconds"
+	SettingAlertRateInterval             = "alerts.rate.interval_seconds"
+	SettingAlertUsageInterval            = "alerts.usage.interval_seconds"
+	SettingAlertBalanceInterval          = "alerts.balance.interval_seconds"
 	SettingUIOperationsManagementEnabled = "ui.operations.management_enabled"
 	SettingUIChannelsPageEnabled         = "ui.channels.page_enabled"
 	SettingUIChannelsShowRateChanges     = "ui.channels.show_rate_changes"
@@ -86,6 +91,11 @@ func (s *Settings) SyncSettings() (SyncSettings, error) {
 		RelayRateIntervalSeconds:           10,
 		RelaySnapshotIntervalMinutes:       60,
 		RelaySnapshotIntervalSeconds:       3600,
+		AlertsEnabled:                      true,
+		AlertEvaluationIntervalSeconds:     60,
+		AlertRateIntervalSeconds:           60,
+		AlertUsageIntervalSeconds:          60,
+		AlertBalanceIntervalSeconds:        300,
 	}
 	readBool := func(key string, target *bool) error {
 		value, found, err := s.Get(key)
@@ -181,6 +191,21 @@ func (s *Settings) SyncSettings() (SyncSettings, error) {
 			}
 		}
 	}
+	if err = readBool(SettingAlertsEnabled, &settings.AlertsEnabled); err != nil {
+		return settings, err
+	}
+	if _, err = readInt(SettingAlertEvaluationInterval, &settings.AlertEvaluationIntervalSeconds); err != nil {
+		return settings, err
+	}
+	if _, err = readInt(SettingAlertRateInterval, &settings.AlertRateIntervalSeconds); err != nil {
+		return settings, err
+	}
+	if _, err = readInt(SettingAlertUsageInterval, &settings.AlertUsageIntervalSeconds); err != nil {
+		return settings, err
+	}
+	if _, err = readInt(SettingAlertBalanceInterval, &settings.AlertBalanceIntervalSeconds); err != nil {
+		return settings, err
+	}
 	return settings, nil
 }
 
@@ -210,6 +235,18 @@ func (s *Settings) SaveSyncSettings(settings SyncSettings) error {
 		}
 	}
 	settings.RelaySnapshotIntervalMinutes = (settings.RelaySnapshotIntervalSeconds + 59) / 60
+	if settings.AlertEvaluationIntervalSeconds < 30 {
+		settings.AlertEvaluationIntervalSeconds = 60
+	}
+	if settings.AlertRateIntervalSeconds < 30 {
+		settings.AlertRateIntervalSeconds = 60
+	}
+	if settings.AlertUsageIntervalSeconds < 30 {
+		settings.AlertUsageIntervalSeconds = 60
+	}
+	if settings.AlertBalanceIntervalSeconds < 60 {
+		settings.AlertBalanceIntervalSeconds = 300
+	}
 	values := map[string]string{
 		SettingChannelTokenRefreshEnabled:   strconv.FormatBool(settings.ChannelTokenRefreshEnabled),
 		SettingChannelTokenRefreshInterval:  strconv.Itoa(settings.ChannelTokenRefreshIntervalMinutes),
@@ -224,6 +261,11 @@ func (s *Settings) SaveSyncSettings(settings SyncSettings) error {
 		SettingRelaySnapshotEnabled:         strconv.FormatBool(settings.RelaySnapshotEnabled),
 		SettingRelaySnapshotInterval:        strconv.Itoa(settings.RelaySnapshotIntervalMinutes),
 		SettingRelaySnapshotIntervalSeconds: strconv.Itoa(settings.RelaySnapshotIntervalSeconds),
+		SettingAlertsEnabled:                strconv.FormatBool(settings.AlertsEnabled),
+		SettingAlertEvaluationInterval:      strconv.Itoa(settings.AlertEvaluationIntervalSeconds),
+		SettingAlertRateInterval:            strconv.Itoa(settings.AlertRateIntervalSeconds),
+		SettingAlertUsageInterval:           strconv.Itoa(settings.AlertUsageIntervalSeconds),
+		SettingAlertBalanceInterval:         strconv.Itoa(settings.AlertBalanceIntervalSeconds),
 	}
 	for key, value := range values {
 		if err := s.Set(key, strings.TrimSpace(value)); err != nil {

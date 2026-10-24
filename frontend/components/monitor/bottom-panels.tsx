@@ -47,6 +47,8 @@ import type {
 type PillTone = "brand" | "blue" | "orange" | "danger" | "warning" | "sky" | "muted"
 
 const eventMeta: Record<NotificationEvent, { icon: LucideIcon; cls: string; tag: PillTone }> = {
+  alert_firing: { icon: AlertTriangle, cls: "text-danger", tag: "danger" },
+  alert_recovered: { icon: BellRing, cls: "text-success", tag: "brand" },
   balance_low: { icon: AlertTriangle, cls: "text-warning", tag: "warning" },
   login_failed: { icon: ShieldX, cls: "text-danger", tag: "danger" },
   captcha_failed: { icon: KeyRound, cls: "text-orange-600 dark:text-orange-400", tag: "orange" },
@@ -55,6 +57,8 @@ const eventMeta: Record<NotificationEvent, { icon: LucideIcon; cls: string; tag:
 }
 
 const eventLabel: Record<string, string> = {
+  alert_firing: "预警触发",
+  alert_recovered: "预警恢复",
   balance_low: "余额告警",
   rate_changed: "倍率变化",
   login_failed: "登录失败",
@@ -408,7 +412,7 @@ actions={<>
   groups={[
     { label: "发送状态", value: statusFilter, onValueChange: (value) => setStatusFilter(value as typeof statusFilter), options: [{ value: "all", label: "All" }, { value: "success", label: "成功" }, { value: "failed", label: "失败" }] },
     { label: "通知渠道", value: channelFilter, onValueChange: setChannelFilter, options: [{ value: "all", label: "All" }, ...(channels.data ?? []).map((channel) => ({ value: String(channel.id), label: channel.name }))] },
-    { label: "通知事件", value: eventFilter, onValueChange: setEventFilter, options: [{ value: "all", label: "All" }, { value: "balance_low", label: "余额告警" }, { value: "rate_changed", label: "倍率变化" }, { value: "login_failed", label: "登录失败" }, { value: "captcha_failed", label: "验证码失败" }, { value: "monitor_failed", label: "采集失败" }, { value: "test", label: "测试通知" }] },
+    { label: "通知事件", value: eventFilter, onValueChange: setEventFilter, options: [{ value: "all", label: "All" }, { value: "alert_firing", label: "预警触发" }, { value: "alert_recovered", label: "预警恢复" }, { value: "balance_low", label: "余额告警" }, { value: "rate_changed", label: "倍率变化" }, { value: "login_failed", label: "登录失败" }, { value: "captcha_failed", label: "验证码失败" }, { value: "monitor_failed", label: "采集失败" }, { value: "test", label: "测试通知" }] },
   ]}
 />
 <Button type="button" variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" onClick={resetFilters}><RotateCcw className="size-3.5" />重置</Button>

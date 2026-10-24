@@ -46,6 +46,16 @@ func (r *Channels) ListAccountsForChannels(channelIDs []uint) (map[uint][]Channe
 	return result, nil
 }
 
+func (r *Channels) ListAccountsForRelayAccount(stationID uint, relayAccountExternalID int64) ([]ChannelAccount, error) {
+	var list []ChannelAccount
+	err := r.db.Table("channel_accounts AS account").Select("account.*").
+		Joins("JOIN channel_relay_account_links AS link ON link.channel_account_id = account.id").
+		Joins("JOIN channels AS channel ON channel.id = account.channel_id AND channel.deleted_at IS NULL").
+		Where("link.relay_station_id = ? AND link.relay_account_external_id = ?", stationID, relayAccountExternalID).
+		Order("account.is_primary DESC, account.id ASC").Find(&list).Error
+	return list, err
+}
+
 // EnsurePrimaryAccount mirrors the legacy channel credential into the primary
 // child record without overwriting that account's independently sampled
 // balance. It makes legacy and newly-created channels share one account shape.

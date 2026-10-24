@@ -8,6 +8,18 @@ import (
 
 type Notifications struct{ db *gorm.DB }
 
+func (r *Notifications) LastAlertDelivery(channelID, eventID uint, event NotificationEvent) (*time.Time, error) {
+	var row NotificationLog
+	err := r.db.Where("channel_id = ? AND alert_event_id = ? AND event = ? AND success = ?", channelID, eventID, event, true).Order("sent_at DESC").First(&row).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &row.SentAt, nil
+}
+
 func NewNotifications(db *gorm.DB) *Notifications { return &Notifications{db: db} }
 
 func (r *Notifications) ListChannels() ([]NotificationChannel, error) {
@@ -56,6 +68,12 @@ func (r *Notifications) ListLogs(limit int) ([]NotificationLog, error) {
 		return nil, err
 	}
 	return list, nil
+}
+
+func (r *Notifications) AlertLogs(eventID uint) ([]NotificationLog, error) {
+	list := make([]NotificationLog, 0)
+	err := r.db.Where("alert_event_id = ?", eventID).Order("sent_at DESC, id DESC").Find(&list).Error
+	return list, err
 }
 
 // DeleteLogsBefore 删除 sent_at < cutoff 的通知日志，返回删除行数。

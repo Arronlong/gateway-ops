@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"sort"
+	"strings"
 	"time"
 
 	"gorm.io/gorm"
@@ -57,7 +59,7 @@ func (r *RelayStations) UpsertUsageEvents(events []RelayUsageEvent) error {
 	return r.db.Clauses(clause.OnConflict{
 		Columns: []clause.Column{{Name: "relay_station_id"}, {Name: "remote_usage_id"}},
 		DoUpdates: clause.AssignmentColumns([]string{
-			"account_external_id", "group_external_id", "group_name", "user_email",
+			"account_external_id", "group_external_id", "group_name", "user_external_id", "user_email", "ip_address",
 			"model", "request_type", "first_token_ms", "duration_ms", "status_code",
 			"cache_known", "input_tokens", "output_tokens", "cache_read_tokens", "cache_creation_tokens",
 			"cache_creation5m_tokens", "cache_creation1h_tokens", "actual_cost", "total_cost",
@@ -77,6 +79,64 @@ func (r *RelayStations) ListUsageEvents(stationID uint, since, until time.Time) 
 	var events []RelayUsageEvent
 	err := query.Order("occurred_at ASC, remote_usage_id ASC").Find(&events).Error
 	return events, err
+}
+
+func (r *RelayStations) ListUsageEventsByAccountWindow(stationID uint, accountExternalID int64, since, until time.Time) ([]RelayUsageEvent, error) {
+	query := r.db.Where("relay_station_id = ? AND account_external_id = ?", stationID, accountExternalID)
+	if !since.IsZero() {
+		query = query.Where("occurred_at >= ?", since)
+	}
+	if !until.IsZero() {
+		query = query.Where("occurred_at < ?", until)
+	}
+	var events []RelayUsageEvent
+	err := query.Order("occurred_at ASC, remote_usage_id ASC").Find(&events).Error
+	return events, err
+}
+
+func (r *RelayStations) ListUsageEventsByUserWindow(stationID uint, userKey string, since, until time.Time) ([]RelayUsageEvent, error) {
+	query := r.db.Where("relay_station_id = ? AND (user_external_id = ? OR (COALESCE(user_external_id, '') = '' AND user_email = ?))", stationID, userKey, userKey)
+	if !since.IsZero() {
+		query = query.Where("occurred_at >= ?", since)
+	}
+	if !until.IsZero() {
+		query = query.Where("occurred_at < ?", until)
+	}
+	var events []RelayUsageEvent
+	err := query.Order("occurred_at ASC, remote_usage_id ASC").Find(&events).Error
+	return events, err
+}
+
+func (r *RelayStations) ListUsageUserKeys(stationID uint, since time.Time) ([]string, error) {
+	var rows []struct {
+		UserExternalID string
+		UserEmail      string
+	}
+	query := r.db.Model(&RelayUsageEvent{}).Select("user_external_id, user_email").Where("relay_station_id = ?", stationID)
+	if !since.IsZero() {
+		query = query.Where("occurred_at >= ?", since)
+	}
+	if err := query.Group("user_external_id, user_email").Find(&rows).Error; err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(rows))
+	keys := make([]string, 0, len(rows))
+	for _, row := range rows {
+		key := strings.TrimSpace(row.UserExternalID)
+		if key == "" {
+			key = strings.TrimSpace(row.UserEmail)
+		}
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	return keys, nil
 }
 
 func (r *RelayStations) RecentUsageEventsByAccount(stationID uint, limit int) ([]RelayUsageEvent, error) {

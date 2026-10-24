@@ -509,6 +509,13 @@ func (s *Service) SetGroupsBatch(ctx context.Context, stationID uint, accountExt
 // SetSchedulable updates the remote account scheduling flag and keeps the local
 // snapshot plus adjustment audit log in sync with the remote result.
 func (s *Service) SetSchedulable(ctx context.Context, stationID uint, accountExternalID int64, schedulable bool) error {
+	return s.stations.WithAlertMutationLock(ctx, func() error { return s.setSchedulableManual(ctx, stationID, accountExternalID, schedulable) })
+}
+
+func (s *Service) setSchedulableManual(ctx context.Context, stationID uint, accountExternalID int64, schedulable bool) error {
+	if err := s.MarkAlertManualIntervention("relay_account", stationID, accountExternalID); err != nil {
+		return err
+	}
 	station, err := s.stations.FindByID(stationID)
 	if err != nil {
 		return err
@@ -524,7 +531,7 @@ func (s *Service) SetSchedulable(ctx context.Context, stationID uint, accountExt
 	if err != nil {
 		return err
 	}
-	return s.setScheduling(ctx, station, *account, groups, schedulable, "manual")
+	return s.applyScheduling(ctx, station, *account, groups, schedulable, "manual")
 }
 
 // SetSchedulableBatch applies the scheduling state to the current filtered
@@ -1125,6 +1132,18 @@ func (s *Service) disableScheduling(ctx context.Context, station *storage.RelayS
 }
 
 func (s *Service) setScheduling(ctx context.Context, station *storage.RelayStation, account storage.RelayAccount, groups []storage.RelayGroup, schedulable bool, source string) error {
+	if source != "alert" {
+		return s.stations.WithAlertMutationLock(ctx, func() error {
+			if err := s.MarkAlertManualIntervention("relay_account", station.ID, account.ExternalID); err != nil {
+				return err
+			}
+			return s.applyScheduling(ctx, station, account, groups, schedulable, source)
+		})
+	}
+	return s.applyScheduling(ctx, station, account, groups, schedulable, source)
+}
+
+func (s *Service) applyScheduling(ctx context.Context, station *storage.RelayStation, account storage.RelayAccount, groups []storage.RelayGroup, schedulable bool, source string) error {
 	oldIDs := groupIDs(groups)
 	encoded, _ := json.Marshal(oldIDs)
 	action := "disable_scheduling"

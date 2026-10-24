@@ -31,6 +31,8 @@ export type CaptchaProviderType =
 export type MonitorJob = "login" | "balance" | "rates"
 
 export type NotificationEvent =
+	| "alert_firing"
+	| "alert_recovered"
   | "balance_low"
   | "rate_changed"
   | "login_failed"
@@ -206,6 +208,71 @@ export interface NotificationLog {
   success: boolean
   error_message?: string
   sent_at: string
+}
+
+export type AlertTargetType = "relay_account" | "relay_user"
+export type AlertMetric = "rate_change" | "balance_low" | "account_spend" | "account_stability" | "user_spend" | "user_multi_ip"
+export type AlertLifecycleState = "normal" | "pending" | "firing" | "recovering" | "recovered" | "unknown"
+
+export interface AlertRule {
+  id: number
+  name: string
+  target_type: AlertTargetType
+  metric: AlertMetric
+  severity: string
+  enabled: boolean
+  scope: string
+  condition: string
+  action: string
+  recovery: string
+  cooldown_seconds: number
+  channel_ids: number[]
+  remark?: string
+  created_at: string
+  updated_at: string
+}
+
+export interface AlertEvent {
+  id: number
+  rule_id: number
+  metric: AlertMetric
+  target_type: AlertTargetType
+  relay_station_id: number
+  target_external_id: string
+  severity: string
+  state: AlertLifecycleState
+  actual_value?: number | null
+  threshold_value?: number | null
+  summary: string
+  sample: string
+  action_summary: string
+  started_at: string
+  fired_at?: string | null
+  recovered_at?: string | null
+  acknowledged_at?: string | null
+  updated_at: string
+}
+
+export interface AlertActionLog {
+  id: number
+  event_id: number
+  action: string
+  phase: string
+  status: string
+  before: string
+  after: string
+  success: boolean
+  error_message?: string
+  attempt: number
+  automatic: boolean
+  created_at: string
+}
+
+export interface AlertSummary {
+  open_events: number
+  enabled_rules: number
+  enabled_channels: number
+  actions_today: number
 }
 
 export interface MonitorLog {

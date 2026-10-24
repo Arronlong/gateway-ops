@@ -78,13 +78,51 @@ func (d *Dispatcher) Dispatch(ctx context.Context, msg Message) error {
 	return d.fanout(ctx, msg, nil)
 }
 
+// DispatchToChannels 按规则显式选定的渠道发送，逐渠道、逐事件持久化冷却。
+func (d *Dispatcher) DispatchToChannels(ctx context.Context, channelIDs []uint, msg Message) error {
+	msg = sanitizeMessage(msg)
+	if len(channelIDs) == 0 {
+		return nil
+	}
+	var errs []error
+	seen := map[uint]bool{}
+	for _, channelID := range channelIDs {
+		if seen[channelID] {
+			continue
+		}
+		seen[channelID] = true
+		channel, err := d.repo.FindChannel(channelID)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if !channel.Enabled {
+			continue
+		}
+		if msg.AlertEventID > 0 {
+			last, err := d.repo.LastAlertDelivery(channelID, msg.AlertEventID, msg.Event)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if last != nil && (msg.Event == storage.EventAlertRecovered || time.Since(*last) < msg.AlertCooldown) {
+				continue
+			}
+		}
+		if err := d.sendOne(ctx, channel, msg); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // DispatchRateBatch 把一次扫描收集到的多条 RateChange 按 Policy 合并 / 过滤后推送。
 //
 //   - 先按 MinChangePct 过滤掉小变动
 //   - 然后对每个通知渠道：先用它自己的 Subscriptions 切片出它关心的 changes，
 //     再按 BatchRateChanges 决定合并发送 1 条还是逐条发送
 //
-// 关键：合并消息只包含订阅匹配的子集，避免"全合并后 ModelName='' 被 groups 模式订阅过滤掉"的边界。
+// 关键：合并消息只包含订阅匹配的子集，避免"全合并后 ModelName=” 被 groups 模式订阅过滤掉"的边界。
 func (d *Dispatcher) DispatchRateBatch(ctx context.Context, channel *storage.Channel, changes []RateChange) error {
 	if channel == nil || len(changes) == 0 {
 		return nil
@@ -294,11 +332,13 @@ func backoffDelay(attempt int) time.Duration {
 
 func (d *Dispatcher) logResult(channelID uint, msg Message, sendErr error) {
 	log := &storage.NotificationLog{
-		ChannelID: channelID,
-		Event:     msg.Event,
-		Subject:   msg.Subject,
-		Body:      msg.Body,
-		Success:   sendErr == nil,
+		AlertEventID: msg.AlertEventID,
+		AlertRuleID:  msg.AlertRuleID,
+		ChannelID:    channelID,
+		Event:        msg.Event,
+		Subject:      msg.Subject,
+		Body:         msg.Body,
+		Success:      sendErr == nil,
 	}
 	if sendErr != nil {
 		log.ErrorMessage = sendErr.Error()

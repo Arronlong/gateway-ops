@@ -300,15 +300,19 @@ func (NotificationChannel) TableName() string { return "notification_channels" }
 type NotificationEvent string
 
 const (
-	EventBalanceLow    NotificationEvent = "balance_low"
-	EventRateChanged   NotificationEvent = "rate_changed"
-	EventLoginFailed   NotificationEvent = "login_failed"
-	EventCaptchaFailed NotificationEvent = "captcha_failed"
-	EventMonitorFailed NotificationEvent = "monitor_failed"
+	EventBalanceLow     NotificationEvent = "balance_low"
+	EventRateChanged    NotificationEvent = "rate_changed"
+	EventLoginFailed    NotificationEvent = "login_failed"
+	EventCaptchaFailed  NotificationEvent = "captcha_failed"
+	EventMonitorFailed  NotificationEvent = "monitor_failed"
+	EventAlertFiring    NotificationEvent = "alert_firing"
+	EventAlertRecovered NotificationEvent = "alert_recovered"
 )
 
 // NotificationLog 通知发送记录。
 type NotificationLog struct {
+	AlertEventID uint              `gorm:"index" json:"alert_event_id,omitempty"`
+	AlertRuleID  uint              `gorm:"index" json:"alert_rule_id,omitempty"`
 	ID           uint              `gorm:"primaryKey" json:"id"`
 	ChannelID    uint              `gorm:"not null;index" json:"channel_id"`
 	Event        NotificationEvent `gorm:"size:64;not null;index" json:"event"`
@@ -340,6 +344,126 @@ type NotificationCooldown struct {
 }
 
 func (NotificationCooldown) TableName() string { return "notification_cooldowns" }
+
+type AlertLifecycleState string
+
+const (
+	AlertStateNormal     AlertLifecycleState = "normal"
+	AlertStatePending    AlertLifecycleState = "pending"
+	AlertStateFiring     AlertLifecycleState = "firing"
+	AlertStateRecovering AlertLifecycleState = "recovering"
+	AlertStateRecovered  AlertLifecycleState = "recovered"
+	AlertStateUnknown    AlertLifecycleState = "unknown"
+)
+
+type AlertRule struct {
+	ID              uint           `gorm:"primaryKey" json:"id"`
+	Name            string         `gorm:"size:128;not null" json:"name"`
+	TargetType      string         `gorm:"size:32;not null;index" json:"target_type"`
+	Metric          string         `gorm:"size:64;not null;index" json:"metric"`
+	Severity        string         `gorm:"size:16;not null;default:'warning'" json:"severity"`
+	Enabled         bool           `gorm:"not null;index" json:"enabled"`
+	ScopeJSON       string         `gorm:"type:text;not null;default:'{}'" json:"scope"`
+	ConditionJSON   string         `gorm:"type:text;not null;default:'{}'" json:"condition"`
+	ActionJSON      string         `gorm:"type:text;not null;default:'{}'" json:"action"`
+	RecoveryJSON    string         `gorm:"type:text;not null;default:'{}'" json:"recovery"`
+	CooldownSeconds int            `gorm:"not null;default:1800" json:"cooldown_seconds"`
+	Remark          string         `gorm:"size:512" json:"remark,omitempty"`
+	ChannelIDs      []uint         `gorm:"-" json:"channel_ids"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
+	DeletedAt       gorm.DeletedAt `gorm:"index" json:"-"`
+}
+
+func (AlertRule) TableName() string { return "alert_rules" }
+
+type AlertRuleNotificationChannel struct {
+	RuleID                uint `gorm:"primaryKey;uniqueIndex:idx_alert_rule_notify" json:"rule_id"`
+	NotificationChannelID uint `gorm:"primaryKey;uniqueIndex:idx_alert_rule_notify" json:"notification_channel_id"`
+}
+
+func (AlertRuleNotificationChannel) TableName() string { return "alert_rule_notification_channels" }
+
+type AlertRuleState struct {
+	ID                    uint                `gorm:"primaryKey" json:"id"`
+	RuleID                uint                `gorm:"not null;uniqueIndex:idx_alert_state_target" json:"rule_id"`
+	TargetType            string              `gorm:"size:32;not null;uniqueIndex:idx_alert_state_target" json:"target_type"`
+	RelayStationID        uint                `gorm:"not null;uniqueIndex:idx_alert_state_target" json:"relay_station_id"`
+	TargetExternalID      string              `gorm:"size:128;not null;uniqueIndex:idx_alert_state_target" json:"target_external_id"`
+	State                 AlertLifecycleState `gorm:"size:24;not null;index" json:"state"`
+	ConsecutiveViolations int                 `gorm:"not null;default:0" json:"consecutive_violations"`
+	ConsecutiveRecoveries int                 `gorm:"not null;default:0" json:"consecutive_recoveries"`
+	LastViolationAt       *time.Time          `json:"last_violation_at,omitempty"`
+	LastRecoveredAt       *time.Time          `json:"last_recovered_at,omitempty"`
+	LastEvaluatedAt       *time.Time          `json:"last_evaluated_at,omitempty"`
+	LastObservedAt        *time.Time          `json:"last_observed_at,omitempty"`
+	LastNotifiedAt        *time.Time          `json:"last_notified_at,omitempty"`
+	AutomaticActionJSON   string              `gorm:"type:text;not null;default:'{}'" json:"automatic_action"`
+	ManualIntervened      bool                `gorm:"not null;default:false" json:"manual_intervened"`
+	HistoryJSON           string              `gorm:"type:text;not null;default:'[]'" json:"history"`
+	BaselineValue         *float64            `json:"baseline_value,omitempty"`
+	CreatedAt             time.Time           `json:"created_at"`
+	UpdatedAt             time.Time           `json:"updated_at"`
+}
+
+func (AlertRuleState) TableName() string { return "alert_rule_states" }
+
+type AlertEvent struct {
+	ID                          uint                `gorm:"primaryKey" json:"id"`
+	RuleID                      uint                `gorm:"not null;index" json:"rule_id"`
+	TargetType                  string              `gorm:"size:32;not null;index" json:"target_type"`
+	RelayStationID              uint                `gorm:"not null;index" json:"relay_station_id"`
+	TargetExternalID            string              `gorm:"size:128;not null;index" json:"target_external_id"`
+	Severity                    string              `gorm:"size:16;not null" json:"severity"`
+	Metric                      string              `gorm:"size:64;not null;index" json:"metric"`
+	State                       AlertLifecycleState `gorm:"size:24;not null;index" json:"state"`
+	ActualValue                 *float64            `json:"actual_value,omitempty"`
+	ThresholdValue              *float64            `json:"threshold_value,omitempty"`
+	Summary                     string              `gorm:"type:text" json:"summary"`
+	SampleJSON                  string              `gorm:"type:text" json:"sample"`
+	ActionSummaryJSON           string              `gorm:"type:text" json:"action_summary"`
+	StartedAt                   time.Time           `gorm:"not null;index" json:"started_at"`
+	FiredAt                     *time.Time          `json:"fired_at,omitempty"`
+	RecoveredAt                 *time.Time          `json:"recovered_at,omitempty"`
+	AcknowledgedAt              *time.Time          `json:"acknowledged_at,omitempty"`
+	LastNotifiedAt              *time.Time          `json:"last_notified_at,omitempty"`
+	RecoveryNotificationPending bool                `gorm:"not null;default:false;index" json:"recovery_notification_pending"`
+	UpdatedAt                   time.Time           `json:"updated_at"`
+}
+
+func (AlertEvent) TableName() string { return "alert_events" }
+
+type AlertActionLog struct {
+	ID           uint      `gorm:"primaryKey" json:"id"`
+	EventID      uint      `gorm:"not null;index;uniqueIndex:idx_alert_event_action_phase" json:"event_id"`
+	Action       string    `gorm:"size:64;not null" json:"action"`
+	Phase        string    `gorm:"size:16;uniqueIndex:idx_alert_event_action_phase" json:"phase"`
+	Status       string    `gorm:"size:24" json:"status"`
+	BeforeJSON   string    `gorm:"type:text" json:"before"`
+	AfterJSON    string    `gorm:"type:text" json:"after"`
+	Success      bool      `gorm:"not null" json:"success"`
+	ErrorMessage string    `gorm:"type:text" json:"error_message,omitempty"`
+	Attempt      int       `gorm:"not null;default:1" json:"attempt"`
+	Automatic    bool      `gorm:"not null;default:true" json:"automatic"`
+	CreatedAt    time.Time `gorm:"not null;index" json:"created_at"`
+}
+
+func (AlertActionLog) TableName() string { return "alert_action_logs" }
+
+type AlertMetricSample struct {
+	ID               uint      `gorm:"primaryKey" json:"id"`
+	RuleID           uint      `gorm:"not null;index" json:"rule_id"`
+	TargetType       string    `gorm:"size:32;not null;index" json:"target_type"`
+	RelayStationID   uint      `gorm:"not null;index" json:"relay_station_id"`
+	TargetExternalID string    `gorm:"size:128;not null;index" json:"target_external_id"`
+	Metric           string    `gorm:"size:64;not null;index" json:"metric"`
+	ObservedAt       time.Time `gorm:"not null;index" json:"observed_at"`
+	Value            float64   `json:"value"`
+	RequestCount     int64     `json:"request_count"`
+	PayloadJSON      string    `gorm:"type:text" json:"payload"`
+}
+
+func (AlertMetricSample) TableName() string { return "alert_metric_samples" }
 
 // MonitorJob 监控任务类型。
 type MonitorJob string
@@ -549,6 +673,7 @@ type RelayAccount struct {
 	RateMultiplier *float64   `json:"rate_multiplier,omitempty"`
 	RateSource     string     `gorm:"size:32" json:"rate_source,omitempty"`
 	RateObservedAt *time.Time `json:"rate_observed_at,omitempty"`
+	RatePolledAt   *time.Time `json:"rate_polled_at,omitempty"`
 	// LatencySamplesJSON stores the latest Sub2API usage samples as a compact
 	// snapshot so the risk table never has to fan out requests per account.
 	LatencySamplesJSON string     `gorm:"type:text" json:"-"`
@@ -622,7 +747,9 @@ type RelayUsageEvent struct {
 	AccountExternalID     int64     `gorm:"not null;index:idx_relay_usage_account_time,priority:1" json:"account_external_id"`
 	GroupExternalID       int64     `gorm:"not null;default:0" json:"group_external_id"`
 	GroupName             string    `gorm:"size:256" json:"group_name,omitempty"`
+	UserExternalID        string    `gorm:"size:128;index" json:"user_external_id,omitempty"`
 	UserEmail             string    `gorm:"size:512" json:"user_email,omitempty"`
+	IPAddress             string    `gorm:"size:128;index" json:"ip_address,omitempty"`
 	Model                 string    `gorm:"size:256" json:"model,omitempty"`
 	RequestType           string    `gorm:"size:64" json:"request_type,omitempty"`
 	FirstTokenMS          int64     `gorm:"not null;default:0" json:"first_token_ms"`
@@ -743,6 +870,11 @@ type SyncSettings struct {
 	RelaySnapshotEnabled               bool `json:"relay_snapshot_enabled"`
 	RelaySnapshotIntervalMinutes       int  `json:"relay_snapshot_interval_minutes"`
 	RelaySnapshotIntervalSeconds       int  `json:"relay_snapshot_interval_seconds"`
+	AlertsEnabled                      bool `json:"alerts_enabled"`
+	AlertEvaluationIntervalSeconds     int  `json:"alert_evaluation_interval_seconds"`
+	AlertRateIntervalSeconds           int  `json:"alert_rate_interval_seconds"`
+	AlertUsageIntervalSeconds          int  `json:"alert_usage_interval_seconds"`
+	AlertBalanceIntervalSeconds        int  `json:"alert_balance_interval_seconds"`
 }
 
 const (

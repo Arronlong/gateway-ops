@@ -32,6 +32,10 @@ func notificationIcon(msg Message) string {
 		return "🧩"
 	case storage.EventMonitorFailed:
 		return "⚠️"
+	case storage.EventAlertFiring:
+		return "🚨"
+	case storage.EventAlertRecovered:
+		return "✅"
 	default:
 		return "🔔"
 	}

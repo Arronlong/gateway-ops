@@ -25,6 +25,9 @@ import type {
   DashboardSummary,
   NotificationChannel,
   NotificationLog,
+  AlertRule,
+  AlertEvent,
+  AlertSummary,
   RateChangeLog,
   RateSnapshot,
   RelayOverview,
@@ -320,6 +323,24 @@ export function useNotificationChannels() {
 
 export function useNotificationLogs(limit = 20) {
   return useApi<NotificationLog[]>(`/notifications/logs?limit=${limit}`)
+}
+
+export function useAlertSummary() {
+  return useApi<AlertSummary>("/alerts/summary")
+}
+
+export function useAlertRules() {
+  return useApi<AlertRule[]>("/alerts/rules")
+}
+
+export function useAlertEvents(state?: string, filters: { target?: string; severity?: string; station?: string; offset?: number; from?: string } = {}) {
+  const query = new URLSearchParams({ limit: "50", offset: String(filters.offset ?? 0) })
+  if (state) query.set("state", state)
+  if (filters.target) query.set("target_type", filters.target)
+  if (filters.severity) query.set("severity", filters.severity)
+  if (filters.station) query.set("station_id", filters.station)
+  if (filters.from) query.set("from", filters.from)
+  return useApi<AlertEvent[]>(`/alerts/events?${query.toString()}`)
 }
 
 export function useCaptchaConfigs() {

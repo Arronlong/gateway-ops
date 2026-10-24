@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/guliansheng/gateway-ops/internal/alert"
 	"github.com/guliansheng/gateway-ops/internal/config"
 	"github.com/guliansheng/gateway-ops/internal/monitor"
 	"github.com/guliansheng/gateway-ops/internal/relay"
@@ -31,11 +32,16 @@ type Scheduler struct {
 	relay                *relay.Service
 	pelicanCtx           context.Context
 	pelicanCancel        context.CancelFunc
+	alerts               *alert.Service
 	legacyBalanceID      cron.EntryID
 	legacyRateID         cron.EntryID
 	channelSyncID        cron.EntryID
 	relayRateSyncID      cron.EntryID
 	relaySnapshotSyncID  cron.EntryID
+	alertEvaluationID    cron.EntryID
+	alertRateSyncID      cron.EntryID
+	alertUsageSyncID     cron.EntryID
+	alertBalanceSyncID   cron.EntryID
 	dailyBalanceID       cron.EntryID
 	retryTaskRunsWG      sync.WaitGroup
 	pendingTaskRunsMu    sync.Mutex
@@ -45,6 +51,7 @@ type Scheduler struct {
 	relaySyncMu          sync.Mutex
 	relayRateRunning     atomic.Bool
 	relaySnapshotRunning atomic.Bool
+	alertRunning         atomic.Bool
 }
 
 func New(
@@ -55,21 +62,24 @@ func New(
 	notifies *storage.Notifications,
 	settings *storage.Settings,
 	relaySvc *relay.Service,
+	alertSvc *alert.Service,
 	log *slog.Logger,
 ) *Scheduler {
 	pelicanCtx, pelicanCancel := context.WithCancel(context.Background())
 	return &Scheduler{
-		cfg:           cfg,
-		log:           log,
-		cron:          cron.New(cron.WithSeconds()),
-		monitor:       m,
-		monLogs:       monLogs,
-		rates:         rates,
-		notifies:      notifies,
-		settings:      settings,
-		relay:         relaySvc,
-		pelicanCtx:    pelicanCtx,
-		pelicanCancel: pelicanCancel,
+		cfg:             cfg,
+		log:             log,
+		cron:            cron.New(cron.WithSeconds()),
+		monitor:         m,
+		monLogs:         monLogs,
+		rates:           rates,
+		notifies:        notifies,
+		settings:        settings,
+		relay:           relaySvc,
+		pelicanCtx:      pelicanCtx,
+		pelicanCancel:   pelicanCancel,
+		alerts:          alertSvc,
+		pendingTaskRuns: make(map[uint]pendingTaskRun),
 	}
 }
 
@@ -143,6 +153,9 @@ func (s *Scheduler) SyncSettings() (storage.SyncSettings, error) {
 }
 
 func (s *Scheduler) UpdateSyncSettings(settings storage.SyncSettings) error {
+	if settings.AlertEvaluationIntervalSeconds != 60 || settings.AlertRateIntervalSeconds < 60 || settings.AlertRateIntervalSeconds > 120 || settings.AlertUsageIntervalSeconds < 60 || settings.AlertUsageIntervalSeconds > 120 || settings.AlertBalanceIntervalSeconds < 300 || settings.AlertBalanceIntervalSeconds > 600 {
+		return fmt.Errorf("评估周期固定 60 秒；倍率与用量周期 60–120 秒；余额周期 300–600 秒")
+	}
 	if err := s.settings.SaveSyncSettings(settings); err != nil {
 		return err
 	}
@@ -178,6 +191,34 @@ func (s *Scheduler) configureSyncJobs() error {
 			if err != nil {
 				return err
 			}
+		}
+	}
+	if s.alertEvaluationID != 0 {
+		s.cron.Remove(s.alertEvaluationID)
+		s.alertEvaluationID = 0
+	}
+	for _, id := range []*cron.EntryID{&s.alertRateSyncID, &s.alertUsageSyncID, &s.alertBalanceSyncID} {
+		if *id != 0 {
+			s.cron.Remove(*id)
+			*id = 0
+		}
+	}
+	if s.alerts != nil && settings.AlertsEnabled {
+		s.alertEvaluationID, err = s.cron.AddFunc(fmt.Sprintf("@every %ds", settings.AlertEvaluationIntervalSeconds), s.runAlertEvaluation)
+		if err != nil {
+			return err
+		}
+		s.alertRateSyncID, err = s.cron.AddFunc(fmt.Sprintf("@every %ds", settings.AlertRateIntervalSeconds), s.runAlertRateSync)
+		if err != nil {
+			return err
+		}
+		s.alertUsageSyncID, err = s.cron.AddFunc(fmt.Sprintf("@every %ds", settings.AlertUsageIntervalSeconds), s.runAlertUsageSync)
+		if err != nil {
+			return err
+		}
+		s.alertBalanceSyncID, err = s.cron.AddFunc(fmt.Sprintf("@every %ds", settings.AlertBalanceIntervalSeconds), s.runAlertBalanceSync)
+		if err != nil {
+			return err
 		}
 	}
 	if s.relayRateSyncID != 0 {
@@ -241,6 +282,81 @@ func (s *Scheduler) runChannelSync() {
 		}
 		return ctx.Err()
 	})
+}
+
+func (s *Scheduler) runAlertEvaluation() {
+	if s.alerts == nil || !s.alertRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.alertRunning.Store(false)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	if err := s.alerts.EvaluateAll(ctx, time.Now().UTC()); err != nil {
+		s.log.Warn("alert evaluation failed", "err", err)
+	}
+}
+
+func (s *Scheduler) runAlertRateSync() {
+	if s.alerts == nil {
+		return
+	}
+	needed, ids, err := s.alerts.CollectionPlan("rate")
+	if err != nil || !needed {
+		return
+	}
+	if s.relay == nil || !s.relayRateRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.relayRateRunning.Store(false)
+	if !s.relaySyncMu.TryLock() {
+		return
+	}
+	defer s.relaySyncMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := s.relay.SyncAlertStations(ctx, "rate", ids); err != nil {
+		s.log.Warn("alert rate sync failed", "err", err)
+	}
+}
+
+func (s *Scheduler) runAlertUsageSync() {
+	if s.alerts == nil {
+		return
+	}
+	needed, ids, err := s.alerts.CollectionPlan("usage")
+	if err != nil || !needed {
+		return
+	}
+	if s.relay == nil || !s.relaySnapshotRunning.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.relaySnapshotRunning.Store(false)
+	if !s.relaySyncMu.TryLock() {
+		return
+	}
+	defer s.relaySyncMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	if err := s.relay.SyncAlertStations(ctx, "usage", ids); err != nil {
+		s.log.Warn("alert usage sync failed", "err", err)
+	}
+}
+
+func (s *Scheduler) runAlertBalanceSync() {
+	if s.alerts == nil {
+		return
+	}
+	needed, _, err := s.alerts.CollectionPlan("balance")
+	if err != nil || !needed {
+		return
+	}
+	if s.monitor == nil || !s.channelSyncMu.TryLock() {
+		return
+	}
+	defer s.channelSyncMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
+	defer cancel()
+	s.monitor.ScanAllBalances(ctx)
 }
 
 func (s *Scheduler) runRelayRateSync() {
