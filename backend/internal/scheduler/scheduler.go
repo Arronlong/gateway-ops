@@ -18,6 +18,8 @@ import (
 )
 
 type Scheduler struct {
+	tokenRefreshID       cron.EntryID
+	tokenRefreshRunning  atomic.Bool
 	cfg                  config.SchedulerConfig
 	log                  *slog.Logger
 	cron                 *cron.Cron
@@ -153,6 +155,9 @@ func (s *Scheduler) configureSyncJobs() error {
 
 	settings, err := s.settings.SyncSettings()
 	if err != nil {
+		return err
+	}
+	if err := s.configureTokenRefreshJob(settings); err != nil {
 		return err
 	}
 	if settings.ChannelConfigured {

@@ -175,6 +175,8 @@ export default function SystemSettingsPage() {
 
   const settings = settingsDraft ?? query.data
   const syncSettings = syncSettingsDraft ?? syncQuery.data
+  const tokenRefreshInterval = syncSettings?.channel_token_refresh_interval_minutes || 30
+  const tokenRefreshIntervals = [...new Set([1, ...channelSyncIntervals, tokenRefreshInterval])].sort((left, right) => left - right)
   const iframeAllowlistText = iframeAllowlistDraft ?? query.data?.iframe_embedding_allowlist.join("\n") ?? ""
 
   function updateSettings(update: (current: SystemSettings) => SystemSettings) {
@@ -220,6 +222,8 @@ export default function SystemSettingsPage() {
 
   async function saveSyncSettings() {
     if (!syncSettings) return
+    const tokenInterval=syncSettings.channel_token_refresh_interval_minutes??30
+    if(!Number.isSafeInteger(tokenInterval)||tokenInterval<1){toast.error("\u8bf7\u9009\u62e9\u6709\u6548\u7684\u5237\u65b0\u9891\u7387");return}
     setSavingSync(true)
     try {
       const saved = await apiFetch<SyncSettings>("/sync-settings", {
@@ -227,6 +231,8 @@ export default function SystemSettingsPage() {
         body: JSON.stringify({
           channel_enabled: syncSettings.channel_enabled,
           channel_interval_minutes: syncSettings.channel_interval_minutes,
+          channel_token_refresh_enabled: syncSettings.channel_token_refresh_enabled,
+          channel_token_refresh_interval_minutes: syncSettings.channel_token_refresh_interval_minutes,
           relay_rate_enabled: syncSettings.relay_rate_enabled,
           relay_rate_interval_minutes: Math.ceil(syncSettings.relay_rate_interval_seconds / 60),
           relay_rate_interval_seconds: syncSettings.relay_rate_interval_seconds,
@@ -305,6 +311,20 @@ export default function SystemSettingsPage() {
                   onValueChange={(value) => updateSyncSettings((current) => ({ ...current, channel_interval_minutes: value }))}
               />
             }
+          </div>
+
+          <div className="border-t border-border py-3">
+            <SyncTaskRow
+              task="channel_token_refresh"
+              title={"\u6e20\u9053 Token \u5237\u65b0"}
+              description={"\u5b9a\u671f\u5237\u65b0\u542f\u7528\u76d1\u63a7\u7684 Sub2API \u6e20\u9053 Token\uff0c\u5305\u542b\u4e3b\u8d26\u53f7\u548c\u9644\u52a0\u8d26\u53f7\u3002\u9700\u914d\u7f6e\u6709\u6548\u7684 Refresh Token\uff1b\u4e0d\u6267\u884c\u6a21\u578b\u6d4b\u8bd5\u3002"}
+              checked={syncSettings.channel_token_refresh_enabled??false}
+              value={tokenRefreshInterval}
+              options={tokenRefreshIntervals}
+              formatOption={formatMinutes}
+              onCheckedChange={value=>updateSyncSettings(current=>({...current,channel_token_refresh_enabled:value}))}
+              onValueChange={value=>updateSyncSettings(current=>({...current,channel_token_refresh_interval_minutes:value}))}
+            />
           </div>
 
           <div className="border-t border-border py-3">

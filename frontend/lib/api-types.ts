@@ -1140,6 +1140,8 @@ export interface SystemSettings {
 }
 
 export interface SyncSettings {
+  channel_token_refresh_enabled: boolean
+  channel_token_refresh_interval_minutes: number
   channel_configured: boolean
   channel_enabled: boolean
   channel_interval_minutes: number

@@ -8,14 +8,16 @@ import (
 )
 
 type syncSettingsInput struct {
-	ChannelEnabled               bool `json:"channel_enabled"`
-	ChannelIntervalMinutes       int  `json:"channel_interval_minutes"`
-	RelayRateEnabled             bool `json:"relay_rate_enabled"`
-	RelayRateIntervalMinutes     int  `json:"relay_rate_interval_minutes"`
-	RelayRateIntervalSeconds     int  `json:"relay_rate_interval_seconds"`
-	RelaySnapshotEnabled         bool `json:"relay_snapshot_enabled"`
-	RelaySnapshotIntervalMinutes int  `json:"relay_snapshot_interval_minutes"`
-	RelaySnapshotIntervalSeconds int  `json:"relay_snapshot_interval_seconds"`
+	ChannelTokenRefreshEnabled         *bool `json:"channel_token_refresh_enabled"`
+	ChannelTokenRefreshIntervalMinutes *int  `json:"channel_token_refresh_interval_minutes" binding:"omitempty,min=1"`
+	ChannelEnabled                     bool  `json:"channel_enabled"`
+	ChannelIntervalMinutes             int   `json:"channel_interval_minutes"`
+	RelayRateEnabled                   bool  `json:"relay_rate_enabled"`
+	RelayRateIntervalMinutes           int   `json:"relay_rate_interval_minutes"`
+	RelayRateIntervalSeconds           int   `json:"relay_rate_interval_seconds"`
+	RelaySnapshotEnabled               bool  `json:"relay_snapshot_enabled"`
+	RelaySnapshotIntervalMinutes       int   `json:"relay_snapshot_interval_minutes"`
+	RelaySnapshotIntervalSeconds       int   `json:"relay_snapshot_interval_seconds"`
 }
 
 func registerSyncSettings(g *gin.RouterGroup, d *Deps) {
@@ -38,6 +40,19 @@ func registerSyncSettings(g *gin.RouterGroup, d *Deps) {
 			RelayRateEnabled: in.RelayRateEnabled, RelayRateIntervalMinutes: in.RelayRateIntervalMinutes, RelayRateIntervalSeconds: in.RelayRateIntervalSeconds,
 			RelaySnapshotEnabled: in.RelaySnapshotEnabled, RelaySnapshotIntervalMinutes: in.RelaySnapshotIntervalMinutes,
 			RelaySnapshotIntervalSeconds: in.RelaySnapshotIntervalSeconds,
+		}
+		current, err := d.Scheduler.SyncSettings()
+		if err != nil {
+			fail(c, http.StatusInternalServerError, err)
+			return
+		}
+		settings.ChannelTokenRefreshEnabled = current.ChannelTokenRefreshEnabled
+		settings.ChannelTokenRefreshIntervalMinutes = current.ChannelTokenRefreshIntervalMinutes
+		if in.ChannelTokenRefreshEnabled != nil {
+			settings.ChannelTokenRefreshEnabled = *in.ChannelTokenRefreshEnabled
+		}
+		if in.ChannelTokenRefreshIntervalMinutes != nil {
+			settings.ChannelTokenRefreshIntervalMinutes = *in.ChannelTokenRefreshIntervalMinutes
 		}
 		if err := d.Scheduler.UpdateSyncSettings(settings); err != nil {
 			fail(c, http.StatusInternalServerError, err)

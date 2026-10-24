@@ -66,12 +66,18 @@ func (s *Settings) Set(key, value string) error {
 }
 
 func (s *Settings) SyncSettings() (SyncSettings, error) {
+	tokenEnabled, tokenInterval, tokenErr := s.TokenRefreshSettings()
+	if tokenErr != nil {
+		return SyncSettings{}, tokenErr
+	}
 	settings := SyncSettings{
-		ChannelIntervalMinutes:       30,
-		RelayRateIntervalMinutes:     1,
-		RelayRateIntervalSeconds:     10,
-		RelaySnapshotIntervalMinutes: 60,
-		RelaySnapshotIntervalSeconds: 3600,
+		ChannelTokenRefreshEnabled:         tokenEnabled,
+		ChannelTokenRefreshIntervalMinutes: tokenInterval,
+		ChannelIntervalMinutes:             30,
+		RelayRateIntervalMinutes:           1,
+		RelayRateIntervalSeconds:           10,
+		RelaySnapshotIntervalMinutes:       60,
+		RelaySnapshotIntervalSeconds:       3600,
 	}
 	readBool := func(key string, target *bool) error {
 		value, found, err := s.Get(key)
@@ -171,6 +177,9 @@ func (s *Settings) SyncSettings() (SyncSettings, error) {
 }
 
 func (s *Settings) SaveSyncSettings(settings SyncSettings) error {
+	if settings.ChannelTokenRefreshIntervalMinutes < 1 {
+		settings.ChannelTokenRefreshIntervalMinutes = 30
+	}
 	if settings.ChannelIntervalMinutes < 1 {
 		settings.ChannelIntervalMinutes = 30
 	}
@@ -194,6 +203,8 @@ func (s *Settings) SaveSyncSettings(settings SyncSettings) error {
 	}
 	settings.RelaySnapshotIntervalMinutes = (settings.RelaySnapshotIntervalSeconds + 59) / 60
 	values := map[string]string{
+		SettingChannelTokenRefreshEnabled:   strconv.FormatBool(settings.ChannelTokenRefreshEnabled),
+		SettingChannelTokenRefreshInterval:  strconv.Itoa(settings.ChannelTokenRefreshIntervalMinutes),
 		SettingChannelSyncConfigured:        "true",
 		SettingChannelSyncEnabled:           strconv.FormatBool(settings.ChannelEnabled),
 		SettingChannelSyncInterval:          strconv.Itoa(settings.ChannelIntervalMinutes),
