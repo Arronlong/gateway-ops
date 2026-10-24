@@ -67,13 +67,14 @@ type PublicServiceStatusComponent struct {
 	History     []PublicServiceStatusDay `json:"history"`
 }
 type PublicServiceStatusGroup struct {
-	ID          string                         `json:"id"`
-	Name        string                         `json:"name"`
-	Description string                         `json:"description,omitempty"`
-	Status      string                         `json:"status"`
-	Uptime      float64                        `json:"uptime"`
-	History     []PublicServiceStatusDay       `json:"history"`
-	Components  []PublicServiceStatusComponent `json:"components"`
+	ID              string                         `json:"id"`
+	Name            string                         `json:"name"`
+	Description     string                         `json:"description,omitempty"`
+	Status          string                         `json:"status"`
+	Uptime          float64                        `json:"uptime"`
+	UptimeAvailable *bool                          `json:"uptime_available,omitempty"`
+	History         []PublicServiceStatusDay       `json:"history"`
+	Components      []PublicServiceStatusComponent `json:"components"`
 }
 type PublicServiceStatusDay struct {
 	Date      string                    `json:"date"`
@@ -164,11 +165,11 @@ func publicServiceStatus(c *gin.Context) {
 	serviceStatusCache.mu.Unlock()
 	ctx, cancel := context.WithTimeout(c.Request.Context(), statusFetchTimeout)
 	defer cancel()
-	targets := []statusTarget{{"openai", "OpenAI", "https://status.openai.com/", "https://status.openai.com/history", openAIStatusURL, openAIComponentsURL, openAIIncidentsURL}, {"claude", "Claude", "https://status.claude.com/", "https://status.claude.com/history", claudeStatusURL, "", claudeIncidentsURL}}
+	targets := []statusTarget{{"openai", "OpenAI", "https://status.openai.com/", "https://status.openai.com/history", openAIStatusURL, openAIComponentsURL, openAIIncidentsURL}, {"claude", "Claude", "https://status.claude.com/", "https://status.claude.com/history", claudeStatusURL, "", claudeIncidentsURL}, {"deepseek", "DeepSeek", deepSeekStatusPageURL, deepSeekStatusPageURL + "history", "", "", ""}}
 	results := make(chan PublicServiceStatus, len(targets))
 	for _, target := range targets {
 		target := target
-		go func() { results <- fetchPublicServiceStatus(ctx, target, now) }()
+		go func() { results <- fetchStatusTarget(ctx, target, now) }()
 	}
 	byID := make(map[string]PublicServiceStatus, len(targets))
 	for range targets {

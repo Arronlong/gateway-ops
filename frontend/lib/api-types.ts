@@ -1171,6 +1171,7 @@ export interface PublicServiceStatusGroup {
   description?: string
   status: string
   uptime: number
+  uptime_available?: boolean
   history: PublicServiceStatusDay[]
   components: PublicServiceStatusComponent[]
 }
@@ -1203,7 +1204,7 @@ export interface PublicServiceStatusIncident {
 }
 
 export interface PublicServiceStatus {
-  id: "openai" | "claude" | string
+  id: "openai" | "claude" | "deepseek" | string
   name: string
   url: string
   history_url: string
