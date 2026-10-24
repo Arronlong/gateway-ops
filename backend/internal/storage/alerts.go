@@ -24,6 +24,7 @@ func (r *Alerts) WithMutationLock(ctx context.Context, fn func(*Alerts) error) e
 		return fn(r)
 	}
 	return r.db.WithContext(ctx).Connection(func(db *gorm.DB) error {
+		db = db.Session(&gorm.Session{NewDB: true})
 		if err := db.Exec("SELECT pg_advisory_lock(?)", int64(719420261015)).Error; err != nil {
 			return err
 		}
@@ -42,6 +43,7 @@ func (r *Alerts) WithEvaluationLock(ctx context.Context, fn func(*Alerts) error)
 		return fn(r)
 	}
 	return r.db.WithContext(ctx).Connection(func(db *gorm.DB) error {
+		db = db.Session(&gorm.Session{NewDB: true})
 		var locked bool
 		if err := db.Raw("SELECT pg_try_advisory_lock(?)", int64(719420261015)).Scan(&locked).Error; err != nil {
 			return err
