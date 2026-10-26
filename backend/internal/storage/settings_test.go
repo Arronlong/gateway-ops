@@ -20,6 +20,44 @@ func TestUISettingsOperationsManagementDefaultsEnabled(t *testing.T) {
 	}
 }
 
+func TestUISettingsRecentMetricsLimitDefaultsAndPersistence(t *testing.T) {
+	settings := defaultUISettings()
+	raw, err := json.Marshal(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var data map[string]any
+	if err := json.Unmarshal(raw, &data); err != nil {
+		t.Fatal(err)
+	}
+	if data["recent_metrics_limit"] != float64(60) {
+		t.Fatalf("recent_metrics_limit = %v, want 60", data["recent_metrics_limit"])
+	}
+	if err := json.Unmarshal([]byte(`{"recent_metrics_limit":100,"recent_metrics_window_hours":3}`), &settings); err != nil {
+		t.Fatal(err)
+	}
+	values, err := uiSettingsValues(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["ui.monitor.recent_metrics_limit"] != "100" {
+		t.Fatalf("persisted limit = %q, want 100", values["ui.monitor.recent_metrics_limit"])
+	}
+	if values[SettingUIRecentMetricsWindowHours] != "3" {
+		t.Fatal("legacy three-hour window must be preserved")
+	}
+	if err := json.Unmarshal([]byte(`{"recent_metrics_window_hours":4}`), &settings); err != nil {
+		t.Fatal(err)
+	}
+	values, err = uiSettingsValues(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values["ui.monitor.recent_metrics_limit"] != "100" {
+		t.Fatal("partial legacy update must preserve configured limit")
+	}
+}
+
 func TestUISettingsPelicanDefaultsAreGlobal(t *testing.T) {
 	t.Parallel()
 

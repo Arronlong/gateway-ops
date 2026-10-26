@@ -3,6 +3,17 @@ import test from "node:test"
 // @ts-expect-error Node 22
 import { healthScoreDescription, latencyHealthScore } from "./latency.ts"
 
+test("健康评分和排序跟随配置的最近数量", () => {
+  const rows = Array.from({length: 100}, (_, i) => row(i, {success: i < 20}))
+  const limited = latencyHealthScore(rows, {now, windowHours: 4, sampleLimit: 20})
+  const full = latencyHealthScore(rows, {now, windowHours: 4, sampleLimit: 100})
+  assert.equal(limited?.sampleCount, 20)
+  assert.equal(limited?.recentSuccess, 100)
+  assert.equal(full?.sampleCount, 100)
+  assert.equal(full?.recentSuccess, 20)
+  assert.ok(limited!.score! > full!.score!)
+})
+
 const now = Date.parse("2026-10-22T08:00:00Z")
 const row = (index: number, extra = {}) => ({
   channel_account_id: 1, created_at: new Date(now - (index + 2) * 60000).toISOString(),

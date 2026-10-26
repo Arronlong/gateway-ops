@@ -5,6 +5,7 @@ import { SyncSettingsContext, SystemSettingsContext } from "@/lib/settings-conte
 import { apiFetch } from "@/lib/api"
 import { createSharedRequestRegistry } from "@/lib/shared-request"
 import { scheduleQueryUpdate } from "@/lib/query-transition"
+import { normalizeRecentMetricsLimit } from "@/lib/recent-request-metrics"
 import { latencyBucketQuery } from "@/lib/latency"
 import { useRefreshTick } from "@/lib/refresh-context"
 import type {
@@ -263,11 +264,11 @@ export function useChannelMetrics(range: RelayUsageRange = "today") {
 }
 
 export function useChannelLatencyTrends(limit = 60, enabled = true) {
-  return useApi<ChannelLatencyTrend[]>(enabled ? `/channels/latency-trends?limit=${limit}` : null)
+  return useApi<ChannelLatencyTrend[]>(enabled ? `/channels/latency-trends?limit=${normalizeRecentMetricsLimit(limit)}` : null)
 }
 
 export function useRelayLatencyTrends(limit = 60, enabled = true) {
-  return useApi<RelayLatencyTrend[]>(enabled ? `/relay-stations/latency-trends?limit=${limit}` : null)
+  return useApi<RelayLatencyTrend[]>(enabled ? `/relay-stations/latency-trends?limit=${normalizeRecentMetricsLimit(limit)}` : null)
 }
 
 export function useChannelLatencyBuckets(range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 60, enabled = true) {
@@ -464,7 +465,8 @@ export function useSyncSettingsQuery() {
 }
 
 export function useSystemSettingsQuery() {
-  return useApi<SystemSettings>("/system-settings", false)
+  const query = useApi<SystemSettings>("/system-settings", false)
+  return { ...query, data: query.data ? { ...query.data, recent_metrics_limit: normalizeRecentMetricsLimit(query.data.recent_metrics_limit) } : null }
 }
 
 export function useOperationSummary(range: OperationRange = "today") {

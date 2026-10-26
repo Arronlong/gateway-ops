@@ -893,6 +893,7 @@ type UISettings struct {
 	ChannelsGroupsExpanded      bool              `json:"channels_groups_expanded"`
 	ChannelsShowStability       bool              `json:"channels_show_stability"`
 	ChannelsShowConsumption     bool              `json:"channels_show_consumption"`
+	RecentMetricsLimit          int               `json:"recent_metrics_limit"`
 	RecentMetricsWindowHours    int               `json:"recent_metrics_window_hours"`
 	PelicanPageEnabled          bool              `json:"pelican_page_enabled"`
 	PelicanTasksEnabled         bool              `json:"pelican_tasks_enabled"`

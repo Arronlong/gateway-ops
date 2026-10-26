@@ -60,7 +60,7 @@ import { channelTypeLabel, money, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
 import { RecentRequestMetrics } from "@/components/monitor/recent-request-metrics"
-import { recentRequestMetrics } from "@/lib/recent-request-metrics"
+import { normalizeRecentMetricsLimit, recentRequestMetrics } from "@/lib/recent-request-metrics"
 import type { Channel, ChannelAccount, ChannelType, ChannelUsageSample, LatencyBucketGranularity, RateBoundAccount, RateSnapshot, RelayUsageRange, SystemSettings } from "@/lib/api-types"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
 import { ChannelPelicanPanel } from "@/components/monitor/channel-pelican-panel"
@@ -741,7 +741,7 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
     const section = columnVisibilitySections[column]
     return !section || channelSectionVisible(uiSettings, section)
   })), [preferredColumns, uiSettings])
-  const recentLatencyLimit = 60
+  const recentLatencyLimit = normalizeRecentMetricsLimit(uiSettings.recent_metrics_limit)
   const listGridStyle = useMemo(() => channelListGridStyle(visibleColumns), [visibleColumns])
   const [sortKey, setSortKey] = useState<ChannelSortKey>("score")
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc")
@@ -758,8 +758,8 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
   const recentVisible = channelSectionVisible(uiSettings, "recent") && (viewMode === "gallery" || visibleColumns.has("recent"))
   const stabilityVisible = channelSectionVisible(uiSettings, "stability") && (viewMode === "gallery" || visibleColumns.has("stability"))
   const consumptionVisible = channelSectionVisible(uiSettings, "consumption_trend") && (viewMode === "gallery" || visibleColumns.has("consumption_trend"))
-  const latencyTrends = useChannelLatencyTrends(60, true)
-  const relayLatencyTrends = useRelayLatencyTrends(60, recentVisible)
+  const latencyTrends = useChannelLatencyTrends(recentLatencyLimit, true)
+  const relayLatencyTrends = useRelayLatencyTrends(recentLatencyLimit, recentVisible)
   const scoreLatencyBuckets = useChannelLatencyBuckets(usageRange, "auto", 60, true)
   const listAutoLatencyBuckets = useChannelLatencyBuckets(usageRange, "auto", 30, viewMode === "list" && latencyGranularity === "auto" && stabilityVisible)
   const fixedLatencyBuckets = useChannelLatencyBuckets(usageRange, latencyGranularity, displayBucketCount, latencyGranularity !== "auto" && stabilityVisible)
@@ -767,7 +767,7 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
   const consumptionBuckets = useChannelConsumptionBuckets(usageRange, latencyGranularity, displayBucketCount, consumptionVisible)
   const metricByChannel = useMemo(() => new Map((metrics.data ?? []).map((item) => [item.channel_id, item])), [metrics.data])
   const latencyByChannel = useMemo(() => new Map((latencyTrends.data ?? []).map((item) => [item.channel_id, item.samples])), [latencyTrends.data])
-  const recentMetricsByChannel = useMemo(() => new Map(Array.from(latencyByChannel, ([channelID, samples]) => [channelID, recentRequestMetrics(samples, Date.now(), uiSettings.recent_metrics_window_hours)])), [latencyByChannel, uiSettings.recent_metrics_window_hours])
+  const recentMetricsByChannel = useMemo(() => new Map(Array.from(latencyByChannel, ([channelID, samples]) => [channelID, recentRequestMetrics(samples, Date.now(), uiSettings.recent_metrics_window_hours, recentLatencyLimit)])), [latencyByChannel, uiSettings.recent_metrics_window_hours, recentLatencyLimit])
   const relayRecentSamplesByAccount = useMemo(() => new Map((relayLatencyTrends.data ?? []).map((item) => [relayAccountComparisonKey(item.station_id, item.account_id), item.samples])), [relayLatencyTrends.data])
   const latencyBucketsByChannel = useMemo(() => new Map((latencyBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [latencyBuckets.data])
   const consumptionBucketsByChannel = useMemo(() => new Map((consumptionBuckets.data ?? []).map((item) => [item.channel_id, item.buckets])), [consumptionBuckets.data])
@@ -775,10 +775,10 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
   const healthScoreByChannel = useMemo(() => {
     const scores = new Map<number, ReturnType<typeof latencyHealthScore>>()
     for (const channel of channels ?? []) {
-      scores.set(channel.id, latencyHealthScore(latencyByChannel.get(channel.id) ?? [], { windowHours: uiSettings.recent_metrics_window_hours }))
+      scores.set(channel.id, latencyHealthScore(latencyByChannel.get(channel.id) ?? [], { windowHours: uiSettings.recent_metrics_window_hours, sampleLimit: recentLatencyLimit }))
     }
     return scores
-  }, [channels, latencyByChannel, uiSettings.recent_metrics_window_hours])
+  }, [channels, latencyByChannel, uiSettings.recent_metrics_window_hours, recentLatencyLimit])
   const latestCallByChannel = useMemo(() => {
     const latest = new Map<number, number>()
     for (const series of latencyTrends.data ?? []) {
@@ -1318,7 +1318,7 @@ actions={<>
                   ) : null}
                 </div>
 
-                <RecentRequestMetrics samples={latencyByChannel.get(c.id) ?? []} loading={latencyTrends.loading} windowHours={uiSettings.recent_metrics_window_hours} />
+                <RecentRequestMetrics samples={latencyByChannel.get(c.id) ?? []} loading={latencyTrends.loading} windowHours={uiSettings.recent_metrics_window_hours} sampleLimit={recentLatencyLimit} />
                 {channelSectionVisible(uiSettings, "recent") ? <LatencyStabilityLane
                   buckets={latencyBucketsByChannel.get(c.id) ?? []}
                   recentSamples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)}
@@ -1481,7 +1481,7 @@ actions={<>
               {visibleColumns.has("balance") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">余额</span><span className={cn("font-mono text-sm font-semibold tabular-nums", balanceTone({ ...c, last_balance: currentBalance }))}>{metrics.loading && c.balance_mode === "manual" ? "读取中…" : c.balance_mode === "auto" ? <AccountBalance accounts={accounts} total={currentBalance} /> : money(currentBalance)}</span></div> : null}
               {visibleColumns.has("consumption") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">区间余额消耗</span><span className="font-mono text-sm font-semibold tabular-nums text-warning">{metrics.loading && !metric ? "读取中…" : money(metric?.consumption_amount)}</span></div> : null}
               {visibleColumns.has("usage_cost") ? <div className="flex items-center justify-between gap-2 lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">区间调用消耗</span><span className="font-mono text-xs font-semibold tabular-nums" title={metric ? `渠道自身 usage/log · ${metric.usage_request_count} 次请求` : metrics.error ?? ""}>{metrics.loading && !metric ? "读取中…" : charge(metric?.usage_cost_amount)}</span></div> : null}
-              {channelSectionVisible(uiSettings, "recent") && visibleColumns.has("recent") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">最近调用</p><LatencyStabilityLane buckets={latencyBucketsByChannel.get(c.id) ?? []} recentSamples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} loading={latencyBuckets.loading} layout="fill" compact granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} relayRecentSamplesByAccount={relayRecentSamplesByAccount} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无调用数据`} loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /><RecentLatencyTitle samples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} compact /><RecentRequestMetrics samples={latencyByChannel.get(c.id) ?? []} loading={latencyTrends.loading} windowHours={uiSettings.recent_metrics_window_hours} /></div> : null}
+              {channelSectionVisible(uiSettings, "recent") && visibleColumns.has("recent") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">最近调用</p><LatencyStabilityLane buckets={latencyBucketsByChannel.get(c.id) ?? []} recentSamples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} loading={latencyBuckets.loading} layout="fill" compact granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} relayRecentSamplesByAccount={relayRecentSamplesByAccount} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无调用数据`} loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /><RecentLatencyTitle samples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)} compact /><RecentRequestMetrics samples={latencyByChannel.get(c.id) ?? []} loading={latencyTrends.loading} windowHours={uiSettings.recent_metrics_window_hours} sampleLimit={recentLatencyLimit} /></div> : null}
               {channelSectionVisible(uiSettings, "stability") && visibleColumns.has("stability") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">时间稳定性</p><LatencyStabilityLane buckets={latencyBucketsByChannel.get(c.id) ?? []} loading={latencyBuckets.loading} layout="fill" compact granularity={latencyGranularity} relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无调用数据`} loadSamples={(bucket) => apiFetch<ChannelUsageSample[]>("/channels/" + c.id + "/latency-samples?start=" + encodeURIComponent(bucket.start) + "&end=" + encodeURIComponent(bucket.end) + "&limit=30")} /></div> : null}
               {channelSectionVisible(uiSettings, "consumption_trend") && visibleColumns.has("consumption_trend") ? <div className="min-w-0"><p className="mb-1 text-[11px] text-muted-foreground lg:hidden">调用消耗趋势</p><ChannelConsumptionTrend buckets={consumptionBucketsByChannel.get(c.id) ?? []} loading={consumptionBuckets.loading} granularity={latencyGranularity} compact relayLinks={relayLinksByChannel.get(c.id) ?? []} range={usageRange} bucketCount={displayBucketCount} emptyLabel={`${usageRangeLabel}暂无消费数据`} /></div> : null}
               {visibleColumns.has("updated") ? <div className="flex items-center justify-between gap-2 text-xs lg:block"><span className="text-[11px] text-muted-foreground lg:hidden">上次更新</span><span className="text-muted-foreground" title={c.last_balance_at ?? c.updated_at}>{relativeTime(c.last_balance_at ?? c.updated_at)}</span></div> : null}

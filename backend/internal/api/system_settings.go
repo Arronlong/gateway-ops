@@ -59,6 +59,9 @@ func validateSystemSettings(settings storage.UISettings) error {
 	if err := storage.ValidatePelicanSettings(settings.PelicanSettings()); err != nil {
 		return err
 	}
+	if settings.RecentMetricsLimit < 1 || settings.RecentMetricsLimit > 100 {
+		return fmt.Errorf("recent metrics limit must be between 1 and 100")
+	}
 	if settings.RecentMetricsWindowHours < 1 || settings.RecentMetricsWindowHours > 24 {
 		return fmt.Errorf("recent metrics window hours must be between 1 and 24")
 	}

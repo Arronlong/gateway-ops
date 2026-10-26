@@ -1,7 +1,19 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 // @ts-expect-error Node 22 原生 TypeScript 测试需要显式扩展名。
-import { defaultSystemSettings, pelicanTimezoneOptions, pelicanWeekdayOptions } from "./system-settings.ts"
+import { defaultSystemSettings, pelicanTimezoneOptions, pelicanWeekdayOptions, recentMetricsWindowOptions } from "./system-settings.ts"
+
+test("最近数量默认为六十", () => {
+  assert.equal(defaultSystemSettings.recent_metrics_limit, 60)
+})
+
+test("统计时长预设与历史值兼容", () => {
+  const presets = [1, 2, 4, 6, 8, 12, 18, 24]
+  assert.deepEqual(recentMetricsWindowOptions().map((option: {value: number}) => option.value), presets)
+  const options = recentMetricsWindowOptions(3)
+  assert.deepEqual(options.map((option: {value: number}) => option.value), [1, 2, 3, 4, 6, 8, 12, 18, 24])
+  assert.equal(options.find((option: {value: number}) => option.value === 3)?.label, "每 3 小时")
+})
 // @ts-expect-error Node 22 原生 TypeScript 测试需要显式扩展名。
 import { addPelicanPlan, defaultPelicanPlan, hasConfiguredPelicanPlan, normalizePelicanPlans, pelicanPlanValidationIssues, removePelicanPlan, updatePelicanPlan } from "./pelican.ts"
 

@@ -8,6 +8,8 @@ import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Input } from "@/components/ui/input"
+import { recentMetricsWindowOptions } from "@/lib/system-settings"
+import { MAX_RECENT_METRICS_LIMIT } from "@/lib/recent-request-metrics"
 import { apiFetch } from "@/lib/api"
 import type { SyncSettings, SystemSettings } from "@/lib/api-types"
 import { useSyncSettings, useSystemSettings } from "@/lib/queries"
@@ -195,10 +197,13 @@ export default function SystemSettingsPage() {
 
   async function save() {
     if (!settings) return
+    const limit = settings.recent_metrics_limit ?? 60
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RECENT_METRICS_LIMIT) { toast.error("最近数量范围请填写 1～100 的整数"); return }
     setSaving(true)
     try {
       const payload: SystemSettings = {
         ...settings,
+        recent_metrics_limit: limit,
         iframe_embedding_allowlist: iframeAllowlistText
           .split(/\r?\n/)
           .map((item) => item.trim())
@@ -386,8 +391,15 @@ export default function SystemSettingsPage() {
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <div className="flex min-h-16 items-center justify-between gap-5 py-3">
-            <div className="min-w-0"><p className="text-sm font-medium text-foreground">缓存与成功率统计时长</p><p className="mt-1 text-xs leading-5 text-muted-foreground">默认 1 小时，可填写 1～24 的整数，单位为小时。</p></div>
-            <div className="flex shrink-0 items-center gap-2"><Input className="h-9 w-20 text-center font-mono text-xs" type="number" min={1} max={24} step={1} inputMode="numeric" aria-label="缓存与成功率统计时长" value={settings.recent_metrics_window_hours} onChange={(event) => updateSettings((current) => ({ ...current, recent_metrics_window_hours: Number(event.target.value) }))} /><span className="text-xs text-muted-foreground">小时</span></div>
+            <div className="min-w-0"><p className="text-sm font-medium text-foreground">缓存与成功率统计时长</p><p className="mt-1 text-xs leading-5 text-muted-foreground">默认 1 小时，选择统计时间范围。</p></div>
+            <Select value={String(settings.recent_metrics_window_hours)} onValueChange={(value) => updateSettings((current) => ({ ...current, recent_metrics_window_hours: Number(value) }))}>
+              <SelectTrigger className="h-9 w-32 shrink-0 text-xs" aria-label="缓存与成功率统计时长"><SelectValue /></SelectTrigger>
+              <SelectContent>{recentMetricsWindowOptions(settings.recent_metrics_window_hours).map(({value, label}) => <SelectItem key={value} value={String(value)}>{label}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="flex min-h-16 items-center justify-between gap-5 border-t border-border py-3">
+            <div className="min-w-0"><p className="text-sm font-medium text-foreground">最近数量范围</p><p className="mt-1 text-xs leading-5 text-muted-foreground">默认 60 条，可设置 1～100 条，用于最近调用、统计指标与健康评分。</p></div>
+            <Input className="h-9 w-20 shrink-0 text-center font-mono text-xs" type="number" min={1} max={MAX_RECENT_METRICS_LIMIT} step={1} inputMode="numeric" aria-label="最近数量范围" value={settings.recent_metrics_limit ?? 60} onChange={(event) => updateSettings((current) => ({ ...current, recent_metrics_limit: Number(event.target.value) }))} />
           </div>
         </CardContent>
       </Card>

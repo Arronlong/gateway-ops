@@ -1263,6 +1263,7 @@ export interface SystemSettings {
   channels_show_stability: boolean
   channels_show_consumption: boolean
   recent_metrics_window_hours: number
+  recent_metrics_limit: number
   pelican_page_enabled: boolean
   pelican_tasks_enabled: boolean
   pelican_history_count: number

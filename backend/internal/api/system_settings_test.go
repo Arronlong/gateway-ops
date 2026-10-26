@@ -1,10 +1,88 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+	"github.com/glebarez/sqlite"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
+
+func TestSystemSettingsRecentMetricsHTTPCompatibility(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open(filepath.Join(t.TempDir(), "settings.db")), &gorm.Config{Logger: logger.Default.LogMode(logger.Silent)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sqlDB, err := db.DB()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	if err := db.AutoMigrate(&storage.AppSetting{}, &storage.PelicanConfig{}, &storage.GroupPelicanConfig{}); err != nil {
+		t.Fatal(err)
+	}
+	settings := storage.NewSettings(db)
+	if err := settings.Set(storage.SettingUIRecentMetricsWindowHours, "3"); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	registerSystemSettings(router.Group(""), &Deps{Settings: settings})
+	request := func(method, body string, code, limit, hours int) {
+		t.Helper()
+		req := httptest.NewRequest(method, "/system-settings", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, req)
+		if response.Code != code {
+			t.Fatalf("%s %s: status %d, want %d: %s", method, body, response.Code, code, response.Body.String())
+		}
+		if code != 200 {
+			return
+		}
+		var result struct {
+			Data storage.UISettings `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &result); err != nil {
+			t.Fatal(err)
+		}
+		if result.Data.RecentMetricsLimit != limit || result.Data.RecentMetricsWindowHours != hours {
+			t.Fatalf("%s %s: limit=%d hours=%d, want %d/%d", method, body, result.Data.RecentMetricsLimit, result.Data.RecentMetricsWindowHours, limit, hours)
+		}
+	}
+	request("GET", "", 200, 60, 3)
+	request("PUT", `{"recent_metrics_window_hours":3}`, 200, 60, 3)
+	request("GET", "", 200, 60, 3)
+	request("PUT", `{"recent_metrics_window_hours":12,"recent_metrics_limit":30}`, 200, 30, 12)
+	request("GET", "", 200, 30, 12)
+	request("PUT", `{"recent_metrics_window_hours":3}`, 200, 30, 3)
+	for _, limit := range []string{"0", "-1", "101", "1.5", `"30"`} {
+		request("PUT", `{"recent_metrics_limit":`+limit+`}`, 400, 0, 0)
+	}
+	request("GET", "", 200, 30, 3)
+}
+
+func TestValidateSystemSettingsRecentMetricsLimit(t *testing.T) {
+	for _, limit := range []int{-1, 0, 1, 60, 100, 101} {
+		t.Run(fmt.Sprint(limit), func(t *testing.T) {
+			settings := storage.UISettings{RecentMetricsWindowHours: 3, IframeEmbeddingMode: storage.IframeEmbeddingModeAll, PelicanPrompt: storage.DefaultPelicanPrompt, PelicanReasoningEffort: "medium", PelicanParallelCount: 1, PelicanCronExpression: "*/30 * * * *", PelicanActiveStart: "08:00", PelicanActiveEnd: "22:00", PelicanHistoryCount: storage.PelicanHistoryLimit}
+			if err := json.Unmarshal([]byte(fmt.Sprintf(`{"recent_metrics_limit":%d}`, limit)), &settings); err != nil {
+				t.Fatal(err)
+			}
+			err := validateSystemSettings(settings)
+			wantErr := limit < 1 || limit > 100
+			if (err != nil) != wantErr {
+				t.Fatalf("limit %d: error = %v, wantErr %v", limit, err, wantErr)
+			}
+		})
+	}
+}
 
 func TestValidateSystemSettingsIframeConfiguration(t *testing.T) {
 	t.Parallel()
@@ -17,6 +95,7 @@ func TestValidateSystemSettingsIframeConfiguration(t *testing.T) {
 		{
 			name: "allow all",
 			settings: storage.UISettings{
+				RecentMetricsLimit:       60,
 				RecentMetricsWindowHours: 1,
 				IframeEmbeddingEnabled:   true,
 				IframeEmbeddingMode:      storage.IframeEmbeddingModeAll,
@@ -24,17 +103,18 @@ func TestValidateSystemSettingsIframeConfiguration(t *testing.T) {
 		},
 		{
 			name:     "window hours out of range",
-			settings: storage.UISettings{RecentMetricsWindowHours: 25, IframeEmbeddingMode: storage.IframeEmbeddingModeAll},
+			settings: storage.UISettings{RecentMetricsLimit: 60, RecentMetricsWindowHours: 25, IframeEmbeddingMode: storage.IframeEmbeddingModeAll},
 			wantErr:  true,
 		},
 		{
 			name:     "window hours below range",
-			settings: storage.UISettings{RecentMetricsWindowHours: 0, IframeEmbeddingMode: storage.IframeEmbeddingModeAll},
+			settings: storage.UISettings{RecentMetricsLimit: 60, RecentMetricsWindowHours: 0, IframeEmbeddingMode: storage.IframeEmbeddingModeAll},
 			wantErr:  true,
 		},
 		{
 			name: "valid allowlist",
 			settings: storage.UISettings{
+				RecentMetricsLimit:       60,
 				RecentMetricsWindowHours: 1,
 				IframeEmbeddingEnabled:   true,
 				IframeEmbeddingMode:      storage.IframeEmbeddingModeAllowlist,
@@ -44,6 +124,7 @@ func TestValidateSystemSettingsIframeConfiguration(t *testing.T) {
 		{
 			name: "invalid mode",
 			settings: storage.UISettings{
+				RecentMetricsLimit:       60,
 				RecentMetricsWindowHours: 1,
 				IframeEmbeddingEnabled:   true,
 				IframeEmbeddingMode:      "invalid",
@@ -53,6 +134,7 @@ func TestValidateSystemSettingsIframeConfiguration(t *testing.T) {
 		{
 			name: "invalid allowlist pattern",
 			settings: storage.UISettings{
+				RecentMetricsLimit:       60,
 				RecentMetricsWindowHours: 1,
 				IframeEmbeddingEnabled:   true,
 				IframeEmbeddingMode:      storage.IframeEmbeddingModeAllowlist,
@@ -85,6 +167,7 @@ func TestValidateSystemSettingsPelicanConfiguration(t *testing.T) {
 	t.Parallel()
 
 	base := storage.UISettings{
+		RecentMetricsLimit:       60,
 		RecentMetricsWindowHours: 1,
 		IframeEmbeddingMode:      storage.IframeEmbeddingModeAllowlist,
 		PelicanReasoningEffort:   "medium",

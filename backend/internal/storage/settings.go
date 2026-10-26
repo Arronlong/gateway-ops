@@ -36,6 +36,7 @@ const (
 	SettingUIChannelsGroupsExpanded      = "ui.channels.groups_expanded"
 	SettingUIChannelsShowStability       = "ui.channels.show_stability"
 	SettingUIChannelsShowConsumption     = "ui.channels.show_consumption"
+	SettingUIRecentMetricsLimit          = "ui.monitor.recent_metrics_limit"
 	SettingUIRecentMetricsWindowHours    = "ui.monitor.recent_metrics_window_hours"
 	SettingPelicanModel                  = "pelican.model"
 	SettingPelicanPrompt                 = "pelican.prompt"
@@ -287,6 +288,7 @@ func defaultUISettings() UISettings {
 		ChannelsShowStability:       true,
 		ChannelsShowConsumption:     true,
 		RecentMetricsWindowHours:    1,
+		RecentMetricsLimit:          60,
 		PelicanPageEnabled:          true,
 		PelicanTasksEnabled:         true,
 		PelicanHistoryCount:         PelicanHistoryLimit,
@@ -340,6 +342,7 @@ func uiSettingsValues(settings UISettings) (map[string]string, error) {
 		SettingUIChannelsShowStability:       strconv.FormatBool(settings.ChannelsShowStability),
 		SettingUIChannelsShowConsumption:     strconv.FormatBool(settings.ChannelsShowConsumption),
 		SettingUIRecentMetricsWindowHours:    strconv.Itoa(settings.RecentMetricsWindowHours),
+		SettingUIRecentMetricsLimit:          strconv.Itoa(settings.RecentMetricsLimit),
 		SettingPelicanModel:                  plans[0].Model,
 		SettingPelicanPrompt:                 plans[0].Prompt,
 		SettingPelicanReasoningEffort:        plans[0].ReasoningEffort,
@@ -432,6 +435,15 @@ func (s *Settings) UISettings() (UISettings, error) {
 	}
 	if err := readBool(SettingUIChannelsShowConsumption, &settings.ChannelsShowConsumption); err != nil {
 		return settings, err
+	}
+	if value, found, err := s.Get(SettingUIRecentMetricsLimit); err != nil {
+		return settings, err
+	} else if found {
+		limit, err := strconv.Atoi(strings.TrimSpace(value))
+		if err != nil || limit < 1 || limit > 100 {
+			return settings, fmt.Errorf("invalid recent metrics limit %q", value)
+		}
+		settings.RecentMetricsLimit = limit
 	}
 	if err := readWindowHours(&settings.RecentMetricsWindowHours); err != nil {
 		return settings, err

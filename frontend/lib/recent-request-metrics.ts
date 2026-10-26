@@ -21,7 +21,12 @@ const DEFAULT_WINDOW_HOURS = 1
 const MIN_WINDOW_HOURS = 1
 const MAX_WINDOW_HOURS = 24
 const RECENT_CUTOFF_MS = 45 * 1000
-const RECENT_LIMIT = 60
+export const DEFAULT_RECENT_METRICS_LIMIT = 60
+export const MAX_RECENT_METRICS_LIMIT = 100
+
+export function normalizeRecentMetricsLimit(value = DEFAULT_RECENT_METRICS_LIMIT) {
+  return Number.isSafeInteger(value) && value >= 1 ? Math.min(MAX_RECENT_METRICS_LIMIT, value) : DEFAULT_RECENT_METRICS_LIMIT
+}
 
 function nonNegative(value: number | undefined) {
   return Number.isFinite(value) ? Math.max(0, value ?? 0) : 0
@@ -45,18 +50,18 @@ export function recentRequestAttemptOutcome(sample: RecentRequestSample): boolea
   return (sample.status_code ?? 0) >= 200 && (sample.status_code ?? 0) < 300
 }
 
-export function recentRequestWindow<T extends RecentRequestSample>(samples: readonly T[], now = Date.now(), windowHours = DEFAULT_WINDOW_HOURS) {
+export function recentRequestWindow<T extends RecentRequestSample>(samples: readonly T[], now = Date.now(), windowHours = DEFAULT_WINDOW_HOURS, sampleLimit = DEFAULT_RECENT_METRICS_LIMIT) {
   const normalizedWindowHours = Number.isInteger(windowHours) ? Math.min(MAX_WINDOW_HOURS, Math.max(MIN_WINDOW_HOURS, windowHours)) : DEFAULT_WINDOW_HOURS
   const cutoff = now - RECENT_CUTOFF_MS
   const windowStart = cutoff - normalizedWindowHours * 60 * 60 * 1000
   const selected = samples.map((sample, index) => ({sample, index, time: Date.parse(sample.created_at)}))
     .filter(({time}) => Number.isFinite(time) && time >= windowStart && time <= cutoff)
-    .sort((a, b) => b.time - a.time || a.index - b.index).slice(0, RECENT_LIMIT)
-  return { windowHours: normalizedWindowHours, samples: selected.map(({sample}) => sample) }
+    .sort((a, b) => b.time - a.time || a.index - b.index).slice(0, normalizeRecentMetricsLimit(sampleLimit))
+  return { windowHours: normalizedWindowHours, sampleLimit: normalizeRecentMetricsLimit(sampleLimit), samples: selected.map(({sample}) => sample) }
 }
 
-export function recentRequestMetrics(samples: readonly RecentRequestSample[], now = Date.now(), windowHours = DEFAULT_WINDOW_HOURS) {
-  const selected = recentRequestWindow(samples, now, windowHours)
+export function recentRequestMetrics(samples: readonly RecentRequestSample[], now = Date.now(), windowHours = DEFAULT_WINDOW_HOURS, sampleLimit = DEFAULT_RECENT_METRICS_LIMIT) {
+  const selected = recentRequestWindow(samples, now, windowHours, sampleLimit)
   let successCount = 0, successAttemptCount = 0, cacheHitCount = 0, cacheKnownCount = 0
   let cacheInputTokens = 0, cacheReadTokens = 0, cacheCreationTotal = 0
   for (const sample of selected.samples) {
@@ -79,7 +84,7 @@ export function recentRequestMetrics(samples: readonly RecentRequestSample[], no
   }
   const cacheTokenTotal = cacheInputTokens + cacheReadTokens + cacheCreationTotal
   return {
-    sampleCount: selected.samples.length, windowHours: selected.windowHours, successCount, successAttemptCount, successKnownCount: successAttemptCount, cacheHitCount, cacheKnownCount,
+    sampleCount: selected.samples.length, sampleLimit: selected.sampleLimit, windowHours: selected.windowHours, successCount, successAttemptCount, successKnownCount: successAttemptCount, cacheHitCount, cacheKnownCount,
     cacheInputTokens, cacheReadTokens, cacheCreationTokens: cacheCreationTotal, cacheTokenTotal,
     successRate: successAttemptCount ? successCount / successAttemptCount : null,
     cacheHitRate: cacheTokenTotal ? cacheReadTokens / cacheTokenTotal : null,

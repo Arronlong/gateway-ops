@@ -33,6 +33,12 @@ export function channelSectionVisible(settings: SystemSettings | null, section: 
   }
 }
 
+export function recentMetricsWindowOptions(current = 1) {
+  const values = [1, 2, 4, 6, 8, 12, 18, 24]
+  if (Number.isInteger(current) && current >= 1 && current <= 24 && !values.includes(current)) values.push(current)
+  return values.sort((left, right) => left - right).map(value => ({value, label: `每 ${value} 小时`}))
+}
+
 export const defaultSystemSettings: SystemSettings = {
   operations_management_enabled: true,
   channels_page_enabled: true,
@@ -44,6 +50,7 @@ export const defaultSystemSettings: SystemSettings = {
   channels_show_stability: true,
   channels_show_consumption: true,
   recent_metrics_window_hours: 1,
+  recent_metrics_limit: 60,
   pelican_page_enabled: true,
   pelican_tasks_enabled: true,
   pelican_history_count: 30,

@@ -72,6 +72,7 @@ export interface LatencyHealthScore {
   stability: number | null
   cacheHit: number | null
   sampleCount: number
+  sampleLimit: number
   attemptCount: number
   windowHours: number
   missingMetrics: string[]
@@ -128,11 +129,11 @@ function requestStability(attempts: Array<{ sample: HealthSample; outcome: boole
   return consistency * Math.max(0, continuity)
 }
 
-export function latencyHealthScore(samples: readonly HealthSample[], options: { now?: number; windowHours?: number } = {}): LatencyHealthScore | null {
-  const {now = Date.now(), windowHours = 1} = options
-  const selected = recentRequestWindow(samples, now, windowHours)
+export function latencyHealthScore(samples: readonly HealthSample[], options: { now?: number; windowHours?: number; sampleLimit?: number } = {}): LatencyHealthScore | null {
+  const {now = Date.now(), windowHours = 1, sampleLimit = 60} = options
+  const selected = recentRequestWindow(samples, now, windowHours, sampleLimit)
   if (selected.samples.length === 0) return null
-  const metrics = recentRequestMetrics(selected.samples, now, selected.windowHours)
+  const metrics = recentRequestMetrics(selected.samples, now, selected.windowHours, selected.sampleLimit)
   const attempts = selected.samples.map((sample) => ({sample, outcome: recentRequestAttemptOutcome(sample)}))
     .filter((attempt): attempt is {sample: HealthSample; outcome: boolean} => attempt.outcome != null)
   const successful = attempts.filter(({outcome}) => outcome).map(({sample}) => sample)
@@ -155,6 +156,7 @@ export function latencyHealthScore(samples: readonly HealthSample[], options: { 
     stability,
     cacheHit,
     sampleCount: selected.samples.length,
+    sampleLimit: selected.sampleLimit,
     attemptCount: attempts.length,
     windowHours: selected.windowHours,
     missingMetrics,
@@ -167,7 +169,7 @@ export function healthScoreDescription(score: LatencyHealthScore | null) {
   const value = (part: number | null) => part == null ? "未知" : part.toFixed(1)
   const result = score.score == null ? `数据不足：${score.missingMetrics.join("、")}` : `综合评分 ${score.score}`
   const confidence = score.lowConfidence ? " · 少于 10 次，低置信度" : ""
-  return `${result} · ${score.windowHours}h 最近 ${score.sampleCount}/60 次（有效尝试 ${score.attemptCount} 次）${confidence}
+  return `${result} · ${score.windowHours}h 最近 ${score.sampleCount}/${score.sampleLimit} 次（有效尝试 ${score.attemptCount} 次）${confidence}
 成功率 ${value(score.recentSuccess)} · 稳定性 ${value(score.stability)} · 缓存命中 ${value(score.cacheHit)} · 延迟 ${value(score.recentLatency)}
 四项各占 25%，缺项不重新分配权重。成功率和缓存与环形指标同口径；稳定性仅评估相对延迟波动与连续失败。
 波动分 = 100 ÷ (1 + 标准差/均值)；连续失败系数 = 1 - max(0, 最长连败-1) ÷ (尝试次数-1)。稳定性 = 波动分 × 连续失败系数；延迟仅评估成功请求。`

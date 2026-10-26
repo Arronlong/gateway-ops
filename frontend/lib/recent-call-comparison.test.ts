@@ -40,8 +40,9 @@ test("channel and relay pages provide counterpart recent-call series", () => {
   const channels = readFileSync(new URL("../components/monitor/channel-cards.tsx", import.meta.url), "utf8")
   const relays = readFileSync(new URL("../app/relay-stations-page.tsx", import.meta.url), "utf8")
 
-  assert.match(channels, /useRelayLatencyTrends\(60, recentVisible\)/)
+  assert.match(channels, /useRelayLatencyTrends\(recentLatencyLimit, recentVisible\)/)
   assert.match(channels, /relayRecentSamplesByAccount=\{relayRecentSamplesByAccount\}/)
-  assert.match(relays, /useChannelLatencyTrends\(60, detailModule === "accounts" && overviewReady\)/)
+  assert.match(relays, /useChannelLatencyTrends\(metricsLimit, detailModule === "accounts" && overviewReady\)/)
   assert.match(relays, /channelRecentSamplesByChannel=\{channelRecentSamplesByChannel\}/)
+  assert.doesNotMatch(relays, /latestRelayLatencySamples\(account\.latency_samples \?\? \[\], (30|60)\)/)
 })
