@@ -76,22 +76,22 @@ export function PelicanSettingsCard({ settings, saving, onChange, onSave }: {
                 <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 text-xs" disabled={plans.length <= 1} onClick={() => patchPlans(removePelicanPlan(plans, index))}><Trash2 className="size-3.5" />{"\u5220\u9664\u65b9\u6848"}</Button>
               </div>
             </div>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
-              <div className="min-w-0 space-y-2 sm:col-span-2">
+            <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_12rem]">
+              <div className="min-w-0 space-y-2">
                 <Label htmlFor={modelID}>{"\u6a21\u578b\u4f18\u5148\u5217\u8868"}</Label>
-                <Textarea id={modelID} className="w-full max-w-full" maxLength={256} rows={3} value={plan.model} aria-invalid={Boolean(modelIssue)} aria-describedby={modelIssue ? `${modelID}-error` : undefined} onChange={event => patchPlans(updatePelicanPlan(plans, index, { model: event.target.value }))} placeholder={"\u6bcf\u884c\u6216\u7528\u9017\u53f7\u5206\u9694\uff0c\u6309\u4f18\u5148\u987a\u5e8f\u586b\u5199"} />
+                <Textarea id={modelID} className="w-full max-w-full" maxLength={256} rows={2} value={plan.model} aria-invalid={Boolean(modelIssue)} aria-describedby={modelIssue ? `${modelID}-error` : undefined} onChange={event => patchPlans(updatePelicanPlan(plans, index, { model: event.target.value }))} placeholder={"\u6bcf\u884c\u6216\u7528\u9017\u53f7\u5206\u9694\uff0c\u6309\u4f18\u5148\u987a\u5e8f\u586b\u5199"} />
                 <p className="text-xs leading-5 text-muted-foreground">{"\u652f\u6301\u6362\u884c\u3001\u9017\u53f7\u6216\u5206\u53f7\u5206\u9694\uff0c\u6309\u987a\u5e8f\u4f7f\u7528\u9996\u4e2a\u53ef\u7528\u6a21\u578b\u3002"}</p>
                 {modelIssue ? <p id={`${modelID}-error`} role="alert" className="text-xs text-danger">{modelIssue.message}</p> : null}
+              </div>
+              <div className="min-w-0 space-y-2">
+                <Label htmlFor={effortID}>{"\u601d\u8003\u5f3a\u5ea6"}</Label>
+                <Select value={plan.reasoning_effort} onValueChange={value => patchPlans(updatePelicanPlan(plans, index, { reasoning_effort: value }))}><SelectTrigger id={effortID} className="w-full" aria-invalid={Boolean(effortIssue)}><SelectValue /></SelectTrigger><SelectContent>{Object.entries(pelicanEffortOptions).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
+                {effortIssue ? <p role="alert" className="text-xs text-danger">{effortIssue.message}</p> : null}
               </div>
               <div className="min-w-0 space-y-2 sm:col-span-2">
                 <div className="flex min-w-0 flex-wrap items-center justify-between gap-2"><Label htmlFor={promptID}>{"\u9898\u76ee"}</Label><Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => patchPlans(updatePelicanPlan(plans, index, { prompt: defaultPelicanPrompt }))}>{"\u6062\u590d\u9ed8\u8ba4\u9898\u76ee"}</Button></div>
                 <Textarea id={promptID} className="w-full max-w-full" value={plan.prompt} rows={4} maxLength={32000} aria-invalid={Boolean(promptIssue)} aria-describedby={promptIssue ? `${promptID}-error` : undefined} onChange={event => patchPlans(updatePelicanPlan(plans, index, { prompt: event.target.value }))} />
                 {promptIssue ? <p id={`${promptID}-error`} role="alert" className="text-xs text-danger">{promptIssue.message}</p> : null}
-              </div>
-              <div className="min-w-0 space-y-2 sm:col-span-2">
-                <Label htmlFor={effortID}>{"\u601d\u8003\u5f3a\u5ea6"}</Label>
-                <Select value={plan.reasoning_effort} onValueChange={value => patchPlans(updatePelicanPlan(plans, index, { reasoning_effort: value }))}><SelectTrigger id={effortID} className="w-full" aria-invalid={Boolean(effortIssue)}><SelectValue /></SelectTrigger><SelectContent>{Object.entries(pelicanEffortOptions).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select>
-                {effortIssue ? <p role="alert" className="text-xs text-danger">{effortIssue.message}</p> : null}
               </div>
             </div>
           </section>
