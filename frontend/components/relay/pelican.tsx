@@ -46,7 +46,7 @@ export function PelicanProvider({stationID,children,libraryQuery,galleryQuery,sc
  const deleting=useRef(false)
  useEffect(retainPelicanThumbnails,[])
  const refetch=useRef(query.refetch);refetch.current=query.refetch
- const anyRunning=!readOnly&&sourceData?.configs.some(running)
+ const anyRunning=sourceData?.results.some(result=>result.status==="running")||(!readOnly&&sourceData?.configs.some(running))
  useEffect(()=>{
   if(!anyRunning)return
   const timer=window.setInterval(()=>{if(!document.hidden)void refetch.current().catch(()=>{})},5000)
@@ -230,21 +230,21 @@ function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanR
   return()=>{disposed=true;window.clearTimeout(timer);release();if(url)URL.revokeObjectURL(url)}
  },[visible,active,result.id,result.relay_station_id,result.account_external_id,result.status])
  return <div ref={ref} className={`relative ${grid?"w-full min-w-0":"w-56 shrink-0 snap-start"} overflow-hidden rounded-lg border border-border bg-card`}>
-  {allowDelete?<PelicanDeleteButton result={result} compact/>:null}
+  {allowDelete&&result.status!=="running"?<PelicanDeleteButton result={result} compact/>:null}
   <div className="aspect-[4/3] overflow-hidden bg-muted/30">
    {image?<img src={image} alt={`测智作品 ${result.id} 静态预览`} width={448} height={336} decoding="async" className="h-full w-full object-contain" onError={()=>{setImage("");setError("预览不可用，点击查看原图")}}/>:null}
-   {!image||error?<p className="flex h-full items-center justify-center p-3 text-center text-xs text-muted-foreground">{result.status==="failed"?"本次生成失败":error||"点击作品可交互播放"}</p>:null}
+   {!image||error?<p className="flex h-full items-center justify-center p-3 text-center text-xs text-muted-foreground">{result.status==="running"?"生成中…":result.status==="failed"?"本次生成失败":error||"点击作品可交互播放"}</p>:null}
   </div>
   <div className="space-y-1 p-2 text-[10px]">
    <p className="truncate font-mono text-xs" title={result.model}>{result.model}</p>
-   <p className="flex flex-wrap justify-between gap-x-1 text-muted-foreground"><span>{timeLabel(result.finished_at)}</span><span className="whitespace-nowrap">{(result.duration_ms/1000).toFixed(1)} 秒</span></p>
-   <p className={result.status==="success"?"text-teal-600":"text-danger"}>{result.status==="success"?`思考强度 ${pelicanEfforts[result.reasoning_effort]??result.reasoning_effort}`:"生成失败·点击查看"}</p>
+   <p className="flex flex-wrap justify-between gap-x-1 text-muted-foreground"><span>{timeLabel(result.finished_at)}</span><span className="whitespace-nowrap">{result.status==="running"?"等待完成":`${(result.duration_ms/1000).toFixed(1)} 秒`}</span></p>
+   <p className={result.status==="running"?"text-muted-foreground":result.status==="success"?"text-teal-600":"text-danger"}>{result.status==="running"?"生成中…":result.status==="success"?`思考强度 ${pelicanEfforts[result.reasoning_effort]??result.reasoning_effort}`:"生成失败·点击查看"}</p>
    {context.showKeyGroup?<p data-pelican-key-group className="relative z-[1] flex min-w-0 items-center justify-between gap-2 text-muted-foreground" onClick={()=>context.open(result)}>
     <span className="min-w-0 flex-1 truncate" title={groupLabels.name}>{groupLabels.name}</span>
     <span className="shrink-0 whitespace-nowrap tabular-nums" title="生成时 Key 对应的分组倍率">{groupLabels.rate}</span>
    </p>:null}
   </div>
-  <button type="button" className="absolute inset-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={`查看测智作品 ${result.id}`} onClick={()=>context.open(result)}/>
+  <button type="button" className="absolute inset-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={`查看测智作品 ${result.id}`} disabled={result.status==="running"} onClick={()=>context.open(result)}/>
  </div>
 }
 

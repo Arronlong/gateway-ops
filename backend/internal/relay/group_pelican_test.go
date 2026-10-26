@@ -74,10 +74,14 @@ func TestGroupPelicanExecutesGlobalPlanThroughGroupGateway(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		mock.ExpectQuery(`SELECT .*relay_groups`).WillReturnRows(sqlmock.NewRows([]string{"relay_station_id", "external_id", "name", "rate_multiplier"}).AddRow(7, 20, "指定销售组", 0.5))
 	}
-	mock.ExpectQuery(`SELECT .*relay_stations`).WillReturnRows(sqlmock.NewRows([]string{"id", "type", "base_url", "api_key_cipher"}).AddRow(7, "sub2api", server.URL, cipher))
+	mock.ExpectQuery(`SELECT .*relay_stations.*LIMIT \$2$`).WillReturnRows(sqlmock.NewRows([]string{"id", "type", "base_url", "api_key_cipher"}).AddRow(7, "sub2api", server.URL, cipher))
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT .*relay_stations.*FOR UPDATE`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
-	mock.ExpectQuery(`INSERT INTO "relay_group_pelican_results"`).WithArgs(uint(7), int64(20), "指定销售组", "model-a", "draw", "high", "manual", "success", "<svg></svg>", "", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "指定销售组", 0.5).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(12))
+	mock.ExpectQuery(`INSERT INTO "relay_group_pelican_results"`).WithArgs(uint(7), int64(20), "指定销售组", "missing-model,model-a", "draw", "high", "manual", "running", "", "", int64(0), sqlmock.AnyArg(), sqlmock.AnyArg(), "", nil).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(12))
+	mock.ExpectCommit()
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .*relay_stations.*FOR UPDATE`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
+	mock.ExpectExec(`UPDATE "relay_group_pelican_results" SET .* WHERE id = .*relay_station_id = .*group_external_id =`).WithArgs(uint(7), int64(20), "指定销售组", "model-a", "draw", "high", "manual", "success", "<svg></svg>", "", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "指定销售组", 0.5, uint(12), uint(7), int64(20)).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`SELECT .*app_settings`).WillReturnRows(sqlmock.NewRows([]string{"key", "value"}).AddRow(storage.SettingPelicanHistoryCount, "30"))
 	mock.ExpectExec(`DELETE FROM "relay_group_pelican_results"`).WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectCommit()

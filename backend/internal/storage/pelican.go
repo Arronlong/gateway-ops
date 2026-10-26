@@ -131,8 +131,21 @@ func (r *RelayStations) SavePelicanResult(result *PelicanResult) error {
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&station, result.RelayStationID).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(result).Error; err != nil {
-			return err
+		if result.ID == 0 {
+			if err := tx.Create(result).Error; err != nil {
+				return err
+			}
+		} else {
+			updated := tx.Model(&PelicanResult{}).Where("id = ? AND relay_station_id = ? AND account_external_id = ?", result.ID, result.RelayStationID, result.AccountExternalID).Select("*").Omit("id").Updates(result)
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		if result.Status == "running" {
+			return nil
 		}
 		historyCount := PelicanHistoryLimit
 		var setting AppSetting
@@ -148,7 +161,7 @@ func (r *RelayStations) SavePelicanResult(result *PelicanResult) error {
 			historyCount = parsed
 		}
 		kept := tx.Model(&PelicanResult{}).Select("id").Where("relay_station_id = ? AND account_external_id = ?", result.RelayStationID, result.AccountExternalID).Order("finished_at DESC, id DESC").Limit(historyCount)
-		return tx.Where("relay_station_id = ? AND account_external_id = ? AND id NOT IN (?)", result.RelayStationID, result.AccountExternalID, kept).Delete(&PelicanResult{}).Error
+		return tx.Where("relay_station_id = ? AND account_external_id = ? AND status <> 'running' AND id NOT IN (?)", result.RelayStationID, result.AccountExternalID, kept).Delete(&PelicanResult{}).Error
 	})
 }
 func (r *RelayStations) PelicanGallery(stationID uint, historyCounts ...int) ([]PelicanResult, error) {

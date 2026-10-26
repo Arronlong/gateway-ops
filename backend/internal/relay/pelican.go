@@ -198,7 +198,11 @@ func (s *Service) StartPelican(ctx context.Context, stationID uint, accountID in
 		return nil, ErrPelicanRunning
 	}
 	config.LeaseUntil = &until
-	go s.runPelicanBatch(context.Background(), *config, until, time.Time{}, "manual", plans)
+	ready := make(chan error, 1)
+	go s.runPelicanBatchReady(context.Background(), *config, until, time.Time{}, "manual", ready, plans)
+	if err := <-ready; err != nil {
+		return nil, err
+	}
 	return config, nil
 }
 func (s *Service) RunDuePelicans(ctx context.Context) error {
@@ -276,6 +280,17 @@ func (s *Service) savePelicanFailures(config storage.PelicanConfig, trigger, acc
 }
 
 func (s *Service) runPelicanBatch(parent context.Context, config storage.PelicanConfig, until, next time.Time, trigger string, configured ...[]storage.PelicanTestPlan) {
+	s.runPelicanBatchReady(parent, config, until, next, trigger, nil, configured...)
+}
+
+func (s *Service) runPelicanBatchReady(parent context.Context, config storage.PelicanConfig, until, next time.Time, trigger string, ready chan error, configured ...[]storage.PelicanTestPlan) {
+	var readyOnce sync.Once
+	notify := func(err error) {
+		if ready != nil {
+			readyOnce.Do(func() { ready <- err })
+		}
+	}
+	defer func() { notify(errors.New("创建测智任务失败")) }()
 	plans := pelicanExecutionPlans(config, configured)
 	tasklog.Add(parent, "INFO", "开始测试：中转站 #%d，账号 #%d", config.RelayStationID, config.AccountExternalID)
 	var saved atomic.Bool
@@ -309,23 +324,48 @@ func (s *Service) runPelicanBatch(parent context.Context, config storage.Pelican
 		saved.Store(s.savePelicanFailures(config, trigger, "", err, plans))
 		return
 	}
+	results := make([]storage.PelicanResult, len(plans))
+	for i, plan := range plans {
+		started := time.Now().UTC()
+		results[i] = storage.PelicanResult{RelayStationID: config.RelayStationID, AccountExternalID: config.AccountExternalID, AccountName: account.Name, Model: plan.Model, Prompt: plan.Prompt, ReasoningEffort: plan.ReasoningEffort, Trigger: trigger, Status: "running", StartedAt: started, FinishedAt: started}
+		if err := s.stations.SavePelicanResult(&results[i]); err != nil {
+			for j := 0; j < i; j++ {
+				results[j].Status, results[j].Error, results[j].FinishedAt = "failed", redactTestText(err.Error(), ""), time.Now().UTC()
+				if saveErr := s.stations.SavePelicanResult(&results[j]); saveErr != nil {
+					slog.Error("finalize pelican placeholder failed", "error", saveErr)
+				}
+			}
+			if finishErr := s.stations.FinishPelican(config.ID, until); finishErr != nil {
+				slog.Error("release pelican lease failed", "error", finishErr)
+			}
+			notify(err)
+			return
+		}
+	}
+	notify(nil)
 	key, err := s.cipher.Decrypt(station.APIKeyCipher)
 	if err != nil {
 		tasklog.Add(parent, "ERROR", "账号 #%d 执行失败：%v", config.AccountExternalID, err)
-		saved.Store(s.savePelicanFailures(config, trigger, account.Name, err, plans))
+		saved.Store(true)
+		for i := range results {
+			results[i].Status, results[i].Error, results[i].FinishedAt = "failed", redactTestText(err.Error(), ""), time.Now().UTC()
+			if saveErr := s.stations.SavePelicanResult(&results[i]); saveErr != nil {
+				saved.Store(false)
+			}
+		}
 		return
 	}
 	saved.Store(true)
 	var keyInfoOnce sync.Once
 	var keyInfo pelicanKeyGroup
 	var calls sync.WaitGroup
-	for _, plan := range plans {
+	for i, plan := range plans {
 		calls.Add(1)
-		go func(plan storage.PelicanTestPlan) {
+		go func(plan storage.PelicanTestPlan, result storage.PelicanResult) {
 			defer calls.Done()
 			planConfig := config
 			planConfig.Model, planConfig.Prompt, planConfig.ReasoningEffort, planConfig.ParallelCount = plan.Model, plan.Prompt, plan.ReasoningEffort, 1
-			result := storage.PelicanResult{RelayStationID: config.RelayStationID, AccountExternalID: config.AccountExternalID, AccountName: account.Name, Model: plan.Model, Prompt: plan.Prompt, ReasoningEffort: plan.ReasoningEffort, Trigger: trigger, Status: "success", StartedAt: time.Now().UTC()}
+			result.Status = "success"
 			target, err := s.preparePelican(ctx, *station, key, planConfig)
 			var html string
 			if err == nil {
@@ -351,7 +391,7 @@ func (s *Service) runPelicanBatch(parent context.Context, config storage.Pelican
 				slog.Error("save pelican result failed", "station", config.RelayStationID, "account", config.AccountExternalID, "error", err)
 				tasklog.Add(parent, "ERROR", "save pelican result failed: %v", err)
 			}
-		}(plan)
+		}(plan, results[i])
 	}
 	calls.Wait()
 }

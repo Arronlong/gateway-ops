@@ -657,7 +657,7 @@ export interface PelicanResult {
   prompt?: string
   reasoning_effort: string
   trigger: string
-  status: "success" | "failed"
+  status: "running" | "success" | "failed"
   html?: string
   error: string
   duration_ms: number

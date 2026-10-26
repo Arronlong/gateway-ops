@@ -68,7 +68,11 @@ func (s *Service) StartGroupPelican(ctx context.Context, stationID uint, groupID
 		return nil, ErrPelicanRunning
 	}
 	config.LeaseUntil = &until
-	go s.runGroupPelicanBatch(context.Background(), *config, until, time.Time{}, "manual", plans)
+	ready := make(chan error, 1)
+	go s.runGroupPelicanBatchReady(context.Background(), *config, until, time.Time{}, "manual", plans, ready)
+	if err := <-ready; err != nil {
+		return nil, err
+	}
 	return config, nil
 }
 
@@ -153,6 +157,10 @@ func (s *Service) groupPelicanModels(ctx context.Context, station storage.RelayS
 }
 
 func (s *Service) runGroupPelicanBatch(parent context.Context, config storage.GroupPelicanConfig, until, next time.Time, trigger string, plans []storage.PelicanTestPlan) {
+	s.runGroupPelicanBatchReady(parent, config, until, next, trigger, plans, nil)
+}
+
+func (s *Service) runGroupPelicanBatchReady(parent context.Context, config storage.GroupPelicanConfig, until, next time.Time, trigger string, plans []storage.PelicanTestPlan, ready chan error) {
 	ctx, cancel := context.WithTimeout(parent, pelicanTimeout)
 	defer cancel()
 	var saveFailed atomic.Bool
@@ -168,6 +176,26 @@ func (s *Service) runGroupPelicanBatch(parent context.Context, config storage.Gr
 	name := fmt.Sprintf("分组 #%d", config.GroupExternalID)
 	if group != nil && group.Name != "" {
 		name = group.Name
+	}
+	results := make([]storage.GroupPelicanResult, len(plans))
+	for i, plan := range plans {
+		started := time.Now().UTC()
+		results[i] = storage.GroupPelicanResult{RelayStationID: config.RelayStationID, GroupExternalID: config.GroupExternalID, GroupName: name, Model: plan.Model, Prompt: plan.Prompt, ReasoningEffort: plan.ReasoningEffort, Trigger: trigger, Status: "running", StartedAt: started, FinishedAt: started}
+		if err := s.stations.SaveGroupPelicanResult(&results[i]); err != nil {
+			for j := 0; j < i; j++ {
+				results[j].Status, results[j].Error, results[j].FinishedAt = "failed", redactTestText(err.Error(), ""), time.Now().UTC()
+				if saveErr := s.stations.SaveGroupPelicanResult(&results[j]); saveErr != nil {
+					saveFailed.Store(true)
+				}
+			}
+			if ready != nil {
+				ready <- err
+			}
+			return
+		}
+	}
+	if ready != nil {
+		ready <- nil
 	}
 	var station *storage.RelayStation
 	var key string
@@ -185,11 +213,11 @@ func (s *Service) runGroupPelicanBatch(parent context.Context, config storage.Gr
 		}
 	}
 	var jobs sync.WaitGroup
-	for _, plan := range plans {
+	for i, plan := range plans {
 		jobs.Add(1)
-		go func(plan storage.PelicanTestPlan) {
+		go func(plan storage.PelicanTestPlan, result storage.GroupPelicanResult) {
 			defer jobs.Done()
-			result := storage.GroupPelicanResult{RelayStationID: config.RelayStationID, GroupExternalID: config.GroupExternalID, GroupName: name, Model: plan.Model, Prompt: plan.Prompt, ReasoningEffort: plan.ReasoningEffort, Trigger: trigger, Status: "success", StartedAt: time.Now().UTC()}
+			result.Status = "success"
 			err := preflight
 			if err == nil {
 				result.Model, err = selectPelicanModel(plan.Model, models)
@@ -223,7 +251,7 @@ func (s *Service) runGroupPelicanBatch(parent context.Context, config storage.Gr
 				saveFailed.Store(true)
 				tasklog.Add(parent, "ERROR", "保存分组测智结果失败：%v", err)
 			}
-		}(plan)
+		}(plan, results[i])
 	}
 	jobs.Wait()
 }

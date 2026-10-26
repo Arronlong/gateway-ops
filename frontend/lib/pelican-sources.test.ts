@@ -42,7 +42,7 @@ test("作品库渠道与号池、分组来源复用原有开关和测一次组�
  const controls=panel.slice(panel.indexOf("export function PelicanAccountPanel"),panel.indexOf("function usePelicanBody"))
  assert.match(controls,/compactControls=false/)
  assert.match(controls,/if\(compactControls\)return/)
- assert.ok(controls.indexOf("<Switch")<controls.indexOf("<Button"))
+ assert.ok(controls.indexOf("<Switch")<controls.indexOf("<PelicanOneShotButton"))
  const library=readFileSync(new URL("../app/pelican-library-page.tsx",import.meta.url),"utf8")
  assert.match(library,/group\.targets\.every\(target=>target\.config\.enabled\)/)
  assert.match(library,/group\.config\.enabled\)return false/)

@@ -95,15 +95,28 @@ func (r *RelayStations) SaveGroupPelicanResult(result *GroupPelicanResult) error
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&station, result.RelayStationID).Error; err != nil {
 			return err
 		}
-		if err := tx.Create(result).Error; err != nil {
-			return err
+		if result.ID == 0 {
+			if err := tx.Create(result).Error; err != nil {
+				return err
+			}
+		} else {
+			updated := tx.Model(&GroupPelicanResult{}).Where("id = ? AND relay_station_id = ? AND group_external_id = ?", result.ID, result.RelayStationID, result.GroupExternalID).Select("*").Omit("id").Updates(result)
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		if result.Status == "running" {
+			return nil
 		}
 		limit, err := NewSettings(tx).PelicanHistoryCount()
 		if err != nil {
 			return err
 		}
 		kept := tx.Model(&GroupPelicanResult{}).Select("id").Where("relay_station_id = ? AND group_external_id = ?", result.RelayStationID, result.GroupExternalID).Order("finished_at DESC, id DESC").Limit(limit)
-		return tx.Where("relay_station_id = ? AND group_external_id = ? AND id NOT IN (?)", result.RelayStationID, result.GroupExternalID, kept).Delete(&GroupPelicanResult{}).Error
+		return tx.Where("relay_station_id = ? AND group_external_id = ? AND status <> 'running' AND id NOT IN (?)", result.RelayStationID, result.GroupExternalID, kept).Delete(&GroupPelicanResult{}).Error
 	})
 }
 func (r *RelayStations) GroupPelicanGallery(stationID uint, limit int, publicOnly ...bool) ([]PelicanResult, error) {
