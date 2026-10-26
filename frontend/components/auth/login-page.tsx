@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, type FormEvent } from "react"
+import { ProductIcon, useProductBranding, useProductPageTitle } from "@/components/product-branding"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,6 +11,8 @@ import type { ApiError } from "@/lib/api"
 import { Activity } from "lucide-react"
 
 export function LoginPage() {
+  const {branding}=useProductBranding()
+  useProductPageTitle("登录")
   const { login } = useAuth()
   const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
@@ -38,7 +41,7 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm">
         <CardHeader className="space-y-1.5">
-          <CardTitle className="text-2xl">GatewayOps</CardTitle>
+          <CardTitle className="flex items-center gap-3 text-2xl"><ProductIcon className="size-9"/>{branding.product_name}</CardTitle>
           <CardDescription>登录后台，监控渠道余额和倍率。</CardDescription>
         </CardHeader>
         <CardContent>

@@ -884,6 +884,8 @@ const (
 
 // UISettings 保存管理界面、测智任务与系统级 UI 安全策略。
 type UISettings struct {
+	ProductName                 string            `json:"product_name"`
+	ProductIcon                 string            `json:"product_icon"`
 	OperationsManagementEnabled bool              `json:"operations_management_enabled"`
 	ChannelsPageEnabled         bool              `json:"channels_page_enabled"`
 	ChannelsShowRateChanges     bool              `json:"channels_show_rate_changes"`

@@ -1,3 +1,4 @@
+import { ProductIcon } from "@/components/product-branding"
 import { useState } from "react"
 import { LayoutList, Settings2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -49,7 +50,7 @@ export default function ChannelsPage() {
   if (!uiSettings.channels_page_enabled) {
     return (
       <section className="rounded-lg border border-border bg-card p-6">
-        <h1 className="text-lg font-semibold text-foreground">渠道管理已隐藏</h1>
+        <h1 className="text-lg font-semibold text-foreground"><ProductIcon className="mr-2 size-5 align-middle"/>渠道管理已隐藏</h1>
         <p className="mt-2 text-sm text-muted-foreground">可在“系统设置 → 渠道管理”中重新开启渠道管理页面。</p>
         <a href="/settings" className="mt-4 inline-flex h-9 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground">前往系统设置</a>
       </section>
@@ -60,7 +61,7 @@ export default function ChannelsPage() {
     <section className="space-y-4">
       <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
         <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><LayoutList className="size-5 text-brand" />{"渠道管理"}</h1>
+          <h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><ProductIcon className="size-5 sm:size-6"/>{"渠道管理"}</h1>
           <p className="mt-1 text-xs text-muted-foreground">{"管理渠道可用性、账号、余额、消耗与同步任务。"}</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">

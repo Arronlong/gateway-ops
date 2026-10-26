@@ -1,4 +1,5 @@
 "use client"
+import { ProductIcon } from "@/components/product-branding"
 
 import { useState } from "react"
 import { BellRing, CheckCircle2, Plus, Settings2, ShieldAlert } from "lucide-react"
@@ -19,7 +20,7 @@ export default function NotificationsPage() {
   const refresh = useTriggerRefresh(), summary = useAlertSummary()
   const openNew = () => { setEditingRule(null); setRuleOpen(true) }
   return <section className="space-y-4">
-    <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3"><div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><BellRing className="size-5 text-brand" />预警中心</h1><p className="mt-1 text-xs text-muted-foreground">规则触发、自动处置、消息通知与执行记录。</p></div><Button size="sm" onClick={openNew}><Plus className="size-3.5" />新建规则</Button></header>
+    <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3"><div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><ProductIcon className="size-5 sm:size-6"/>预警中心</h1><p className="mt-1 text-xs text-muted-foreground">规则触发、自动处置、消息通知与执行记录。</p></div><Button size="sm" onClick={openNew}><Plus className="size-3.5" />新建规则</Button></header>
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
       <MetricCard label="待处理事件" value={summary.data?.open_events} detail="未恢复预警" icon={ShieldAlert} tone="text-danger" />
       <MetricCard label="运行中规则" value={summary.data?.enabled_rules} detail="启用中的订阅规则" icon={Settings2} tone="text-brand" />

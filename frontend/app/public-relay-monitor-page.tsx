@@ -1,4 +1,5 @@
 "use client"
+import { ProductIcon, useProductPageTitle } from "@/components/product-branding"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Activity, Ban, CheckCircle2, CircleHelp, CircleX, Clock3, Info, RefreshCw, TriangleAlert } from "lucide-react"
@@ -250,9 +251,7 @@ export default function PublicRelayMonitorPage() {
     }
   }, [initialCache, load, numericStationID])
 
-  useEffect(() => {
-    document.title = data?.station_name ? `${data.station_name} · 分组调用监控` : "分组调用监控 · GatewayOps"
-  }, [data?.station_name])
+  useProductPageTitle(data?.station_name ? `${data.station_name} · 分组调用监控` : "分组调用监控")
 
   const summary = data?.summary
   const selectedStationName = stations.find((station) => station.id === routeStationID)?.name
@@ -260,7 +259,7 @@ export default function PublicRelayMonitorPage() {
     <div className="relative mx-auto w-full max-w-[1440px] px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
       {refreshing && data ? <div className="pointer-events-none absolute inset-x-0 top-3 z-50 flex justify-center"><span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground"><RefreshCw className="size-3.5 animate-spin text-brand" />正在刷新分组监控</span></div> : null}
       <header className="flex min-h-16 flex-wrap items-start justify-between gap-4 border-b border-border pb-5">
-        <div className="min-w-0"><h1 className="flex items-center gap-2 text-xl font-bold sm:text-2xl"><Activity className="size-5 shrink-0 text-brand sm:size-6" /><span className="truncate">{data?.station_name || selectedStationName || "分组调用监控"}</span></h1><p className="mt-1.5 text-sm text-muted-foreground">公开分组的近期调用结果与响应耗时</p></div>
+        <div className="min-w-0"><h1 className="flex items-center gap-2 text-xl font-bold sm:text-2xl"><ProductIcon className="size-5 sm:size-6"/><span className="truncate">{data?.station_name || selectedStationName || "分组调用监控"}</span></h1><p className="mt-1.5 text-sm text-muted-foreground">公开分组的近期调用结果与响应耗时</p></div>
         <div className="flex flex-wrap items-center justify-end gap-3">
           {stations.length > 1 ? <Select value={routeStationID ? String(routeStationID) : undefined} onValueChange={(value) => navigate(`/public/relay-monitor/${value}`)}><SelectTrigger className="h-11 min-w-44 sm:h-9"><SelectValue placeholder="选择中转站" /></SelectTrigger><SelectContent>{stations.map((station) => <SelectItem key={station.id} value={String(station.id)}>{station.name}</SelectItem>)}</SelectContent></Select> : null}
           {numericStationID ? <><span className="whitespace-nowrap font-mono text-xs tabular-nums text-muted-foreground">{refreshing ? "刷新中" : `${countdown} 秒后刷新`}</span><span className="hidden text-xs text-muted-foreground sm:inline">更新于 {formatTime(data?.updated_at)}</span></> : null}

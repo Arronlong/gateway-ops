@@ -1,4 +1,5 @@
 "use client"
+import { ProductIcon } from "@/components/product-branding"
 
 import { useEffect, useMemo, useState } from "react"
 import { AlertCircle, Pencil, Plus, ReceiptText, RefreshCw, RotateCcw, Search, SlidersHorizontal, Trash2, WalletCards } from "lucide-react"
@@ -212,7 +213,7 @@ export default function OperationsCostsPage() {
   return (
     <section className="space-y-4">
       <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
-        <div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><WalletCards className="size-5 text-brand" />成本管理</h1><p className="mt-1 text-xs text-muted-foreground">维护显式收支账本，汇总渠道成本、中转站用户扣费与账号采购成本。</p></div>
+        <div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><ProductIcon className="size-5 sm:size-6"/>成本管理</h1><p className="mt-1 text-xs text-muted-foreground">维护显式收支账本，汇总渠道成本、中转站用户扣费与账号采购成本。</p></div>
         <div className="flex flex-wrap items-center gap-2">
           <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="成本统计时间范围">{ranges.map((item) => <button type="button" key={item.value} onClick={() => setRange(item.value)} className={cn("h-10 rounded px-3 text-xs transition-colors sm:h-8", range === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>{item.label}</button>)}</div>
           <Button type="button" size="sm" className="h-9 gap-1.5" onClick={() => resetForm()}><Plus className="size-3.5" />记一笔</Button>

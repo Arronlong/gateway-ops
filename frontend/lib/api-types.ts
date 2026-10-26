@@ -1253,6 +1253,8 @@ export interface PelicanTestPlan {
 }
 
 export interface SystemSettings {
+  product_name: string
+  product_icon: string
   operations_management_enabled: boolean
   channels_page_enabled: boolean
   channels_show_rate_changes: boolean

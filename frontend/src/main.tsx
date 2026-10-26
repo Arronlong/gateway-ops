@@ -12,6 +12,7 @@ import { AddChannelProvider } from '@/lib/add-channel-context'
 import { AuthGate } from '@/components/auth/auth-gate'
 import { AppShell } from '@/components/app-shell'
 import { SettingsProvider } from '@/components/settings-provider'
+import { ProductBrandingProvider } from '@/components/product-branding'
 import { Toaster } from '@/components/ui/sonner'
 import { PageErrorBoundary } from '@/components/ui/page-error-boundary'
 import DashboardPage from '@/app/page'
@@ -51,6 +52,7 @@ createRoot(document.getElementById('root')!).render(
     <PageErrorBoundary>
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
       <BrowserRouter useTransitions={false}>
+        <ProductBrandingProvider>
         <Routes>
           <Route path="public/relay-monitor" element={<PublicRelayMonitorPage />} />
           <Route path="public/relay-monitor/:stationID" element={<PublicRelayMonitorPage />} />
@@ -69,6 +71,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="operations/local-pool" element={<LocalPoolPage />} />
           </Route>
         </Routes>
+        </ProductBrandingProvider>
       </BrowserRouter>
       <Toaster richColors closeButton position="top-right" />
     </ThemeProvider>

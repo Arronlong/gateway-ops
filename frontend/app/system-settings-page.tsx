@@ -19,6 +19,8 @@ import { useTriggerRefresh } from "@/lib/refresh-context"
 import { cn } from "@/lib/utils"
 import { TaskHistoryButton } from "@/components/system/task-history"
 import { PelicanSettingsCard } from "@/components/system/pelican-settings-card"
+import { BrandingSettingsCard } from "@/components/system/branding-settings-card"
+import { ProductIcon, useProductBranding } from "@/components/product-branding"
 
 const channelSyncIntervals = [5, 10, 15, 30, 60, 180, 360, 720, 1440]
 const relayRateSyncIntervals = [5, 10, 20, 30, 60, 300, 600, 1800, 3600, 18000, 43200, 86400]
@@ -147,6 +149,7 @@ function SettingRow({
 }
 
 export default function SystemSettingsPage() {
+  const {updateBranding}=useProductBranding()
   const { hash } = useLocation()
   const query = useSystemSettings()
   const syncQuery = useSyncSettings()
@@ -197,6 +200,7 @@ export default function SystemSettingsPage() {
 
   async function save() {
     if (!settings) return
+    if(Array.from((settings.product_name??"").trim()).length>40||/[\u0000-\u001f\u007f]/.test(settings.product_name??"")){toast.error("产品名称最多 40 个字符，不能包含控制字符");return}
     const limit = settings.recent_metrics_limit ?? 60
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RECENT_METRICS_LIMIT) { toast.error("最近数量范围请填写 1～200 的整数"); return }
     setSaving(true)
@@ -214,6 +218,7 @@ export default function SystemSettingsPage() {
         body: JSON.stringify(payload),
       })
       setSettingsDraft(saved)
+      updateBranding(saved)
       setIframeAllowlistDraft(saved.iframe_embedding_allowlist.join("\n"))
       await query.refetch()
       refreshAll()
@@ -269,8 +274,7 @@ export default function SystemSettingsPage() {
     <section className="space-y-4">
       <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
         <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold text-foreground">
-            <Settings2 className="size-5 text-brand" />
+          <h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><ProductIcon className="size-5 sm:size-6"/>
             系统设置
           </h1>
           <p className="mt-1 text-xs text-muted-foreground">
@@ -280,6 +284,8 @@ export default function SystemSettingsPage() {
       </header>
 
       <VersionCard />
+
+      <BrandingSettingsCard settings={settings} saving={saving} onChange={updateSettings} onSave={()=>void save()}/>
 
       <PelicanSettingsCard settings={settings} saving={saving} onChange={updateSettings} onSave={() => void save()} />
 

@@ -14,6 +14,7 @@ import { useTriggerRefresh } from "@/lib/refresh-context"
 import { useChannels, useSystemSettings } from "@/lib/queries"
 import { relativeTime } from "@/lib/format"
 import { GITHUB_REPOSITORY_URL } from "@/lib/version"
+import { ProductIcon, useProductBranding } from "@/components/product-branding"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,6 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 export function MonitorHeader() {
+  const {branding}=useProductBranding()
   const { theme, setTheme } = useTheme()
   const { username, authDisabled, logout } = useAuth()
   const refresh = useTriggerRefresh()
@@ -87,10 +89,8 @@ export function MonitorHeader() {
       <div className="flex h-14 w-full min-w-0 items-center gap-2 px-6 sm:gap-4">
         {/* left: logo + title */}
         <div className="flex min-w-0 items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-foreground text-background">
-            <Activity className="size-4" strokeWidth={2.5} />
-          </div>
-          <h1 className="truncate text-base font-semibold tracking-tight text-foreground"><span>GatewayOps</span></h1>
+          <ProductIcon className="size-8 rounded-lg"/>
+          <span className="truncate text-base font-semibold tracking-tight text-foreground">{branding.product_name}</span>
         </div>
 
         <nav className="hidden min-w-0 flex-1 flex-nowrap items-center justify-start gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex xl:justify-center" aria-label="主菜单">

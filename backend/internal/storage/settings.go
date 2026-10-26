@@ -278,6 +278,7 @@ func (s *Settings) SaveSyncSettings(settings SyncSettings) error {
 
 func defaultUISettings() UISettings {
 	return UISettings{
+		ProductName:                 DefaultProductName,
 		OperationsManagementEnabled: true,
 		ChannelsPageEnabled:         true,
 		ChannelsShowRateChanges:     true,
@@ -332,6 +333,8 @@ func uiSettingsValues(settings UISettings) (map[string]string, error) {
 		return nil, err
 	}
 	return map[string]string{
+		SettingProductName:                   NormalizeProductName(settings.ProductName),
+		SettingProductIcon:                   settings.ProductIcon,
 		SettingUIOperationsManagementEnabled: strconv.FormatBool(settings.OperationsManagementEnabled),
 		SettingUIChannelsPageEnabled:         strconv.FormatBool(settings.ChannelsPageEnabled),
 		SettingUIChannelsShowRateChanges:     strconv.FormatBool(settings.ChannelsShowRateChanges),
@@ -364,6 +367,11 @@ func uiSettingsValues(settings UISettings) (map[string]string, error) {
 
 func (s *Settings) UISettings() (UISettings, error) {
 	settings := defaultUISettings()
+	branding, err := s.BrandingSettings()
+	if err != nil {
+		return settings, err
+	}
+	settings.ProductName, settings.ProductIcon = branding.ProductName, branding.ProductIcon
 	readBool := func(key string, target *bool) error {
 		value, found, err := s.Get(key)
 		if err != nil || !found {

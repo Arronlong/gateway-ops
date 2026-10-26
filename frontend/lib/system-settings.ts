@@ -40,6 +40,8 @@ export function recentMetricsWindowOptions(current = 1) {
 }
 
 export const defaultSystemSettings: SystemSettings = {
+  product_name: "GatewayOps",
+  product_icon: "",
   operations_management_enabled: true,
   channels_page_enabled: true,
   channels_show_rate_changes: true,

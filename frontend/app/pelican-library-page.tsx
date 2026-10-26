@@ -1,3 +1,4 @@
+import { ProductIcon } from "@/components/product-branding"
 import { useMemo, useState } from "react"
 import { Link, useSearchParams } from "react-router-dom"
 import { Bird, RefreshCw, Search, Settings2 } from "lucide-react"
@@ -14,7 +15,7 @@ export default function PelicanLibraryPage() {
   const settings = useSystemSettings()
   if (!settings.data) return <ConfigurationLoading query={settings} title="鹈鹕测智" />
   if (!settings.data.pelican_page_enabled) return <section className="rounded-lg border border-border bg-card p-6">
-    <h1 className="text-lg font-semibold">鹈鹕测智页面已隐藏</h1>
+    <h1 className="text-lg font-semibold"><ProductIcon className="mr-2 size-5 align-middle"/>鹈鹕测智页面已隐藏</h1>
     <p className="mt-2 text-sm text-muted-foreground">可在系统设置中重新开启页面展示。</p>
     <Button asChild className="mt-4" size="sm"><Link to="/settings#pelican-settings">前往测智设置</Link></Button>
   </section>
@@ -55,7 +56,7 @@ function PelicanLibraryContent({historyCount}:{historyCount:number}) {
   return <section className="min-w-0 space-y-4">
       <header className="flex flex-wrap items-center justify-between gap-3 border-l-2 border-brand pl-3">
         <div>
-          <h1 className="flex items-center gap-2 text-xl font-bold"><Bird className="size-5 text-brand" />{"\u9e48\u9e55\u6d4b\u667a\u4f5c\u54c1\u5e93"}</h1>
+          <h1 className="flex items-center gap-2 text-xl font-bold"><ProductIcon className="size-5 sm:size-6"/>{"\u9e48\u9e55\u6d4b\u667a\u4f5c\u54c1\u5e93"}</h1>
           <p className="mt-1 text-xs text-muted-foreground">渠道、号池账号和中转站分组各自一组，最新结果在前，每组最多 {historyCount} 份。点击作品可交互播放。</p>
         </div>
         <div className="flex flex-wrap gap-2"><Button asChild variant="outline" size="sm"><Link to="/settings#pelican-settings"><Settings2 className="mr-1 size-3.5"/>全局测智设置</Link></Button><Button type="button" variant="outline" size="sm" disabled={query.refreshing||sourcesQuery.refreshing} onClick={()=>void Promise.all([query.refetch(),sourcesQuery.refetch()]).catch(()=>{})} aria-label="刷新作品列表"><RefreshCw className={`mr-1 size-3.5 ${query.refreshing?"animate-spin":""}`}/>刷新</Button></div>

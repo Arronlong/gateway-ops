@@ -1,4 +1,5 @@
 "use client"
+import { ProductIcon } from "@/components/product-branding"
 
 import { useEffect, useMemo, useState } from "react"
 import { Activity, ArrowDown, ArrowUp, Box, Boxes, CircleDollarSign, LayoutGrid, List, RefreshCw, RotateCcw, Search, SlidersHorizontal, Users, UsersRound } from "lucide-react"
@@ -127,7 +128,7 @@ export default function LocalPoolPage() {
 
   return <section className="space-y-4">
     <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
-      <div><h1 className="flex items-center gap-2 text-xl font-bold"><UsersRound className="size-5 text-brand" />本地号池</h1><p className="mt-1 text-xs text-muted-foreground">同步中转站 OAuth 账号，查看账号状态和用量，按账号配置鹈鹕测智。</p></div>
+      <div><h1 className="flex items-center gap-2 text-xl font-bold"><ProductIcon className="size-5 sm:size-6"/>本地号池</h1><p className="mt-1 text-xs text-muted-foreground">同步中转站 OAuth 账号，查看账号状态和用量，按账号配置鹈鹕测智。</p></div>
       <Button size="sm" className="h-9 gap-1.5" disabled={!stationID || busy} onClick={() => void syncOAuth()}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />同步 OAuth 号池</Button>
     </header>
 

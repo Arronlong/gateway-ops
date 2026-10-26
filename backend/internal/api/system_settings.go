@@ -25,6 +25,7 @@ func registerSystemSettings(g *gin.RouterGroup, d *Deps) {
 	})
 
 	g.PUT("/system-settings", func(c *gin.Context) {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 2<<20)
 		if d.Settings == nil {
 			fail(c, http.StatusServiceUnavailable, errors.New("system settings unavailable"))
 			return
@@ -38,6 +39,7 @@ func registerSystemSettings(g *gin.RouterGroup, d *Deps) {
 			fail(c, http.StatusBadRequest, err)
 			return
 		}
+		settings.ProductName = storage.NormalizeProductName(settings.ProductName)
 		pelican := settings.PelicanSettings()
 		settings.PelicanPlans = pelican.Plans
 		settings.PelicanModel = pelican.Model
@@ -56,6 +58,9 @@ func registerSystemSettings(g *gin.RouterGroup, d *Deps) {
 }
 
 func validateSystemSettings(settings storage.UISettings) error {
+	if err := storage.ValidateBranding(settings.ProductName, settings.ProductIcon); err != nil {
+		return err
+	}
 	if err := storage.ValidatePelicanSettings(settings.PelicanSettings()); err != nil {
 		return err
 	}

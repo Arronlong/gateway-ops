@@ -67,6 +67,7 @@ func Register(r *gin.Engine, d *Deps) {
 	})
 
 	publicAPI := r.Group("/api/public")
+	registerBranding(publicAPI, d)
 	registerPublicRelayStations(publicAPI, d)
 	registerPublicModelPricing(publicAPI, d)
 	registerPublicServiceStatus(publicAPI)

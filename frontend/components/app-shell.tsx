@@ -5,6 +5,7 @@ import { MonitorHeader } from "@/components/monitor/monitor-header"
 import { DockBar } from "@/components/monitor/dock-bar"
 import { PageErrorBoundary } from "@/components/ui/page-error-boundary"
 import { GITHUB_LICENSE_URL } from "@/lib/version"
+import { useProductBranding } from "@/components/product-branding"
 
 /**
  * AppShell 是所有路由共享的外壳：顶部 header + 中间 Outlet（+ 可选底部 dock）。
@@ -15,6 +16,7 @@ import { GITHUB_LICENSE_URL } from "@/lib/version"
 const SHOW_DOCK = false
 
 export function AppShell() {
+  const {branding}=useProductBranding()
   const location = useLocation()
   return (
     <div className="min-h-screen bg-background">
@@ -32,7 +34,7 @@ export function AppShell() {
       </main>
       {SHOW_DOCK ? <DockBar /> : null}
       <footer className="px-6 pb-5 pt-2 text-center text-[11px] text-muted-foreground">
-        <span>GatewayOps · Copyright (c) 2026 guliansheng and upstream contributors · </span>
+        <span>{branding.product_name} · Copyright (c) 2026 guliansheng and upstream contributors · </span>
         <a className="underline underline-offset-2 hover:text-foreground" href={GITHUB_LICENSE_URL} target="_blank" rel="noopener noreferrer">GNU AGPLv3</a>
         <span> · 无保证</span>
       </footer>
