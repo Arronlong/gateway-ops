@@ -224,14 +224,13 @@ export function MonitorHeader() {
               <TooltipTrigger asChild>
                 <Button
                   variant="outline"
-                  size="sm"
+                  size="icon"
                   onClick={handleRefresh}
                   disabled={syncing}
-                  className="gap-1.5 border-border bg-background text-foreground hover:bg-muted"
+                  className="size-8 shrink-0 border-border bg-background text-foreground hover:bg-muted"
                   aria-label="刷新视图"
                 >
                   <RefreshCw className={cn("size-3.5", syncing && "animate-spin")} />
-                  {"刷新视图"}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom" className="max-w-xs text-xs">

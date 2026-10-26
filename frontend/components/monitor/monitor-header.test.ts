@@ -12,6 +12,24 @@ const source = ts.createSourceFile(
 )
 const documentationUrl = "https://gateway-ops.netlify.app/"
 
+test("刷新视图按钮仅显示图标并保留无障碍标签", () => {
+  const buttons: ts.JsxElement[] = []
+  function visit(node: ts.Node) {
+    if (ts.isJsxElement(node) && node.openingElement.tagName.getText() === "Button" && attribute(node, "onClick") === "{handleRefresh}") buttons.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(source)
+  assert.equal(buttons.length, 2)
+  for (const button of buttons) {
+    assert.equal(attribute(button, "size"), '"icon"')
+    assert.equal(attribute(button, "disabled"), "{syncing}")
+    assert.ok(attribute(button, "aria-label"))
+    const children = button.children.filter((child) => !ts.isJsxText(child) || child.getText().trim())
+    assert.equal(children.length, 1)
+    assert.ok(ts.isJsxSelfClosingElement(children[0]) && children[0].tagName.getText() === "RefreshCw")
+  }
+})
+
 function attribute(element: ts.JsxElement | ts.JsxSelfClosingElement, name: string) {
   const opening = ts.isJsxElement(element) ? element.openingElement : element
   const property = opening.attributes.properties.find((item) => ts.isJsxAttribute(item) && item.name.getText() === name)
