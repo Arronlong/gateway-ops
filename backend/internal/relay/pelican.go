@@ -47,7 +47,13 @@ func applyPelicanSettings(config *storage.PelicanConfig, settings storage.Pelica
 
 func pelicanExecutionPlans(config storage.PelicanConfig, configured [][]storage.PelicanTestPlan) []storage.PelicanTestPlan {
 	if len(configured) > 0 && len(configured[0]) > 0 {
-		return append([]storage.PelicanTestPlan(nil), configured[0]...)
+		plans := make([]storage.PelicanTestPlan, 0, len(configured[0]))
+		for _, plan := range configured[0] {
+			if plan.Enabled == nil || *plan.Enabled {
+				plans = append(plans, plan)
+			}
+		}
+		return plans
 	}
 	return []storage.PelicanTestPlan{{Model: config.Model, Prompt: config.Prompt, ReasoningEffort: config.ReasoningEffort}}
 }
@@ -55,7 +61,7 @@ func pelicanExecutionPlans(config storage.PelicanConfig, configured [][]storage.
 func pelicanManualRunPlans(configured []storage.PelicanTestPlan, requested []storage.PelicanTestPlan) ([]storage.PelicanTestPlan, error) {
 	plans := storage.ConfiguredPelicanPlans(configured)
 	if len(plans) == 0 {
-		return nil, errors.New("请先在系统设置中配置鹈鹕测智模型")
+		return nil, errors.New("请先在系统设置中配置并启用鹈鹕测智方案")
 	}
 	if len(requested) == 0 {
 		return plans, nil
@@ -64,6 +70,9 @@ func pelicanManualRunPlans(configured []storage.PelicanTestPlan, requested []sto
 		return nil, errors.New("一次手动测智只能指定一个方案")
 	}
 	plan := requested[0]
+	if plan.Enabled != nil && !*plan.Enabled {
+		return nil, errors.New("不能执行已禁用的测智方案")
+	}
 	plan.Model = strings.TrimSpace(plan.Model)
 	if plan.Model == "" || len(plan.Model) > 256 {
 		return nil, errors.New("请选择有效的测智模型")
@@ -81,7 +90,7 @@ func pelicanManualRunPlans(configured []storage.PelicanTestPlan, requested []sto
 		}
 	}
 	if !modelConfigured {
-		return nil, errors.New("所选模型不在系统设置的测智模型列表中")
+		return nil, errors.New("所选模型不在系统设置的已启用测智模型列表中")
 	}
 	if strings.TrimSpace(plan.Prompt) == "" || len(plan.Prompt) > 32000 {
 		return nil, errors.New("测智提示词不能为空且不能超过 32000 字节")

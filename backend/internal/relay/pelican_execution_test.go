@@ -547,3 +547,23 @@ func expectPelicanPlaceholder(mock sqlmock.Sqlmock, model, prompt, effort, trigg
 	mock.ExpectQuery(`INSERT INTO "relay_pelican_results"`).WithArgs(uint(7), int64(20), "test account", model, prompt, effort, trigger, "running", "", "", int64(0), sqlmock.AnyArg(), sqlmock.AnyArg(), "", nil).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(id))
 	mock.ExpectCommit()
 }
+
+func TestPelicanDisabledPlansCannotRunManuallyOrFallBack(t *testing.T) {
+	disabled := false
+	configured := []storage.PelicanTestPlan{{Model: "disabled-model", Prompt: "disabled", ReasoningEffort: "high", Enabled: &disabled}, {Model: "enabled-model", Prompt: "enabled", ReasoningEffort: "low"}}
+	plans, err := pelicanManualRunPlans(configured, nil)
+	if err != nil || len(plans) != 1 || plans[0].Model != "enabled-model" {
+		t.Fatalf("plans=%#v err=%v", plans, err)
+	}
+	for _, requested := range []storage.PelicanTestPlan{{Model: "disabled-model", Prompt: "draw", ReasoningEffort: "high"}, {Model: "enabled-model", Prompt: "draw", ReasoningEffort: "low", Enabled: &disabled}} {
+		if _, err := pelicanManualRunPlans(configured, []storage.PelicanTestPlan{requested}); err == nil {
+			t.Fatalf("disabled override accepted: %#v", requested)
+		}
+	}
+	if _, err := pelicanManualRunPlans(configured[:1], nil); err == nil {
+		t.Fatal("all-disabled plans accepted")
+	}
+	if got := pelicanExecutionPlans(storage.PelicanConfig{Model: "legacy"}, [][]storage.PelicanTestPlan{configured[:1]}); len(got) != 0 {
+		t.Fatalf("disabled plan fell back to legacy: %#v", got)
+	}
+}

@@ -44,7 +44,7 @@ export function PelicanSettingsCard({ settings, saving, onChange, onSave }: {
     <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">
       <div className="min-w-0">
         <CardTitle className="flex items-center gap-2 text-sm font-semibold"><Bird className="size-4 text-brand" />{"\u9e48\u9e55\u6d4b\u667a\u65b9\u6848"}</CardTitle>
-        <p className="mt-1 text-xs leading-5 text-muted-foreground">{"\u6bcf\u8f6e\u6240\u6709\u65b9\u6848\u5e76\u884c\u8fd0\u884c\u4e00\u6b21\uff1b\u5b9a\u65f6\u65f6\u6bb5\u4e0e\u9891\u7387\u7edf\u4e00\u5e94\u7528\u4e8e\u6240\u6709\u5173\u8054\u8d26\u53f7\u3002"}</p>
+        <p className="mt-1 text-xs leading-5 text-muted-foreground">{"\u6bcf\u8f6e\u5df2\u542f\u7528\u65b9\u6848\u5e76\u884c\u8fd0\u884c\u4e00\u6b21\uff1b\u5b9a\u65f6\u65f6\u6bb5\u4e0e\u9891\u7387\u7edf\u4e00\u5e94\u7528\u4e8e\u6240\u6709\u5173\u8054\u8d26\u53f7\u3002"}</p>
       </div>
       <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
         <TaskHistoryButton task="pelican" title={"\u9e48\u9e55\u5b9a\u65f6\u8c03\u5ea6\u68c0\u67e5"} />
@@ -71,7 +71,10 @@ export function PelicanSettingsCard({ settings, saving, onChange, onSave }: {
           return <section key={index} className="min-w-0 space-y-3 rounded-md border border-border p-3 sm:p-4">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
               <h3 className="text-sm font-medium">{"\u65b9\u6848"} {index + 1}</h3>
-              <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 text-xs" disabled={plans.length <= 1} onClick={() => patchPlans(removePelicanPlan(plans, index))}><Trash2 className="size-3.5" />{"\u5220\u9664\u65b9\u6848"}</Button>
+              <div className="flex items-center gap-3">
+                <Label htmlFor={`pelican-plan-${index}-enabled`} className="flex items-center gap-2 text-xs font-normal">启用<Switch id={`pelican-plan-${index}-enabled`} checked={plan.enabled !== false} aria-label={`方案 ${index + 1}启用`} onCheckedChange={enabled => patchPlans(updatePelicanPlan(plans, index, { enabled }))} /></Label>
+                <Button type="button" size="sm" variant="ghost" className="h-8 gap-1.5 text-xs" disabled={plans.length <= 1} onClick={() => patchPlans(removePelicanPlan(plans, index))}><Trash2 className="size-3.5" />{"\u5220\u9664\u65b9\u6848"}</Button>
+              </div>
             </div>
             <div className="grid min-w-0 gap-3 sm:grid-cols-2">
               <div className="min-w-0 space-y-2 sm:col-span-2">
@@ -96,7 +99,7 @@ export function PelicanSettingsCard({ settings, saving, onChange, onSave }: {
         {countIssue ? <p role="alert" className="text-xs text-danger">{countIssue.message}</p> : null}
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={plans.length >= 8} onClick={() => patchPlans(addPelicanPlan(plans))}><Plus className="size-3.5" />{"\u65b0\u589e\u65b9\u6848"}</Button>
-          <span className="text-xs text-muted-foreground">{"\u6700\u591a 8 \u9879\uff0c\u6bcf\u9879\u6bcf\u8f6e\u6267\u884c\u4e00\u6b21"}</span>
+          <span className="text-xs text-muted-foreground">{"\u6700\u591a 8 \u9879\uff0c\u4ec5\u6267\u884c\u5df2\u542f\u7528\u65b9\u6848\uff0c\u6bcf\u9879\u6bcf\u8f6e\u4e00\u6b21"}</span>
         </div>
       </div>
       <div className="space-y-2 sm:col-span-2">

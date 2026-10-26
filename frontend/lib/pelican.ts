@@ -17,7 +17,7 @@ export const pelicanSchedules = [
 export const pelicanEfforts: Record<string,string> = {none:"\u65e0",minimal:"\u6700\u4f4e",low:"\u4f4e",medium:"\u4e2d",high:"\u9ad8",xhigh:"\u6781\u9ad8",max:"\u6700\u9ad8",ultra:"\u8d85\u9ad8"}
 export const pelicanEffortOptions: Record<string,string> = {none:"\u65e0 - None",minimal:"\u6700\u4f4e - Minimal",low:"\u4f4e - Low",medium:"\u4e2d - Medium",high:"\u9ad8 - High",xhigh:"\u6781\u9ad8 - XHigh",max:"\u6700\u9ad8 - Max",ultra:"\u8d85\u9ad8 - Ultra"}
 export function defaultPelicanPlan(): PelicanTestPlan {
- return {model:"",prompt:defaultPelicanPrompt,reasoning_effort:"medium"}
+ return {enabled:true,model:"",prompt:defaultPelicanPrompt,reasoning_effort:"medium"}
 }
 export type PelicanSettingsSource = {
  pelican_plans?: unknown
@@ -29,6 +29,7 @@ export type PelicanSettingsSource = {
 function normalizePelicanPlan(value: unknown): PelicanTestPlan {
  const plan=value&&typeof value==="object"?value as Record<string,unknown>:{}
  return {
+  ...(typeof plan.enabled==="boolean"?{enabled:plan.enabled}:{}),
   model:typeof plan.model==="string"?plan.model:"",
   prompt:typeof plan.prompt==="string"?plan.prompt:defaultPelicanPrompt,
   reasoning_effort:typeof plan.reasoning_effort==="string"?plan.reasoning_effort:"medium",
@@ -44,7 +45,7 @@ export function normalizePelicanPlans(settings: PelicanSettingsSource = {}): Pel
 function pelicanModelEntries(model:string) { return model.split(/[\n\r,，;；]/).map(value=>value.trim()).filter(Boolean) }
 export function pelicanRunOptions(settings: PelicanSettingsSource | null | undefined): PelicanTestPlan[] {
  const seen=new Set<string>()
- return normalizePelicanPlans(settings??{}).flatMap(plan=>pelicanModelEntries(plan.model).flatMap(model=>{
+ return normalizePelicanPlans(settings??{}).filter(plan=>plan.enabled!==false).flatMap(plan=>pelicanModelEntries(plan.model).flatMap(model=>{
   if(seen.has(model))return []
   seen.add(model)
   return [{...plan,model}]
@@ -52,7 +53,7 @@ export function pelicanRunOptions(settings: PelicanSettingsSource | null | undef
 }
 function pelicanTextBytes(value:string) { return new TextEncoder().encode(value).length }
 export function hasConfiguredPelicanPlan(settings?: PelicanSettingsSource | null): boolean {
- return normalizePelicanPlans(settings??{}).some(plan=>pelicanModelEntries(plan.model).length>0)
+ return normalizePelicanPlans(settings??{}).some(plan=>plan.enabled!==false&&pelicanModelEntries(plan.model).length>0)
 }
 export type PelicanPlanValidationField = "model" | "prompt" | "reasoning_effort" | "plans"
 export type PelicanPlanValidationIssue = {index:number|null;field:PelicanPlanValidationField;message:string}

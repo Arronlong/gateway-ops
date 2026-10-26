@@ -29,6 +29,7 @@ type PelicanSettings struct {
 }
 
 type PelicanTestPlan struct {
+	Enabled         *bool  `json:"enabled,omitempty"`
 	Model           string `json:"model"`
 	Prompt          string `json:"prompt"`
 	ReasoningEffort string `json:"reasoning_effort"`
@@ -47,7 +48,7 @@ func normalizedPelicanPlans(plans []PelicanTestPlan, legacyModel, legacyPrompt, 
 func ConfiguredPelicanPlans(plans []PelicanTestPlan) []PelicanTestPlan {
 	configured := make([]PelicanTestPlan, 0, len(plans))
 	for _, plan := range plans {
-		if len(PelicanModelPriorityList(plan.Model)) > 0 {
+		if (plan.Enabled == nil || *plan.Enabled) && len(PelicanModelPriorityList(plan.Model)) > 0 {
 			configured = append(configured, plan)
 		}
 	}

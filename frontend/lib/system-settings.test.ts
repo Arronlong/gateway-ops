@@ -69,7 +69,7 @@ test("方案归一化最多保留八项并补充缺失字段", () => {
 
   assert.equal(plans.length, 8)
   assert.deepEqual(plans[0], { model: "model", prompt: "prompt", reasoning_effort: "medium" })
-  assert.deepEqual(plans[1], defaultPelicanPlan())
+  assert.deepEqual(plans[1], normalizePelicanPlans({})[0])
 })
 
 test("单独编辑方案不修改其他项或原始对象", () => {

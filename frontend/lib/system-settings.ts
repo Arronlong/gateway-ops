@@ -47,7 +47,7 @@ export const defaultSystemSettings: SystemSettings = {
   pelican_page_enabled: true,
   pelican_tasks_enabled: true,
   pelican_history_count: 30,
-  pelican_plans: [{ model: "", prompt: defaultPelicanPrompt, reasoning_effort: "medium" }],
+  pelican_plans: [{ enabled: true, model: "", prompt: defaultPelicanPrompt, reasoning_effort: "medium" }],
   pelican_model: "",
   pelican_prompt: defaultPelicanPrompt,
   pelican_reasoning_effort: "medium",

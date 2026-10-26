@@ -1246,6 +1246,7 @@ export interface RelayOverview {
 }
 
 export interface PelicanTestPlan {
+  enabled?: boolean
   model: string
   prompt: string
   reasoning_effort: string
