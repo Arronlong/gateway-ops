@@ -4,15 +4,15 @@ import test from "node:test"
 import { recentRequestMetrics } from "./recent-request-metrics.ts"
 
 test("配置数量同时限制最近样本和统计分母", () => {
-  const rows = Array.from({length: 100}, (_, i) => sample(i / 3 + 1, {input_tokens: 10, status_code: i < 20 ? 200 : 500}))
+  const rows = Array.from({length: 201}, (_, i) => sample(i / 5 + 1, {input_tokens: 10, status_code: i < 20 ? 200 : 500}))
   const result = recentRequestMetrics(rows.reverse(), now, 1, 20)
   assert.equal(result.sampleCount, 20)
   assert.equal(result.sampleLimit, 20)
   assert.equal(result.successAttemptCount, 20)
   assert.equal(result.successRate, 1)
   assert.equal(result.cacheInputTokens, 200)
-  assert.equal(recentRequestMetrics(rows, now, 1, 100).sampleCount, 100)
-  assert.equal(recentRequestMetrics(rows, now, 1, 101).sampleLimit, 100)
+  assert.equal(recentRequestMetrics(rows, now, 1, 200).sampleCount, 200)
+  assert.equal(recentRequestMetrics(rows, now, 1, 201).sampleLimit, 200)
   for (const limit of [0, -1, 1.5, NaN]) assert.equal(recentRequestMetrics(rows, now, 1, limit).sampleLimit, 60)
 })
 

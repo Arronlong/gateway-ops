@@ -62,21 +62,23 @@ func TestSystemSettingsRecentMetricsHTTPCompatibility(t *testing.T) {
 	request("PUT", `{"recent_metrics_window_hours":12,"recent_metrics_limit":30}`, 200, 30, 12)
 	request("GET", "", 200, 30, 12)
 	request("PUT", `{"recent_metrics_window_hours":3}`, 200, 30, 3)
-	for _, limit := range []string{"0", "-1", "101", "1.5", `"30"`} {
+	request("PUT", `{"recent_metrics_limit":200}`, 200, 200, 3)
+	request("GET", "", 200, 200, 3)
+	for _, limit := range []string{"0", "-1", "201", "1.5", `"30"`} {
 		request("PUT", `{"recent_metrics_limit":`+limit+`}`, 400, 0, 0)
 	}
-	request("GET", "", 200, 30, 3)
+	request("GET", "", 200, 200, 3)
 }
 
 func TestValidateSystemSettingsRecentMetricsLimit(t *testing.T) {
-	for _, limit := range []int{-1, 0, 1, 60, 100, 101} {
+	for _, limit := range []int{-1, 0, 1, 60, 100, 200, 201} {
 		t.Run(fmt.Sprint(limit), func(t *testing.T) {
 			settings := storage.UISettings{RecentMetricsWindowHours: 3, IframeEmbeddingMode: storage.IframeEmbeddingModeAll, PelicanPrompt: storage.DefaultPelicanPrompt, PelicanReasoningEffort: "medium", PelicanParallelCount: 1, PelicanCronExpression: "*/30 * * * *", PelicanActiveStart: "08:00", PelicanActiveEnd: "22:00", PelicanHistoryCount: storage.PelicanHistoryLimit}
 			if err := json.Unmarshal([]byte(fmt.Sprintf(`{"recent_metrics_limit":%d}`, limit)), &settings); err != nil {
 				t.Fatal(err)
 			}
 			err := validateSystemSettings(settings)
-			wantErr := limit < 1 || limit > 100
+			wantErr := limit < 1 || limit > 200
 			if (err != nil) != wantErr {
 				t.Fatalf("limit %d: error = %v, wantErr %v", limit, err, wantErr)
 			}

@@ -33,15 +33,15 @@ func TestUISettingsRecentMetricsLimitDefaultsAndPersistence(t *testing.T) {
 	if data["recent_metrics_limit"] != float64(60) {
 		t.Fatalf("recent_metrics_limit = %v, want 60", data["recent_metrics_limit"])
 	}
-	if err := json.Unmarshal([]byte(`{"recent_metrics_limit":100,"recent_metrics_window_hours":3}`), &settings); err != nil {
+	if err := json.Unmarshal([]byte(`{"recent_metrics_limit":200,"recent_metrics_window_hours":3}`), &settings); err != nil {
 		t.Fatal(err)
 	}
 	values, err := uiSettingsValues(settings)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values["ui.monitor.recent_metrics_limit"] != "100" {
-		t.Fatalf("persisted limit = %q, want 100", values["ui.monitor.recent_metrics_limit"])
+	if values["ui.monitor.recent_metrics_limit"] != "200" {
+		t.Fatalf("persisted limit = %q, want 200", values["ui.monitor.recent_metrics_limit"])
 	}
 	if values[SettingUIRecentMetricsWindowHours] != "3" {
 		t.Fatal("legacy three-hour window must be preserved")
@@ -53,7 +53,7 @@ func TestUISettingsRecentMetricsLimitDefaultsAndPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if values["ui.monitor.recent_metrics_limit"] != "100" {
+	if values["ui.monitor.recent_metrics_limit"] != "200" {
 		t.Fatal("partial legacy update must preserve configured limit")
 	}
 }

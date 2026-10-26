@@ -198,7 +198,7 @@ export default function SystemSettingsPage() {
   async function save() {
     if (!settings) return
     const limit = settings.recent_metrics_limit ?? 60
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RECENT_METRICS_LIMIT) { toast.error("最近数量范围请填写 1～100 的整数"); return }
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RECENT_METRICS_LIMIT) { toast.error("最近数量范围请填写 1～200 的整数"); return }
     setSaving(true)
     try {
       const payload: SystemSettings = {
@@ -398,7 +398,7 @@ export default function SystemSettingsPage() {
             </Select>
           </div>
           <div className="flex min-h-16 items-center justify-between gap-5 border-t border-border py-3">
-            <div className="min-w-0"><p className="text-sm font-medium text-foreground">最近数量范围</p><p className="mt-1 text-xs leading-5 text-muted-foreground">默认 60 条，可设置 1～100 条，用于最近调用、统计指标与健康评分。</p></div>
+            <div className="min-w-0"><p className="text-sm font-medium text-foreground">最近数量范围</p><p className="mt-1 text-xs leading-5 text-muted-foreground">默认 60 条，可设置 1～200 条，用于最近调用、统计指标与健康评分。</p></div>
             <Input className="h-9 w-20 shrink-0 text-center font-mono text-xs" type="number" min={1} max={MAX_RECENT_METRICS_LIMIT} step={1} inputMode="numeric" aria-label="最近数量范围" value={settings.recent_metrics_limit ?? 60} onChange={(event) => updateSettings((current) => ({ ...current, recent_metrics_limit: Number(event.target.value) }))} />
           </div>
         </CardContent>

@@ -440,7 +440,7 @@ func (s *Settings) UISettings() (UISettings, error) {
 		return settings, err
 	} else if found {
 		limit, err := strconv.Atoi(strings.TrimSpace(value))
-		if err != nil || limit < 1 || limit > 100 {
+		if err != nil || limit < 1 || limit > 200 {
 			return settings, fmt.Errorf("invalid recent metrics limit %q", value)
 		}
 		settings.RecentMetricsLimit = limit
