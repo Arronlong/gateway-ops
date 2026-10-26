@@ -3,6 +3,60 @@ import test from "node:test"
 // @ts-expect-error Node 22
 import { recentRequestMetrics } from "./recent-request-metrics.ts"
 
+test("TPS 按配置样本的总输出与总耗时加权计算", () => {
+  const result = recentRequestMetrics([
+    sample(1, {model: "model-a", output_tokens: 40, duration_ms: 2000}),
+    sample(2, {model: "model-b", output_tokens: 90, duration_ms: 3000}),
+    sample(3, {model: "image-model", request_type: "image", output_tokens: 1000, duration_ms: 1000}),
+    sample(4, {model: "probe-model", request_type: "probe", output_tokens: 1000, duration_ms: 1000}),
+  ], now, 1, 4)
+  assert.equal(result.tps, 26)
+  assert.equal(result.tpsScore, 52)
+  assert.deepEqual(result.tpsModels, ["model-a", "model-b"])
+})
+
+test("TPS 无有效文字计量时不可用且独立评分最高百分", () => {
+  assert.equal(recentRequestMetrics([sample(1, {request_type: "image", output_tokens: 100, duration_ms: 1000})], now).tps, null)
+  assert.equal(recentRequestMetrics([sample(1, {output_tokens: 0, duration_ms: 1000})], now).tpsScore, 0)
+  assert.equal(recentRequestMetrics([sample(1, {output_tokens: 25, duration_ms: 1000})], now).tpsScore, 50)
+  assert.equal(recentRequestMetrics([sample(1, {output_tokens: 50, duration_ms: 1000})], now).tpsScore, 100)
+  assert.equal(recentRequestMetrics([sample(1, {output_tokens: 100, duration_ms: 1000})], now).tpsScore, 100)
+})
+
+test("TPS 与缓存及成功率共用统计时长与最近数量", () => {
+  const result = recentRequestMetrics([
+    sample(90, {output_tokens: 1000, duration_ms: 1000}),
+    sample(4, {output_tokens: 1000, duration_ms: 1000}),
+    sample(3, {output_tokens: 100, duration_ms: 1000}),
+    sample(2, {output_tokens: 80, duration_ms: 2000}),
+  ], now, 1, 2)
+  assert.equal(result.sampleCount, 2)
+  assert.equal(result.tps, 60)
+  assert.deepEqual(result.tpsModels, [])
+})
+
+test("TPS 保留省略零输出的耗时并排除无效或未完成计量", () => {
+  const completed = sample(1, {model: "text-model", output_tokens: 100, duration_ms: 1000})
+  assert.equal(recentRequestMetrics([completed, sample(2, {duration_ms: 99000})], now).tps, 1)
+  assert.equal(recentRequestMetrics([sample(1, {duration_ms: 1000})], now).tps, 0)
+  const invalid = [
+    sample(2, {output_tokens: 0, duration_ms: 99000, in_progress: true}),
+    sample(3, {output_tokens: 0, duration_ms: 99000, attempt_status: "in_progress"}),
+    ...[0, -1, null, NaN, Infinity].map(duration_ms => sample(4, {output_tokens: 100, duration_ms})),
+    ...[-1, NaN, Infinity].map(output_tokens => sample(5, {output_tokens, duration_ms: 1000})),
+  ]
+  assert.equal(recentRequestMetrics([completed, ...invalid], now).tps, 100)
+})
+
+test("TPS 在渠道仅提供模型名时排除图片补计量", () => {
+  const imageModels = ["gpt-image-1", "GROK-IMAGINE", "dall-e-3", "imagen-4", "seedream-4", "image-generation", "flux-dev"]
+  for (const model of imageModels) {
+    const result = recentRequestMetrics([sample(1, {model, output_tokens: 1000, duration_ms: 1000})], now)
+    assert.equal(result.tps, null, model)
+    assert.equal(result.tpsScore, null, model)
+  }
+})
+
 test("配置数量同时限制最近样本和统计分母", () => {
   const rows = Array.from({length: 201}, (_, i) => sample(i / 5 + 1, {input_tokens: 10, status_code: i < 20 ? 200 : 500}))
   const result = recentRequestMetrics(rows.reverse(), now, 1, 20)

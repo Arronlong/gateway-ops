@@ -1,7 +1,10 @@
 export interface RecentRequestSample {
   created_at: string
+  model?: string
   cache_known?: boolean
   input_tokens?: number
+  output_tokens?: number
+  duration_ms?: number | null
   cache_read_tokens?: number
   cache_creation_tokens?: number
   cache_creation_5m_tokens?: number
@@ -82,10 +85,30 @@ export function recentRequestMetrics(samples: readonly RecentRequestSample[], no
       if (outcome) successCount++
     }
   }
+  const tpsSamples = selected.samples.filter(sample => {
+    const requestType = sample.request_type?.trim().toLowerCase() ?? ""
+    const model = sample.model?.trim().toLowerCase() ?? ""
+    // 渠道历史样本仅有模型名，使用与后端图片定价相同的模型识别规则。
+    const imageModel = /grok-imagine|gpt-image|dall-e|imagen|seedream|image-generation/.test(model) || model.startsWith("flux-")
+    return !excludedFromSuccessRate(sample)
+      && sample.in_progress !== true && sample.attempt_status !== "in_progress"
+      && !requestType.includes("image")
+      && !imageModel
+      // 后端对零值使用 omitempty，缺省输出 Token 仍需计入已完成请求的耗时。
+      && Number.isFinite(sample.output_tokens ?? 0)
+      && (sample.output_tokens ?? 0) >= 0
+      && Number.isFinite(sample.duration_ms)
+      && (sample.duration_ms ?? 0) > 0
+  })
+  const tpsOutputTokens = tpsSamples.reduce((total, sample) => total + (sample.output_tokens ?? 0), 0)
+  const tpsDurationSeconds = tpsSamples.reduce((total, sample) => total + (sample.duration_ms ?? 0) / 1000, 0)
+  const tps = tpsDurationSeconds > 0 ? tpsOutputTokens / tpsDurationSeconds : null
+  const tpsModels = Array.from(new Set(tpsSamples.map(sample => sample.model?.trim()).filter((model): model is string => Boolean(model))))
   const cacheTokenTotal = cacheInputTokens + cacheReadTokens + cacheCreationTotal
   return {
     sampleCount: selected.samples.length, sampleLimit: selected.sampleLimit, windowHours: selected.windowHours, successCount, successAttemptCount, successKnownCount: successAttemptCount, cacheHitCount, cacheKnownCount,
     cacheInputTokens, cacheReadTokens, cacheCreationTokens: cacheCreationTotal, cacheTokenTotal,
+    tps, tpsScore: tps == null ? null : Math.min(100, tps * 2), tpsModels, tpsOutputTokens, tpsDurationSeconds,
     successRate: successAttemptCount ? successCount / successAttemptCount : null,
     cacheHitRate: cacheTokenTotal ? cacheReadTokens / cacheTokenTotal : null,
     latestAt: selected.samples[0]?.created_at ?? null,

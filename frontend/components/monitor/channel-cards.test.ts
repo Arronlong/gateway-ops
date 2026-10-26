@@ -22,8 +22,20 @@ test("\u6e20\u9053\u753b\u518c\u548c\u5217\u8868\u6307\u6807\u5747\u4f7f\u7528\u
 
 test("\u73af\u5f62\u6307\u6807\u6807\u9898\u52a8\u6001\u663e\u793a\u914d\u7f6e\u7684\u5c0f\u65f6\u6570", () => {
   const dynamicLabels = metricsSource.match(/label=\{`\$\{metrics\.windowHours\}h [^`]+`/g) ?? []
-  assert.equal(dynamicLabels.length, 2)
+  assert.equal(dynamicLabels.length, 3)
   assert.doesNotMatch(metricsSource, /label="1h /)
+})
+
+test("TPS 使用独立排序且不改变综合健康评分", () => {
+  const relaySource = readFileSync(new URL("../../app/relay-stations-page.tsx", import.meta.url), "utf8")
+  const latencySource = readFileSync(new URL("../../lib/latency.ts", import.meta.url), "utf8")
+  for (const page of [source, relaySource]) {
+    assert.ok(/value: "tps_score", label: "TPS \u8bc4\u5206"/.test(page), "缺少独立 TPS 排序选项")
+    assert.ok(/case "tps_score":[\s\S]{0,180}tpsScore/.test(page), "TPS 排序必须使用独立评分")
+  }
+  assert.match(metricsSource, /<TpsRing/)
+  assert.match(metricsSource, /TPS =/)
+  assert.doesNotMatch(latencySource, /tpsScore/)
 })
 
 test("\u6e20\u9053\u641c\u7d22\u4f7f\u7528\u53ef\u4e2d\u65ad\u66f4\u65b0\u4e14\u4e0d\u8986\u76d6\u8f93\u5165\u8349\u7a3f", () => {

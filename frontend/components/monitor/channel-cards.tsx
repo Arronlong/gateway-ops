@@ -78,7 +78,7 @@ type ManagementModeFilter = "auto" | "manual" | "all"
 type AccountCountFilter = "multi" | "single" | "all"
 type ChannelTypeFilter = "all" | ChannelType
 type AssociationFilter = "all" | "unlinked" | `station:${number}`
-type ChannelSortKey = "score" | "cache_hit_rate" | "success_rate" | "ratio_change" | "recent_call" | "updated" | "output_speed_p50" | "output_speed_p95" | "first_latency_p50" | "first_latency_p95" | "duration_latency_p50" | "duration_latency_p95" | "balance" | "consumption" | "usage_cost" | "name" | "account_count" | "status"
+type ChannelSortKey = "score" | "cache_hit_rate" | "success_rate" | "tps_score" | "ratio_change" | "recent_call" | "updated" | "output_speed_p50" | "output_speed_p95" | "first_latency_p50" | "first_latency_p95" | "duration_latency_p50" | "duration_latency_p95" | "balance" | "consumption" | "usage_cost" | "name" | "account_count" | "status"
 type SortDirection = "asc" | "desc"
 type ChannelViewMode = "gallery" | "list"
 type ChannelColumnKey = "score" | "type" | "status" | "management" | "accounts" | "balance" | "consumption" | "usage_cost" | "recent" | "stability" | "consumption_trend" | "updated" | "remark"
@@ -163,6 +163,7 @@ const channelSortOptions: Array<{ value: ChannelSortKey; label: string }> = [
   { value: "score", label: "综合评分" },
   { value: "cache_hit_rate", label: "缓存命中率" },
   { value: "success_rate", label: "重试感知成功率" },
+  { value: "tps_score", label: "TPS 评分" },
   { value: "ratio_change", label: "最近倍率变动" },
   { value: "recent_call", label: "最近调用时间" },
   { value: "updated", label: "上次更新时间" },
@@ -853,6 +854,9 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
           break
         case "success_rate":
           result = compareNumber(recentMetricsByChannel.get(left.id)?.successRate ?? null, recentMetricsByChannel.get(right.id)?.successRate ?? null)
+          break
+        case "tps_score":
+          result = compareNumber(recentMetricsByChannel.get(left.id)?.tpsScore ?? null, recentMetricsByChannel.get(right.id)?.tpsScore ?? null)
           break
         case "recent_call":
           result = compareNumber(latestCallByChannel.get(left.id) ?? null, latestCallByChannel.get(right.id) ?? null)
