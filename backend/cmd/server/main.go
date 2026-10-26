@@ -117,7 +117,7 @@ func main() {
 	})
 	relaySvc := relay.NewService(relayStations, cipher, channels, rates, settings)
 	monitorSvc := monitor.NewService(channels, rates, monLogs, channelUsage, channelSvc, dispatcher, log)
-	alertCollector := alert.NewCollector(alertRules, relayStations, channels)
+	alertCollector := alert.NewCollector(alertRules, relayStations, channels, alert.CollectorSources{ChannelUsage: channelUsage, Rates: rates, Users: relaySvc})
 	alertSvc := alert.NewService(alertRules, alertCollector, relaySvc, dispatcher, log)
 
 	sch := scheduler.New(cfg.Scheduler, monitorSvc, monLogs, rates, notifies, settings, relaySvc, alertSvc, log)

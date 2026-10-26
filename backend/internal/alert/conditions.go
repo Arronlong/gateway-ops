@@ -20,6 +20,8 @@ func EvaluateCondition(rule RuleSpec, observation Observation, baseline *Baselin
 	}
 
 	switch rule.Metric {
+	case MetricChannelRateChange:
+		return thresholdResult(rule, observation.Value, "渠道倍率变化")
 	case MetricRateChange:
 		if baseline == nil || (baseline.Value == 0 && rule.RateMode != "absolute") || math.IsNaN(baseline.Value) || math.IsInf(baseline.Value, 0) {
 			return ConditionResult{Unknown: true, Summary: "尚无有效倍率基线"}
@@ -37,7 +39,9 @@ func EvaluateCondition(rule RuleSpec, observation Observation, baseline *Baselin
 		}
 		return thresholdResult(rule, change, "倍率变化")
 	case MetricBalanceLow:
-		return thresholdResult(rule, observation.Value, "关联渠道账号最低余额")
+		return thresholdResult(rule, observation.Value, "渠道余额")
+	case MetricUserBalanceLow:
+		return thresholdResult(rule, observation.Value, "用户余额")
 	case MetricAccountStability:
 		return thresholdResult(rule, observation.Value, "稳定性指标")
 	case MetricAccountSpend, MetricUserSpend:
@@ -85,13 +89,14 @@ func EvaluateCondition(rule RuleSpec, observation Observation, baseline *Baselin
 func thresholdResult(rule RuleSpec, value float64, label string) ConditionResult {
 	violated := value >= rule.Threshold
 	recovered := !violated
-	if rule.Metric == MetricBalanceLow {
+	isBalance := rule.Metric == MetricBalanceLow || rule.Metric == MetricUserBalanceLow
+	if isBalance {
 		violated = value <= rule.Threshold
 		recovered = !violated
 	}
 	if rule.RecoveryThreshold != nil {
 		recovered = value <= *rule.RecoveryThreshold
-		if rule.Metric == MetricBalanceLow {
+		if isBalance {
 			recovered = value >= *rule.RecoveryThreshold
 		}
 	}

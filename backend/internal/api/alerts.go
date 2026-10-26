@@ -49,6 +49,7 @@ func registerAlerts(g *gin.RouterGroup, d *Deps) {
 		c.JSON(http.StatusOK, gin.H{"data": list})
 	})
 	alerts.POST("/rules", func(c *gin.Context) { createAlertRule(c, d) })
+	alerts.POST("/rules/preview", func(c *gin.Context) { previewAlertRule(c, d) })
 	alerts.GET("/rules/:id", func(c *gin.Context) { getAlertRule(c, d) })
 	alerts.PUT("/rules/:id", func(c *gin.Context) { updateAlertRule(c, d) })
 	alerts.PATCH("/rules/:id/enabled", func(c *gin.Context) {
@@ -84,7 +85,7 @@ func registerAlerts(g *gin.RouterGroup, d *Deps) {
 			fail(c, 400, errors.New("事件状态无效"))
 			return
 		}
-		if value := c.Query("target_type"); value != "" && value != "relay_account" && value != "relay_user" {
+		if value := c.Query("target_type"); value != "" && value != "channel" && value != "relay_account" && value != "relay_user" {
 			fail(c, 400, errors.New("对象类型无效"))
 			return
 		}
@@ -151,6 +152,25 @@ func createAlertRule(c *gin.Context, d *Deps) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": rule})
+}
+
+func previewAlertRule(c *gin.Context, d *Deps) {
+	var in alertRuleInput
+	if err := c.ShouldBindJSON(&in); err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	rule, err := alertRuleFromInput(0, in)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	preview, err := d.Alerts.PreviewRuleSummary(c.Request.Context(), *rule, time.Now().UTC())
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": preview})
 }
 
 func getAlertRule(c *gin.Context, d *Deps) {

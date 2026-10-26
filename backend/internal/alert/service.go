@@ -23,6 +23,7 @@ type Service struct {
 }
 
 type PreviewTarget struct {
+	TargetType       string     `json:"target_type"`
 	StationID        uint       `json:"station_id"`
 	TargetExternalID string     `json:"target_external_id"`
 	TargetName       string     `json:"target_name"`
@@ -31,6 +32,11 @@ type PreviewTarget struct {
 	Violated         bool       `json:"violated"`
 	Unknown          bool       `json:"unknown"`
 	Summary          string     `json:"summary"`
+}
+
+type PreviewSummary struct {
+	Matched int             `json:"matched"`
+	Targets []PreviewTarget `json:"targets"`
 }
 
 func NewService(rules *storage.Alerts, collector MetricCollector, actions ActionExecutor, dispatcher *notify.Dispatcher, log *slog.Logger) *Service {
@@ -127,18 +133,25 @@ func (s *Service) TestRule(ctx context.Context, ruleID uint, now time.Time) ([]P
 	if err != nil {
 		return nil, err
 	}
+	return s.PreviewRule(ctx, *rule, now)
+}
+
+func (s *Service) PreviewRule(ctx context.Context, rule storage.AlertRule, now time.Time) ([]PreviewTarget, error) {
+	if err := validateRule(&rule); err != nil {
+		return nil, err
+	}
 	var condition ConditionConfig
 	if err := json.Unmarshal([]byte(rule.ConditionJSON), &condition); err != nil {
 		return nil, err
 	}
 	spec := condition.RuleSpec(MetricKind(rule.Metric))
-	targets, err := s.collector.Collect(ctx, *rule, condition, now)
+	targets, err := s.collector.Collect(ctx, rule, condition, now)
 	if err != nil {
 		return nil, err
 	}
 	preview := make([]PreviewTarget, 0, len(targets))
 	for _, target := range targets {
-		if spec.Metric == MetricRateChange {
+		if spec.Metric == MetricRateChange && rule.ID != 0 {
 			states, err := s.rules.ListRuleStates(rule.ID)
 			if err != nil {
 				return nil, err
@@ -153,9 +166,18 @@ func (s *Service) TestRule(ctx context.Context, ruleID uint, now time.Time) ([]P
 			}
 		}
 		result := EvaluateCondition(spec, target.Observation, target.Baseline)
-		preview = append(preview, PreviewTarget{StationID: target.StationID, TargetExternalID: target.TargetExternalID, TargetName: target.TargetName, Metric: target.Metric, Actual: result.Actual, Violated: result.Violated, Unknown: result.Unknown, Summary: result.Summary})
+		preview = append(preview, PreviewTarget{TargetType: rule.TargetType, StationID: target.StationID, TargetExternalID: target.TargetExternalID, TargetName: target.TargetName, Metric: target.Metric, Actual: result.Actual, Violated: result.Violated, Unknown: result.Unknown, Summary: result.Summary})
 	}
 	return preview, nil
+}
+
+func (s *Service) PreviewRuleSummary(ctx context.Context, rule storage.AlertRule, now time.Time) (PreviewSummary, error) {
+	targets, err := s.PreviewRule(ctx, rule, now)
+	if err != nil {
+		return PreviewSummary{}, err
+	}
+	previewCount := min(len(targets), 10)
+	return PreviewSummary{Matched: len(targets), Targets: targets[:previewCount]}, nil
 }
 
 func (s *Service) EvaluateAll(ctx context.Context, now time.Time) error {
@@ -394,7 +416,7 @@ func (s *Service) sendEventNotification(ctx context.Context, rule storage.AlertR
 }
 
 func alertLabel(value string) string {
-	labels := map[string]string{"info": "提示", "warning": "警告", "critical": "严重", "rate_change": "倍率变化", "balance_low": "渠道余额低", "account_spend": "账号消耗异常", "account_stability": "账号稳定性异常", "user_spend": "用户消耗异常", "user_multi_ip": "用户多 IP", "firing": "触发中", "recovering": "恢复中", "recovered": "已恢复", "disable_account_scheduling": "自动停止账号调度", "enable_account_scheduling": "自动恢复账号调度", "disable_user": "自动停用用户", "enable_user": "自动启用用户", "prepared": "准备执行", "succeeded": "执行成功", "skipped": "已跳过", "failed": "执行失败", "uncertain": "结果待核对"}
+	labels := map[string]string{"info": "提示", "warning": "警告", "critical": "严重", "rate_change": "倍率变化", "channel_rate_change": "倍率变化", "balance_low": "渠道余额低", "account_spend": "账号消耗异常", "account_stability": "账号稳定性异常", "user_spend": "用户消耗异常", "user_multi_ip": "用户多 IP", "user_balance_low": "用户余额低", "firing": "触发中", "recovering": "恢复中", "recovered": "已恢复", "disable_account_scheduling": "自动停止账号调度", "enable_account_scheduling": "自动恢复账号调度", "disable_user": "自动停用用户", "enable_user": "自动启用用户", "prepared": "准备执行", "succeeded": "执行成功", "skipped": "已跳过", "failed": "执行失败", "uncertain": "结果待核对"}
 	if label, ok := labels[value]; ok {
 		return label
 	}
@@ -423,7 +445,7 @@ func validateRuleDefaults(rule *storage.AlertRule) error {
 	if rule == nil || strings.TrimSpace(rule.Name) == "" {
 		return errors.New("alert rule name is required")
 	}
-	if rule.TargetType != string(TargetRelayAccount) && rule.TargetType != string(TargetRelayUser) {
+	if rule.TargetType != string(TargetChannel) && rule.TargetType != string(TargetRelayAccount) && rule.TargetType != string(TargetRelayUser) {
 		return fmt.Errorf("unsupported alert target type: %s", rule.TargetType)
 	}
 	if rule.Metric == "" {

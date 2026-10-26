@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,10 +29,29 @@ type Collector struct {
 	alerts   *storage.Alerts
 	stations *storage.RelayStations
 	channels *storage.Channels
+	usage    *storage.ChannelUsage
+	rates    *storage.Rates
+	users    UserSnapshotProvider
 }
 
-func NewCollector(alerts *storage.Alerts, stations *storage.RelayStations, channels *storage.Channels) *Collector {
-	return &Collector{alerts: alerts, stations: stations, channels: channels}
+type UserSnapshotProvider interface {
+	AlertUserSnapshots(ctx context.Context, stationID uint) ([]storage.RelayUserSnapshot, error)
+}
+
+type CollectorSources struct {
+	ChannelUsage *storage.ChannelUsage
+	Rates        *storage.Rates
+	Users        UserSnapshotProvider
+}
+
+func NewCollector(alerts *storage.Alerts, stations *storage.RelayStations, channels *storage.Channels, sources ...CollectorSources) *Collector {
+	collector := &Collector{alerts: alerts, stations: stations, channels: channels}
+	if len(sources) > 0 {
+		collector.usage = sources[0].ChannelUsage
+		collector.rates = sources[0].Rates
+		collector.users = sources[0].Users
+	}
+	return collector
 }
 
 func (c *Collector) Collect(ctx context.Context, rule storage.AlertRule, config ConditionConfig, now time.Time) ([]TargetObservation, error) {
@@ -43,6 +63,10 @@ func (c *Collector) Collect(ctx context.Context, rule storage.AlertRule, config 
 		if err := json.Unmarshal([]byte(rule.ScopeJSON), &scope); err != nil {
 			return nil, fmt.Errorf("decode alert scope: %w", err)
 		}
+	}
+	targetType := TargetType(rule.TargetType)
+	if targetType == TargetChannel {
+		return c.collectChannels(ctx, rule, scope, config, now)
 	}
 	stationIDs := scope.StationIDs
 	if len(stationIDs) == 0 {
@@ -62,11 +86,111 @@ func (c *Collector) Collect(ctx context.Context, rule storage.AlertRule, config 
 	metric := MetricKind(rule.Metric)
 	spec := config.RuleSpec(metric)
 	result := make([]TargetObservation, 0)
+	activeTargetsByStation := map[uint]map[string]struct{}{}
+	if targetType == TargetRelayAccount && len(scope.Filters) > 0 && c.alerts != nil && rule.ID > 0 {
+		states, err := c.alerts.ListRuleStates(rule.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, state := range states {
+			if state.TargetType != string(TargetRelayAccount) || !isActiveAlertState(state.State) {
+				continue
+			}
+			if activeTargetsByStation[state.RelayStationID] == nil {
+				activeTargetsByStation[state.RelayStationID] = map[string]struct{}{}
+			}
+			activeTargetsByStation[state.RelayStationID][state.TargetExternalID] = struct{}{}
+		}
+	}
 	for _, stationID := range stationIDs {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		if TargetType(rule.TargetType) == TargetRelayUser {
+		station, err := c.stations.FindByID(stationID)
+		if err != nil {
+			return nil, err
+		}
+		if targetType == TargetRelayUser && c.users != nil {
+			users, err := c.users.AlertUserSnapshots(ctx, stationID)
+			if err != nil {
+				return nil, err
+			}
+			states, err := c.alerts.ListRuleStates(rule.ID)
+			if err != nil {
+				return nil, err
+			}
+			activeTargets := activeAlertTargetIDs(states, TargetRelayUser, stationID)
+			known := map[string]bool{}
+			if metric == MetricUserBalanceLow || len(scope.Filters) > 0 {
+				for _, user := range users {
+					key := strconv.FormatInt(user.ID, 10)
+					if len(targets) > 0 {
+						if _, ok := targets[key]; !ok {
+							continue
+						}
+					}
+					if !scopeMatches(targetType, scope, userScopeAttributes(user, *station)) {
+						continue
+					}
+					known[key] = true
+				}
+			}
+			for key := range activeTargets {
+				known[key] = true
+			}
+			if metric != MetricUserBalanceLow {
+				keys, err := c.stations.ListUsageUserKeys(stationID, now.Add(-spec.Window))
+				if err != nil {
+					return nil, err
+				}
+				for _, key := range keys {
+					if len(targets) == 0 || hasScopeTarget(targets, key) {
+						known[key] = true
+					}
+				}
+				for _, state := range states {
+					if state.RelayStationID == stationID {
+						known[state.TargetExternalID] = true
+					}
+				}
+				for key := range targets {
+					known[key] = true
+				}
+			}
+			userByID := make(map[string]storage.RelayUserSnapshot, len(users))
+			for _, user := range users {
+				userByID[strconv.FormatInt(user.ID, 10)] = user
+			}
+			for key := range known {
+				if len(targets) > 0 && !hasScopeTarget(targets, key) {
+					continue
+				}
+				if len(scope.Filters) > 0 || metric == MetricUserBalanceLow {
+					user, exists := userByID[key]
+					if !exists || (!scopeMatches(targetType, scope, userScopeAttributes(user, *station)) && !hasScopeTarget(activeTargets, key)) {
+						continue
+					}
+					if metric == MetricUserBalanceLow {
+						observation := Observation{ObservedAt: user.ObservedAt.UTC(), Value: user.Balance, Valid: !user.ObservedAt.IsZero() && fresh(user.ObservedAt, now, 3*time.Minute)}
+						if !observation.Valid {
+							observation.Reason = "用户余额快照缺失或已过期"
+						}
+						result = append(result, TargetObservation{StationID: stationID, TargetExternalID: key, TargetName: userDisplayName(user), Metric: metric, Observation: observation})
+						continue
+					}
+				}
+				observation, err := c.collectUser(stationID, key, metric, spec, now)
+				if err != nil {
+					return nil, err
+				}
+				result = append(result, TargetObservation{StationID: stationID, TargetExternalID: key, TargetName: key, Metric: metric, Observation: observation, Baseline: c.spendBaseline(rule, stationID, key, spec, observation.ObservedAt)})
+			}
+			continue
+		}
+		if targetType == TargetRelayUser && (metric == MetricUserBalanceLow || len(scope.Filters) > 0) {
+			return nil, fmt.Errorf("user scope filtering requires a station adapter")
+		}
+		if targetType == TargetRelayUser {
 			keys, err := c.stations.ListUsageUserKeys(stationID, now.Add(-spec.Window))
 			if err != nil {
 				return nil, err
@@ -115,6 +239,9 @@ func (c *Collector) Collect(ctx context.Context, rule storage.AlertRule, config 
 				if _, ok := targets[key]; !ok {
 					continue
 				}
+			}
+			if !scopeMatches(targetType, scope, accountScopeAttributes(account, *station)) && !hasScopeTarget(activeTargetsByStation[stationID], key) {
+				continue
 			}
 			observation, err := c.collectAccount(stationID, account, metric, spec, now)
 			if err != nil {

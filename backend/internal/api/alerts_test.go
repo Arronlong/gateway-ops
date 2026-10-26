@@ -99,6 +99,7 @@ func TestAlertHTTPWorkflowAndAuthentication(t *testing.T) {
 	request("POST", "/alerts/rules", `{}`, "", 401)
 	body := fmt.Sprintf(`{"name":"消耗保护","target_type":"relay_account","metric":"account_spend","scope":{"station_ids":[7],"target_ids":["42"]},"condition":{"threshold":20,"window_seconds":900,"trigger_consecutive":3,"recovery_consecutive":3},"action":{"actions":[]},"recovery":{"enabled":false},"channel_ids":[%d],"cooldown_seconds":1800}`, channel.ID)
 	created := request("POST", "/alerts/rules", body, token, 200)
+	request("POST", "/alerts/rules/preview", body, token, 200)
 	var result struct {
 		Data storage.AlertRule `json:"data"`
 	}
@@ -111,6 +112,13 @@ func TestAlertHTTPWorkflowAndAuthentication(t *testing.T) {
 	}
 	path := fmt.Sprintf("/alerts/rules/%d", ruleID)
 	request("GET", path, "", token, 200)
+	channelBody := `{"name":"渠道余额","target_type":"channel","metric":"balance_low","severity":"critical","enabled":true,"scope":{"logic":"all","filters":[{"field":"monitor_enabled","operator":"eq","value":"true"}]},"condition":{"threshold":0,"window_seconds":900},"action":{"actions":[]},"recovery":{"enabled":false},"cooldown_seconds":1800}`
+	channelRule := request("POST", "/alerts/rules", channelBody, token, 200)
+	if !bytes.Contains(channelRule, []byte(`"target_type":"channel"`)) {
+		t.Fatalf("channel rule type was not persisted: %s", channelRule)
+	}
+	request("POST", "/alerts/rules/preview", channelBody, token, 200)
+	request("GET", "/alerts/events?target_type=channel", "", token, 200)
 	request("PATCH", path+"/enabled", `{"enabled":false}`, token, 200)
 	if rule, _ := repo.FindRule(ruleID); rule.Enabled {
 		t.Fatal("pause did not persist")

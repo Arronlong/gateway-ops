@@ -210,8 +210,9 @@ export interface NotificationLog {
   sent_at: string
 }
 
-export type AlertTargetType = "relay_account" | "relay_user"
-export type AlertMetric = "rate_change" | "balance_low" | "account_spend" | "account_stability" | "user_spend" | "user_multi_ip"
+export type AlertTargetType = "channel" | "relay_account" | "relay_user"
+export type AlertMetric = "channel_rate_change" | "rate_change" | "balance_low" | "account_spend" | "account_stability" | "user_spend" | "user_multi_ip" | "user_balance_low"
+export interface AlertScopeFilter { field: string; operator: string; value: string }
 export type AlertLifecycleState = "normal" | "pending" | "firing" | "recovering" | "recovered" | "unknown"
 
 export interface AlertRule {

@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>预警规则原型 · GatewayOps</title><link rel="stylesheet" href="alert-rule-scope.css"></head>
+<body>
+<header class="top"><strong>GatewayOps</strong><nav><a>首页</a><a>渠道管理</a><a>中转站管理</a><a>成本管理</a><a class="active">预警中心</a></nav></header>
+<main><section class="title"><div><h1>预警中心</h1><p>规则触发、自动处置、消息通知与执行记录。</p></div><button class="primary">＋ 新建规则</button></section>
+<section class="metrics"><article><label>待处理事件</label><b>3</b><small>未恢复预警</small></article><article><label>运行中规则</label><b>12</b><small>启用中的订阅规则</small></article><article><label>通知渠道</label><b>4</b><small>已启用渠道</small></article><article><label>自动化处置</label><b>8</b><small>今日成功执行</small></article></section>
+<nav class="tabs"><button class="active">预警事件　3</button><button>订阅规则　12</button><button>通知渠道</button><button>发送记录</button></nav><section class="list">预警事件列表　　渠道余额偏低 · 用户消耗异常 · 触发中</section></main>
+<div class="shade"><section class="dialog" role="dialog" aria-modal="true"><header><div class="heading"><div><h2>新建订阅规则</h2><p>先圈定监控对象，再定义触发条件与处理方式。</p></div><button id="close" aria-label="关闭">×</button></div><nav class="steps"><button data-step="0" class="active">1　监控对象</button><button data-step="1">2　触发条件</button><button data-step="2">3　自动化与通知</button><button data-step="3">4　告警策略</button></nav></header><div class="content" id="content"></div><footer><span>本地交互原型 · 不会保存或执行远端操作</span><div><button id="back">取消</button><button id="next" class="primary">下一步</button></div></footer></section></div>
+<script src="alert-rule-scope.js"></script></body></html>

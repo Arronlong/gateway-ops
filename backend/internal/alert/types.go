@@ -9,6 +9,7 @@ import (
 type TargetType string
 
 const (
+	TargetChannel      TargetType = "channel"
 	TargetRelayAccount TargetType = "relay_account"
 	TargetRelayUser    TargetType = "relay_user"
 )
@@ -16,12 +17,14 @@ const (
 type MetricKind string
 
 const (
-	MetricRateChange       MetricKind = "rate_change"
-	MetricBalanceLow       MetricKind = "balance_low"
-	MetricAccountSpend     MetricKind = "account_spend"
-	MetricAccountStability MetricKind = "account_stability"
-	MetricUserSpend        MetricKind = "user_spend"
-	MetricUserMultiIP      MetricKind = "user_multi_ip"
+	MetricChannelRateChange MetricKind = "channel_rate_change"
+	MetricRateChange        MetricKind = "rate_change"
+	MetricBalanceLow        MetricKind = "balance_low"
+	MetricAccountSpend      MetricKind = "account_spend"
+	MetricAccountStability  MetricKind = "account_stability"
+	MetricUserSpend         MetricKind = "user_spend"
+	MetricUserMultiIP       MetricKind = "user_multi_ip"
+	MetricUserBalanceLow    MetricKind = "user_balance_low"
 )
 
 type ActionKind string
@@ -103,8 +106,16 @@ func (c ConditionConfig) RuleSpec(metric MetricKind) RuleSpec {
 }
 
 type ScopeConfig struct {
-	StationIDs []uint   `json:"station_ids,omitempty"`
-	TargetIDs  []string `json:"target_ids,omitempty"`
+	StationIDs []uint        `json:"station_ids,omitempty"`
+	TargetIDs  []string      `json:"target_ids,omitempty"`
+	Logic      string        `json:"logic,omitempty"`
+	Filters    []ScopeFilter `json:"filters,omitempty"`
+}
+
+type ScopeFilter struct {
+	Field    string `json:"field"`
+	Operator string `json:"operator"`
+	Value    string `json:"value"`
 }
 
 type ActionConfig struct {

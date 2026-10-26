@@ -29,8 +29,12 @@ func validateRule(rule *storage.AlertRule) error {
 	if len([]rune(rule.Name)) > 128 || len([]rune(rule.Remark)) > 512 {
 		return errors.New("规则名称或备注超过长度限制")
 	}
-	valid := map[MetricKind]TargetType{MetricRateChange: TargetRelayAccount, MetricBalanceLow: TargetRelayAccount, MetricAccountSpend: TargetRelayAccount, MetricAccountStability: TargetRelayAccount, MetricUserSpend: TargetRelayUser, MetricUserMultiIP: TargetRelayUser}
-	if target, ok := valid[MetricKind(rule.Metric)]; !ok || string(target) != rule.TargetType {
+	metric := MetricKind(rule.Metric)
+	target := TargetType(rule.TargetType)
+	validPair := (target == TargetChannel && (metric == MetricChannelRateChange || metric == MetricBalanceLow)) ||
+		(target == TargetRelayAccount && (metric == MetricAccountSpend || metric == MetricAccountStability || metric == MetricRateChange || metric == MetricBalanceLow)) ||
+		(target == TargetRelayUser && (metric == MetricUserSpend || metric == MetricUserMultiIP || metric == MetricUserBalanceLow))
+	if !validPair {
 		return errors.New("指标与目标类型不匹配")
 	}
 	if rule.Severity != "info" && rule.Severity != "warning" && rule.Severity != "critical" {
@@ -58,7 +62,7 @@ func validateRule(rule *storage.AlertRule) error {
 	if config.Threshold < 0 || math.IsNaN(config.Threshold) || math.IsInf(config.Threshold, 0) {
 		return errors.New("阈值必须是非负有限数")
 	}
-	if rule.Metric != string(MetricBalanceLow) && config.Threshold == 0 {
+	if rule.Metric != string(MetricBalanceLow) && rule.Metric != string(MetricUserBalanceLow) && config.Threshold == 0 {
 		return errors.New("此指标的触发阈值必须大于零")
 	}
 	if rule.Metric == string(MetricUserMultiIP) && (config.Threshold < 2 || math.Trunc(config.Threshold) != config.Threshold) {
@@ -101,13 +105,26 @@ func validateRule(rule *storage.AlertRule) error {
 	if len(scope.StationIDs) > 500 || len(scope.TargetIDs) > 500 {
 		return errors.New("规则目标过多")
 	}
+	if err := validateScope(target, scope); err != nil {
+		return err
+	}
+	if target == TargetChannel && len(scope.StationIDs) > 0 {
+		return errors.New("渠道规则不能设置中转站范围")
+	}
 	for _, id := range scope.StationIDs {
 		if id == 0 {
 			return errors.New("中转站 ID 无效")
 		}
 	}
-	if len(scope.TargetIDs) > 0 && len(scope.StationIDs) != 1 {
+	if target != TargetChannel && len(scope.TargetIDs) > 0 && len(scope.StationIDs) != 1 {
 		return errors.New("指定目标 ID 时必须只选择一个中转站，避免跨站 ID 混淆")
+	}
+	if target == TargetChannel {
+		for _, id := range scope.TargetIDs {
+			if value, err := strconv.ParseUint(id, 10, 32); err != nil || value == 0 {
+				return errors.New("渠道 ID 必须是正整数")
+			}
+		}
 	}
 	var actions ActionConfig
 	if err := decodeConfig(rule.ActionJSON, &actions); err != nil {
@@ -119,7 +136,7 @@ func validateRule(rule *storage.AlertRule) error {
 		if spec.Kind != ActionDisableAccountScheduling && spec.Kind != ActionEnableAccountScheduling && spec.Kind != ActionDisableUser && spec.Kind != ActionEnableUser {
 			return errors.New("自动化动作无效")
 		}
-		if (strings.HasSuffix(string(spec.Kind), "user")) != (rule.TargetType == string(TargetRelayUser)) {
+		if target == TargetChannel || (strings.HasSuffix(string(spec.Kind), "user")) != (target == TargetRelayUser) {
 			return errors.New("自动化动作与目标不匹配")
 		}
 		if spec.Enabled {
@@ -152,7 +169,8 @@ func validateRule(rule *storage.AlertRule) error {
 	}
 	if config.RecoveryThreshold != nil {
 		value := *config.RecoveryThreshold
-		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) || (rule.Metric == string(MetricBalanceLow) && value <= config.Threshold) || (rule.Metric != string(MetricBalanceLow) && value >= config.Threshold) {
+		isBalance := rule.Metric == string(MetricBalanceLow) || rule.Metric == string(MetricUserBalanceLow)
+		if value < 0 || math.IsNaN(value) || math.IsInf(value, 0) || (isBalance && value <= config.Threshold) || (!isBalance && value >= config.Threshold) {
 			return errors.New("恢复阈值需要留出滞回区间：余额高于触发阈值，其余指标低于触发阈值")
 		}
 	}

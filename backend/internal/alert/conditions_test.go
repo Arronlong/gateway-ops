@@ -41,6 +41,25 @@ func TestEvaluateRateChangeUsesAbsolutePercentage(t *testing.T) {
 	}
 }
 
+func TestEvaluateChannelRateChangeUsesDirectPercentageObservation(t *testing.T) {
+	rule := RuleSpec{Metric: MetricChannelRateChange, Threshold: 20}
+	result := EvaluateCondition(rule, Observation{Value: 25, Valid: true}, nil)
+	if result.Unknown || !result.Violated {
+		t.Fatalf("channel rate-change samples are direct percentages: %+v", result)
+	}
+}
+
+func TestUserBalanceLowUsesBalanceThresholdAndRecovery(t *testing.T) {
+	recovery := 20.0
+	rule := RuleSpec{Metric: MetricUserBalanceLow, Threshold: 10, RecoveryThreshold: &recovery}
+	if result := EvaluateCondition(rule, Observation{Value: 8, Valid: true}, nil); result.Unknown || !result.Violated {
+		t.Fatalf("user balance below threshold should violate: %+v", result)
+	}
+	if result := EvaluateCondition(rule, Observation{Value: 15, Valid: true}, nil); result.Violated || !result.InRecoveryBand {
+		t.Fatalf("user balance inside hysteresis band should recover gradually: %+v", result)
+	}
+}
+
 func TestEvaluateSpendWindowRequiresMinimumRequests(t *testing.T) {
 	rule := RuleSpec{Metric: MetricAccountSpend, Threshold: 30, MinRequests: 3}
 	result := EvaluateCondition(rule, Observation{Value: 40, RequestCount: 2, Valid: true}, nil)

@@ -42,6 +42,30 @@ func (r *Rates) ListOwnedByChannel(channelID uint) ([]RateSnapshot, error) {
 	return list, nil
 }
 
+func (r *Rates) DistinctOwnedModelsByChannels(channelIDs []uint) (map[uint][]string, error) {
+	result := make(map[uint][]string, len(channelIDs))
+	if len(channelIDs) == 0 {
+		return result, nil
+	}
+	type row struct {
+		ChannelID uint
+		ModelName string
+	}
+	var rows []row
+	err := r.db.Model(&RateSnapshot{}).
+		Select("channel_id, model_name").
+		Where("channel_id IN ? AND source <> ?", channelIDs, RateSnapshotSourceRelayAccount).
+		Order("channel_id ASC, model_name ASC").
+		Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range rows {
+		result[item.ChannelID] = append(result[item.ChannelID], item.ModelName)
+	}
+	return result, nil
+}
+
 func (r *Rates) FindByID(id uint, channelID uint) (*RateSnapshot, error) {
 	var snapshot RateSnapshot
 	if err := r.db.Where("id = ? AND channel_id = ?", id, channelID).First(&snapshot).Error; err != nil {
@@ -251,6 +275,18 @@ func (r *Rates) ListOwnedChangesSince(since time.Time, limit int) ([]RateChangeL
 		Order("changes.changed_at DESC, changes.id DESC").
 		Limit(limit).
 		Scan(&list).Error
+	return list, err
+}
+
+func (r *Rates) ListOwnedChangesByChannelSince(channelID uint, since time.Time) ([]RateChangeLog, error) {
+	var list []RateChangeLog
+	err := r.db.Table("rate_change_logs AS changes").
+		Select("changes.*").
+		Joins("JOIN rate_snapshots AS snapshots ON snapshots.channel_id = changes.channel_id AND snapshots.model_name = changes.model_name").
+		Where("snapshots.source <> ?", RateSnapshotSourceRelayAccount).
+		Where("changes.channel_id = ? AND changes.changed_at >= ? AND changes.old_ratio IS NOT NULL AND changes.old_ratio <> changes.new_ratio", channelID, since).
+		Order("changes.changed_at DESC, changes.id DESC").
+		Find(&list).Error
 	return list, err
 }
 

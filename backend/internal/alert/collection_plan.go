@@ -17,7 +17,9 @@ func (s *Service) CollectionPlan(kind string) (needed bool, stationIDs []uint, e
 	ids := map[uint]bool{}
 	all := false
 	for _, rule := range rules {
-		matches := (kind == "rate" && rule.Metric == string(MetricRateChange)) || (kind == "balance" && rule.Metric == string(MetricBalanceLow)) || (kind == "usage" && rule.Metric != string(MetricRateChange) && rule.Metric != string(MetricBalanceLow))
+		matches := (kind == "rate" && rule.TargetType == string(TargetRelayAccount) && rule.Metric == string(MetricRateChange)) ||
+			(kind == "balance" && rule.Metric == string(MetricBalanceLow)) ||
+			(kind == "usage" && (rule.Metric == string(MetricAccountSpend) || rule.Metric == string(MetricAccountStability) || rule.Metric == string(MetricUserSpend) || rule.Metric == string(MetricUserMultiIP)))
 		if !matches {
 			continue
 		}
