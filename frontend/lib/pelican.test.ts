@@ -2,7 +2,13 @@ import assert from "node:assert/strict"
 import test from "node:test"
 import vm from "node:vm"
 // @ts-expect-error Node 22
-import { defaultPelicanConfig, pelicanViewport, fitPelicanArtwork, createPelicanDocument, pelicanRunOptions } from "./pelican.ts"
+import { defaultPelicanConfig, pelicanViewport, fitPelicanArtwork, createPelicanDocument, pelicanRunOptions, pelicanSchedules } from "./pelican.ts"
+
+test("定时测智的每小时选项使用统一的数量文案", () => {
+ assert.equal(pelicanSchedules.find(item => item.value === "0 * * * *")?.label, "每 1 小时")
+ assert.equal(pelicanSchedules.find(item => item.value === "0 */2 * * *")?.label, "每 2 小时")
+ assert.equal(pelicanSchedules.find(item => item.value === "0 */6 * * *")?.label, "每 6 小时")
+})
 test("账号测智只保留默认关闭的开关",()=>{
  const config=defaultPelicanConfig()
  assert.deepEqual(config,{enabled:false})

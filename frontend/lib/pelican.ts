@@ -11,7 +11,7 @@ export function pelicanGroupLabels(result: Pick<PelicanResult,"upstream_group_na
 
 export const pelicanSchedules = [
  {value:"*/15 * * * *",label:"每 15 分钟"}, {value:"*/30 * * * *",label:"每 30 分钟"},
- {value:"0 * * * *",label:"每小时"}, {value:"0 */2 * * *",label:"每 2 小时"},
+ {value:"0 * * * *",label:"每 1 小时"}, {value:"0 */2 * * *",label:"每 2 小时"},
  {value:"0 */6 * * *",label:"每 6 小时"}, {value:"0 9 * * *",label:"每天 9:00"},
 ]
 export const pelicanEfforts: Record<string,string> = {none:"\u65e0",minimal:"\u6700\u4f4e",low:"\u4f4e",medium:"\u4e2d",high:"\u9ad8",xhigh:"\u6781\u9ad8",max:"\u6700\u9ad8",ultra:"\u8d85\u9ad8"}
