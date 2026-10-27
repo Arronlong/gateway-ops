@@ -102,7 +102,6 @@ function MonitorRow({ group, range, stationID, pelican }: { group: PublicGroupMo
           <span className="inline-flex items-center rounded-md border border-brand/20 bg-brand/5 px-2.5 py-1.5 font-mono text-xs font-semibold tabular-nums text-brand">成功率 {successRate(group)}</span>
         </div>
         </div>
-        <RecentRequestMetricsDisplay metrics={publicGroupRecentMetrics(group.recent_metrics)} showSampleCount={false} />
       </div>
 
       <div className="mt-4 rounded-md bg-muted/35 px-2 py-1.5">
@@ -142,6 +141,9 @@ function MonitorRow({ group, range, stationID, pelican }: { group: PublicGroupMo
         />
       </div>
 
+      <div className="mt-3">
+        <RecentRequestMetricsDisplay metrics={publicGroupRecentMetrics(group.recent_metrics)} showSampleCount={false} />
+      </div>
       <PublicGroupPelicanResults stationID={stationID} groupID={group.external_id} query={pelican}/>
     </div>
   </article>

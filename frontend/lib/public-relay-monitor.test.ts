@@ -98,6 +98,8 @@ test("public monitor cards do not inject failure-summary explanations into recen
   assert.doesNotMatch(page, /failure_summary/)
   assert.match(page, /formatTime\(group\.latest_call_at\)/)
   assert.match(page, /recentSamples=\{group\.calls\}/)
+  assert.ok(page.indexOf("title=\"时间稳定性\"") < page.indexOf("<RecentRequestMetricsDisplay metrics={publicGroupRecentMetrics"))
+  assert.ok(page.indexOf("<RecentRequestMetricsDisplay metrics={publicGroupRecentMetrics") < page.indexOf("<PublicGroupPelicanResults"))
 })
 
 test("public recent-call tooltips use each call latency instead of only its bucket", () => {
