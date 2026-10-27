@@ -130,7 +130,7 @@ func TestPublicGroupMonitorRangeCacheIsolationAndInvalidation(t *testing.T) {
 	now := time.Now()
 	s := &Service{publicMonitorCache: make(map[publicMonitorCacheKey]publicMonitorCacheEntry)}
 	for _, rangeName := range []string{"24h", "7d"} {
-		s.storePublicMonitor(publicMonitorCacheKey{stationID: 3, rangeName: rangeName}, PublicGroupMonitor{StationID: 3, StationName: rangeName, Range: rangeName}, now)
+		s.storePublicMonitor(publicMonitorCacheKey{stationID: 3, rangeName: rangeName, metricsHours: 1, metricsLimit: 60}, PublicGroupMonitor{StationID: 3, StationName: rangeName, Range: rangeName}, now)
 	}
 	s.storePublicMonitor(publicMonitorCacheKey{stationID: 4, rangeName: "24h"}, PublicGroupMonitor{StationID: 4, Range: "24h"}, now)
 	for _, rangeName := range []string{"24h", "7d"} {

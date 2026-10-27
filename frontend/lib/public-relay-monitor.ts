@@ -1,4 +1,5 @@
-import type { PublicGroupMonitorView } from "./api-types"
+import type { PublicGroupMonitorView, PublicGroupRecentMetrics } from "./api-types"
+import type { RecentRequestMetricValues } from "./recent-request-metrics"
 
 export const publicRelayMonitorRanges = [
   { value: "today", label: "今天" },
@@ -9,7 +10,18 @@ export const publicRelayMonitorRanges = [
 
 export type PublicRelayMonitorRange = typeof publicRelayMonitorRanges[number]["value"]
 export const defaultPublicRelayMonitorRange: PublicRelayMonitorRange = "24h"
-export const publicRelayMonitorCacheVersion = 2
+export const publicRelayMonitorCacheVersion = 3
+
+export function publicGroupRecentMetrics(metrics: PublicGroupRecentMetrics | undefined): RecentRequestMetricValues {
+  return {
+    windowHours: metrics?.window_hours ?? 1, sampleLimit: metrics?.sample_limit ?? 60, sampleCount: metrics?.sample_count ?? 0,
+    latestAt: metrics?.latest_at ?? null, cacheHitRate: metrics?.cache_hit_rate ?? null, successRate: metrics?.success_rate ?? null,
+    tps: metrics?.tps ?? null, tpsScore: metrics?.tps_score ?? null, successCount: metrics?.success_count ?? 0,
+    successAttemptCount: metrics?.success_attempt_count ?? 0, cacheInputTokens: metrics?.cache_input_tokens ?? 0,
+    cacheReadTokens: metrics?.cache_read_tokens ?? 0, cacheCreationTokens: metrics?.cache_creation_tokens ?? 0,
+    tpsOutputTokens: metrics?.tps_output_tokens ?? 0, tpsDurationSeconds: metrics?.tps_duration_seconds ?? 0, tpsModels: metrics?.tps_models ?? [],
+  }
+}
 
 export function publicRelayMonitorPath(stationID: number, range: PublicRelayMonitorRange) {
   return `/public/relay-stations/${stationID}/group-monitor?range=${range}`

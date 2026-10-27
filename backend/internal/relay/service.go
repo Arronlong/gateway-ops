@@ -1355,6 +1355,11 @@ type remoteBatchUpdateResult struct {
 }
 
 type remoteUsage struct {
+	IsAuxiliary           bool     `json:"is_auxiliary"`
+	IsProbe               bool     `json:"is_probe"`
+	IsCyber               bool     `json:"is_cyber"`
+	InProgress            bool     `json:"in_progress"`
+	AttemptStatus         string   `json:"attempt_status"`
 	CacheKnown            bool     `json:"-"`
 	ID                    int64    `json:"id"`
 	RequestID             string   `json:"request_id"`

@@ -61,6 +61,7 @@ type PublicGroupMonitorGroup struct {
 	FailureSummary      string                            `json:"failure_summary,omitempty"`
 	Calls               []PublicGroupMonitorCall          `json:"calls"`
 	LatencyBuckets      []PublicGroupMonitorLatencyBucket `json:"latency_buckets"`
+	RecentMetrics       PublicGroupRecentMetrics          `json:"recent_metrics"`
 }
 
 type PublicGroupMonitorCall struct {
@@ -83,8 +84,10 @@ type PublicGroupMonitorLatencyBucket struct {
 }
 
 type publicMonitorCacheKey struct {
-	stationID uint
-	rangeName string
+	stationID    uint
+	rangeName    string
+	metricsHours int
+	metricsLimit int
 }
 
 type publicMonitorCacheEntry struct {
@@ -114,6 +117,11 @@ const (
 )
 
 type remoteRequestError struct {
+	ID                 int64  `json:"id"`
+	RequestType        string `json:"request_type"`
+	IsAuxiliary        bool   `json:"is_auxiliary"`
+	IsProbe            bool   `json:"is_probe"`
+	IsCyber            bool   `json:"is_cyber"`
 	RequestID          string `json:"request_id"`
 	ClientRequestID    string `json:"client_request_id"`
 	CreatedAt          string `json:"created_at"`
@@ -148,11 +156,12 @@ const (
 )
 
 type monitorFetchResult struct {
-	index  int
-	kind   monitorFetchKind
-	usage  []monitorEvent
-	errors []monitorEvent
-	err    error
+	index   int
+	kind    monitorFetchKind
+	usage   []monitorEvent
+	errors  []monitorEvent
+	err     error
+	samples []groupMetricSample
 }
 
 func (s *Service) invalidatePublicMonitor(stationID uint) {
@@ -344,7 +353,16 @@ func (s *Service) PublicGroupMonitor(ctx context.Context, stationID uint) (Publi
 // 按时间范围读取最近调用，日历区间与渠道管理使用相同的本地时区。
 func (s *Service) PublicGroupMonitorForRange(ctx context.Context, stationID uint, rawRange string) (PublicGroupMonitor, error) {
 	rangeName, since, now := publicGroupMonitorWindowAt(time.Now(), rawRange)
-	cacheKey := publicMonitorCacheKey{stationID: stationID, rangeName: rangeName}
+	metricsHours, metricsLimit, err := s.groupMetricsSettings()
+	if err != nil {
+		return PublicGroupMonitor{}, err
+	}
+	cacheKey := publicMonitorCacheKey{stationID: stationID, rangeName: rangeName, metricsHours: metricsHours, metricsLimit: metricsLimit}
+	metricsSince := now.Add(-45 * time.Second).Add(-time.Duration(metricsHours) * time.Hour)
+	fetchSince := since
+	if metricsSince.Before(fetchSince) {
+		fetchSince = metricsSince
+	}
 	s.publicMonitorMu.Lock()
 	if cached, ok := s.publicMonitorCache[cacheKey]; ok && now.Before(cached.ExpiresAt) {
 		s.publicMonitorMu.Unlock()
@@ -396,9 +414,15 @@ func (s *Service) PublicGroupMonitorForRange(ctx context.Context, stationID uint
 				group := groups[monitored[job.index]]
 				result := monitorFetchResult{index: job.index, kind: job.kind}
 				if job.kind == monitorFetchUsage {
-					result.usage, result.err = fetchGroupMonitorUsageEvents(ctx, s, station.BaseURL, apiKey, group.ExternalID, since, now)
+					var items []remoteUsage
+					items, result.err = fetchGroupMonitorUsagePages(ctx, s, station.BaseURL, apiKey, group.ExternalID, fetchSince, now)
+					result.usage = usageMonitorEvents(items)
+					result.samples = groupMetricUsageSamples(items)
 				} else {
-					result.errors, result.err = fetchGroupMonitorErrorEvents(ctx, s, station.BaseURL, apiKey, group.ExternalID, since, now)
+					var items []remoteRequestError
+					items, result.err = fetchGroupMonitorErrorPages(ctx, s, station.BaseURL, apiKey, group.ExternalID, fetchSince, now)
+					result.errors = errorMonitorEvents(items, group.ExternalID)
+					result.samples = groupMetricErrorSamples(items, group.ExternalID)
 				}
 				results <- result
 			}
@@ -420,10 +444,12 @@ func (s *Service) PublicGroupMonitorForRange(ctx context.Context, stationID uint
 
 	perGroup := make([]struct {
 		usage, errors []monitorEvent
+		samples       []groupMetricSample
 		usageOK       bool
 		errorsOK      bool
 	}, len(monitored))
 	for result := range results {
+		perGroup[result.index].samples = append(perGroup[result.index].samples, result.samples...)
 		if result.kind == monitorFetchUsage {
 			perGroup[result.index].usageOK = result.err == nil
 			perGroup[result.index].usage = result.usage
@@ -435,6 +461,7 @@ func (s *Service) PublicGroupMonitorForRange(ctx context.Context, stationID uint
 	for index, groupIndex := range monitored {
 		group := groups[groupIndex]
 		item := buildPublicGroupMonitorGroupForWindow(group, perGroup[index].usage, perGroup[index].errors, perGroup[index].usageOK && perGroup[index].errorsOK, now, since, now)
+		item.RecentMetrics = buildGroupRecentMetrics(perGroup[index].samples, now, metricsHours, metricsLimit, perGroup[index].usageOK && perGroup[index].errorsOK)
 		view.Groups = append(view.Groups, item)
 		switch item.Status {
 		case "available":

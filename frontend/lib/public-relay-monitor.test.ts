@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
 import test from "node:test"
 // @ts-expect-error Node 22 native TypeScript tests require the explicit .ts extension.
-import { defaultPublicRelayMonitorRange, isPublicRelayMonitorViewForSelection, publicRelayMonitorCacheKey, publicRelayMonitorPath, publicRelayMonitorRanges, resolvePublicRelayMonitorSelection } from "./public-relay-monitor.ts"
+import { defaultPublicRelayMonitorRange, isPublicRelayMonitorViewForSelection, publicRelayMonitorCacheKey, publicRelayMonitorPath, publicRelayMonitorRanges, resolvePublicRelayMonitorSelection, publicGroupRecentMetrics } from "./public-relay-monitor.ts"
 
 test("single station auto-selects from the generic monitor entry", () => {
   assert.deepEqual(
@@ -43,7 +43,34 @@ test("browser cache keys isolate ranges and stations and retire the old schema",
   const current = publicRelayMonitorCacheKey(3, "24h")
   assert.notEqual(current, publicRelayMonitorCacheKey(3, "7d"))
   assert.notEqual(current, publicRelayMonitorCacheKey(8, "24h"))
-  assert.match(current, /^gatewayops:group-monitor:v2:/)
+  assert.match(current, /^gatewayops:group-monitor:v3:/)
+})
+
+test("group aggregate values reuse channel ring inputs without averaging account percentages", () => {
+  const metrics = publicGroupRecentMetrics({
+    window_hours: 6, sample_limit: 200, sample_count: 80, latest_at: "2026-10-27T02:00:00Z",
+    cache_hit_rate: 0.8, success_rate: 0.5, tps: 20, tps_score: 40,
+    success_count: 40, success_attempt_count: 80, cache_input_tokens: 20, cache_read_tokens: 80, cache_creation_tokens: 0,
+    tps_output_tokens: 200, tps_duration_seconds: 10, tps_models: ["text"],
+  })
+  assert.equal(metrics.windowHours, 6)
+  assert.equal(metrics.sampleLimit, 200)
+  assert.equal(metrics.sampleCount, 80)
+  assert.equal(metrics.cacheHitRate, 0.8)
+  assert.equal(metrics.successRate, 0.5)
+  assert.equal(metrics.tps, 20)
+  assert.equal(metrics.tpsScore, 40)
+  assert.equal(metrics.successAttemptCount, 80)
+  assert.deepEqual(metrics.tpsModels, ["text"])
+})
+
+test("missing public group aggregates stay unknown instead of displaying fabricated zeroes", () => {
+  const metrics = publicGroupRecentMetrics(undefined)
+  assert.equal(metrics.cacheHitRate, null)
+  assert.equal(metrics.successRate, null)
+  assert.equal(metrics.tps, null)
+  assert.equal(metrics.sampleCount, 0)
+  assert.deepEqual(metrics.tpsModels, [])
 })
 
 test("only matching station and range payloads are accepted", () => {

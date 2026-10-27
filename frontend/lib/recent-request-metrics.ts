@@ -20,6 +20,11 @@ export interface RecentRequestSample {
   attempt_status?: "in_progress" | "completed" | "failed"
 }
 
+export type RecentRequestMetricValues = Pick<ReturnType<typeof recentRequestMetrics>,
+  "windowHours" | "sampleLimit" | "sampleCount" | "cacheHitRate" | "successRate" | "tps" | "tpsScore" |
+  "successCount" | "successAttemptCount" | "cacheInputTokens" | "cacheReadTokens" | "cacheCreationTokens" |
+  "tpsOutputTokens" | "tpsDurationSeconds" | "tpsModels"> & { latestAt: string | null }
+
 const DEFAULT_WINDOW_HOURS = 1
 const MIN_WINDOW_HOURS = 1
 const MAX_WINDOW_HOURS = 24

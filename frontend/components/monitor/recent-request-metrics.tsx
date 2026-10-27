@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { recentRequestMetrics, type RecentRequestSample } from "@/lib/recent-request-metrics"
+import { recentRequestMetrics, type RecentRequestSample, type RecentRequestMetricValues } from "@/lib/recent-request-metrics"
 
 function Ring({rate, label, color, detail}: {rate: number | null; label: string; color: string; detail: string}) {
   const value = rate == null ? "—" : `${(rate * 100).toFixed(rate === 1 || rate === 0 ? 0 : 1)}%`
@@ -21,6 +21,10 @@ export function RecentRequestMetrics({samples, loading = false, windowHours = 1,
   const [now, setNow] = useState(Date.now)
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30000); return () => window.clearInterval(timer) }, [])
   const metrics = recentRequestMetrics(samples, now, windowHours, sampleLimit)
+  return <RecentRequestMetricsDisplay metrics={metrics} loading={loading} />
+}
+
+export function RecentRequestMetricsDisplay({metrics, loading = false, showSampleCount = true}: {metrics: RecentRequestMetricValues; loading?: boolean; showSampleCount?: boolean}) {
   const latestText = metrics.latestAt ? `\n最新调用：${new Date(metrics.latestAt).toLocaleString("zh-CN", {hour12: false})}` : ""
   const windowText = `最近 ${metrics.windowHours} 小时，截止当前时间前 45 秒，最多 ${metrics.sampleLimit} 次调用。当前 ${metrics.sampleCount} 次。${latestText}`
   const tpsValue = metrics.tps == null ? "不可用" : `${Number(metrics.tps.toFixed(1)).toLocaleString("zh-CN")} Token/s`
@@ -31,6 +35,6 @@ export function RecentRequestMetrics({samples, loading = false, windowHours = 1,
     <Ring rate={metrics.cacheHitRate} label={`${metrics.windowHours}h 缓存命中`} color="#38bdf8" detail={`${windowText}\n缓存命中率 = 缓存读取 Token ÷ (输入 Token + 缓存读取 Token + 缓存创建 Token)。\n${metrics.cacheReadTokens.toLocaleString("zh-CN")} ÷ (${metrics.cacheInputTokens.toLocaleString("zh-CN")} + ${metrics.cacheReadTokens.toLocaleString("zh-CN")} + ${metrics.cacheCreationTokens.toLocaleString("zh-CN")}) × 100% = ${metrics.cacheHitRate == null ? "未知" : `${(metrics.cacheHitRate * 100).toFixed(1)}%`}。\n该指标按 Token 数量加权，不按请求次数加权。\n未报告缓存字段的普通输入会计入分母；没有有效 Token 时显示未知。`}/>
     <Ring rate={metrics.successRate} label={`${metrics.windowHours}h 重试感知成功率`} color="#34d399" detail={`${windowText}\n计算方法：成功次数 ÷ 实际尝试次数。\n成功 ${metrics.successCount} / ${metrics.successAttemptCount} 次。\n一次失败后重试成功，失败和成功分别计入。\n辅助调用、探测和已确认的 cyber 请求不计入成功或失败，也不计入分母。\n进行中的文字尝试保留在分母内；图片等待完成计入。无样本显示未知。`}/>
     <TpsRing tps={metrics.tps} score={metrics.tpsScore} label={`${metrics.windowHours}h TPS`} detail={tpsDetail}/>
-    <span className="text-[10px] text-muted-foreground">{loading && !samples.length ? "读取中…" : `${metrics.windowHours}h · ${metrics.sampleCount}/${metrics.sampleLimit} 次`}</span>
+    {showSampleCount ? <span className="text-[10px] text-muted-foreground">{loading && !metrics.sampleCount ? "读取中…" : `${metrics.windowHours}h · ${metrics.sampleCount}/${metrics.sampleLimit} 次`}</span> : null}
   </div>
 }

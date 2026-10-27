@@ -1054,6 +1054,7 @@ export interface PublicGroupMonitorCall {
 }
 
 export interface PublicGroupMonitorGroup {
+	recent_metrics?: PublicGroupRecentMetrics
 	external_id: number
 	name: string
 	description?: string
@@ -1081,6 +1082,25 @@ export interface PublicGroupMonitorSummary {
 	idle: number
 	disabled: number
 	unknown: number
+}
+
+export interface PublicGroupRecentMetrics {
+  window_hours: number
+  sample_limit: number
+  sample_count: number
+  latest_at: string | null
+  cache_hit_rate: number | null
+  success_rate: number | null
+  tps: number | null
+  tps_score: number | null
+  success_count: number
+  success_attempt_count: number
+  cache_input_tokens: number
+  cache_read_tokens: number
+  cache_creation_tokens: number
+  tps_output_tokens: number
+  tps_duration_seconds: number
+  tps_models: string[]
 }
 
 export interface PublicGroupMonitorView {
