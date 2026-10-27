@@ -87,8 +87,9 @@ function successRate(group: PublicGroupMonitorGroup) {
 function MonitorRow({ group, range, stationID, pelican }: { group: PublicGroupMonitorGroup; range: PublicRelayMonitorRange; stationID:number; pelican:QueryState<PelicanGallery> }) {
   return <article className="group overflow-hidden rounded-[5px] border border-border/80 bg-card shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-brand/40 hover:shadow-md">
     <div className="p-4 sm:p-5">
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1 basis-36">
+      <div className="flex min-w-0 flex-col gap-2">
+        <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-2.5">
             <h2 className="min-w-0 truncate text-base font-semibold text-foreground" title={group.name}>{group.name}</h2>
             <span className="inline-flex shrink-0 items-center rounded-md border border-brand/20 bg-brand/5 px-2 py-1 font-mono text-[11px] font-semibold tabular-nums text-brand">倍率 {group.rate_multiplier.toFixed(3)}</span>
@@ -96,11 +97,12 @@ function MonitorRow({ group, range, stationID, pelican }: { group: PublicGroupMo
           </div>
           <p className="mt-2 line-clamp-2 text-xs leading-5 text-muted-foreground" title={group.description || "暂无描述"}>{group.description || "暂无描述"}</p>
         </div>
-        <RecentRequestMetricsDisplay metrics={publicGroupRecentMetrics(group.recent_metrics)} showSampleCount={false} />
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-nowrap items-center gap-2">
           <Status status={group.status} />
           <span className="inline-flex items-center rounded-md border border-brand/20 bg-brand/5 px-2.5 py-1.5 font-mono text-xs font-semibold tabular-nums text-brand">成功率 {successRate(group)}</span>
         </div>
+        </div>
+        <RecentRequestMetricsDisplay metrics={publicGroupRecentMetrics(group.recent_metrics)} showSampleCount={false} />
       </div>
 
       <div className="mt-4 rounded-md bg-muted/35 px-2 py-1.5">
