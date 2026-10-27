@@ -86,21 +86,21 @@ export function MonitorHeader() {
 
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
-      <div className="flex h-14 w-full min-w-0 items-center gap-2 px-6 sm:gap-4">
+      <div className="flex min-h-14 w-full min-w-0 items-center gap-2 px-6 py-1.5 sm:gap-4">
         {/* left: logo + title */}
         <div className="flex min-w-0 items-center gap-2.5">
           <ProductIcon className="size-8 rounded-lg"/>
           <span className="truncate text-base font-semibold tracking-tight text-foreground">{branding.product_name}</span>
         </div>
 
-        <nav className="hidden min-w-0 flex-1 flex-nowrap items-center justify-start gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden xl:flex xl:justify-center" aria-label="主菜单">
+        <nav className="hidden min-w-0 flex-1 flex-wrap items-center justify-center gap-1 whitespace-nowrap xl:flex" aria-label="主菜单">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.end}
               className={({ isActive }) => cn(
-                "inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors",
+                "inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-sm transition-colors",
                 isActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
               )}
             >
@@ -111,7 +111,7 @@ export function MonitorHeader() {
           {operationsManagementEnabled ? (
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <button type="button" className={cn("inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors hover:bg-muted/60 hover:text-foreground", operationActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")} aria-label="运营管理菜单">
+                <button type="button" className={cn("inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-sm transition-colors hover:bg-muted/60 hover:text-foreground", operationActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")} aria-label="运营管理菜单">
                   <WalletCards className="size-3.5" />运营管理<ChevronDown className="size-3" />
                 </button>
               </DropdownMenuTrigger>
@@ -124,7 +124,7 @@ export function MonitorHeader() {
           ) : null}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" aria-label="状态监控菜单">
+              <button type="button" className="inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground" aria-label="状态监控菜单">
                 <Activity className="size-3.5" />状态监控<ChevronDown className="size-3" />
               </button>
             </DropdownMenuTrigger>
@@ -141,7 +141,7 @@ export function MonitorHeader() {
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className={cn("inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-3 text-sm transition-colors hover:bg-muted/60 hover:text-foreground", systemActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")} aria-label="系统设置菜单"><Settings2 className="size-3.5" />系统设置<ChevronDown className="size-3" /></button>
+              <button type="button" className={cn("inline-flex h-9 shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 text-sm transition-colors hover:bg-muted/60 hover:text-foreground", systemActive ? "bg-muted font-medium text-foreground" : "text-muted-foreground")} aria-label="系统设置菜单"><Settings2 className="size-3.5" />系统设置<ChevronDown className="size-3" /></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-44"><DropdownMenuLabel>系统设置</DropdownMenuLabel><DropdownMenuSeparator />{systemItems.map((item) => <DropdownMenuItem key={item.to} asChild><Link to={item.to}><item.icon />{item.label}</Link></DropdownMenuItem>)}</DropdownMenuContent>
           </DropdownMenu>
