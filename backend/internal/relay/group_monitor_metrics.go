@@ -109,7 +109,7 @@ func groupMetricErrorSamples(items []remoteRequestError, groupID int64) []groupM
 		if model == "" {
 			model = item.UpstreamModel
 		}
-		usage := remoteUsage{Model: model, RequestType: item.RequestType, StatusCode: item.StatusCode, IsAuxiliary: item.IsAuxiliary, IsProbe: item.IsProbe, IsCyber: item.IsCyber}
+		usage := remoteUsage{Model: model, RequestType: string(item.RequestType), StatusCode: item.StatusCode, IsAuxiliary: item.IsAuxiliary, IsProbe: item.IsProbe, IsCyber: item.IsCyber}
 		if item.DurationMS != nil {
 			usage.DurationMS = *item.DurationMS
 		}

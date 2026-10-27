@@ -2,6 +2,7 @@ package relay
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -116,28 +117,51 @@ const (
 	monitorFailureUpstream         = "上游响应异常"
 )
 
+type remoteRequestType string
+
+func (t *remoteRequestType) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		*t = ""
+		return nil
+	}
+	if len(data) > 0 && data[0] == '"' {
+		var value string
+		if err := json.Unmarshal(data, &value); err != nil {
+			return err
+		}
+		*t = remoteRequestType(value)
+		return nil
+	}
+	var value json.Number
+	if err := json.Unmarshal(data, &value); err != nil {
+		return err
+	}
+	*t = remoteRequestType(value.String())
+	return nil
+}
+
 type remoteRequestError struct {
-	ID                 int64  `json:"id"`
-	RequestType        string `json:"request_type"`
-	IsAuxiliary        bool   `json:"is_auxiliary"`
-	IsProbe            bool   `json:"is_probe"`
-	IsCyber            bool   `json:"is_cyber"`
-	RequestID          string `json:"request_id"`
-	ClientRequestID    string `json:"client_request_id"`
-	CreatedAt          string `json:"created_at"`
-	ErrorPhase         string `json:"error_phase"`
-	Phase              string `json:"phase"`
-	Type               string `json:"type"`
-	Message            string `json:"message"`
-	ErrorOwner         string `json:"error_owner"`
-	StatusCode         int    `json:"status_code"`
-	Platform           string `json:"platform"`
-	Model              string `json:"model"`
-	RequestedModel     string `json:"requested_model"`
-	UpstreamModel      string `json:"upstream_model"`
-	GroupID            int64  `json:"group_id"`
-	DurationMS         *int64 `json:"duration_ms"`
-	TimeToFirstTokenMS *int64 `json:"time_to_first_token_ms"`
+	ID                 int64             `json:"id"`
+	RequestType        remoteRequestType `json:"request_type"`
+	IsAuxiliary        bool              `json:"is_auxiliary"`
+	IsProbe            bool              `json:"is_probe"`
+	IsCyber            bool              `json:"is_cyber"`
+	RequestID          string            `json:"request_id"`
+	ClientRequestID    string            `json:"client_request_id"`
+	CreatedAt          string            `json:"created_at"`
+	ErrorPhase         string            `json:"error_phase"`
+	Phase              string            `json:"phase"`
+	Type               string            `json:"type"`
+	Message            string            `json:"message"`
+	ErrorOwner         string            `json:"error_owner"`
+	StatusCode         int               `json:"status_code"`
+	Platform           string            `json:"platform"`
+	Model              string            `json:"model"`
+	RequestedModel     string            `json:"requested_model"`
+	UpstreamModel      string            `json:"upstream_model"`
+	GroupID            int64             `json:"group_id"`
+	DurationMS         *int64            `json:"duration_ms"`
+	TimeToFirstTokenMS *int64            `json:"time_to_first_token_ms"`
 }
 
 type remoteRequestErrorPage struct {

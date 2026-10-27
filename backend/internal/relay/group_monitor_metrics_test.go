@@ -49,6 +49,20 @@ func TestGroupRecentMetricsMatchChannelWeighting(t *testing.T) {
 	}
 }
 
+func TestRemoteRequestErrorAcceptsNumericAndStringRequestTypes(t *testing.T) {
+	var page remoteRequestErrorPage
+	raw := `{"items":[{"request_type":2,"id":1},{"request_type":"probe","id":2},{"request_type":null,"id":3},{"id":4}]}`
+	if err := json.Unmarshal([]byte(raw), &page); err != nil {
+		t.Fatalf("decode mixed request types: %v", err)
+	}
+	if len(page.Items) != 4 || string(page.Items[0].RequestType) != "2" || string(page.Items[1].RequestType) != "probe" || page.Items[2].RequestType != "" || page.Items[3].RequestType != "" {
+		t.Fatalf("request types = %+v", page.Items)
+	}
+	if err := json.Unmarshal([]byte(`{"items":[{"request_type":true}]}`), &page); err == nil {
+		t.Fatal("invalid request type must not be silently accepted")
+	}
+}
+
 func TestPublicGroupRecentMetricsFollowSettingsAndKeepHistoryRange(t *testing.T) {
 	now := time.Now().UTC()
 	var requests atomic.Int32
@@ -69,7 +83,7 @@ func TestPublicGroupRecentMetricsFollowSettingsAndKeepHistoryRange(t *testing.T)
 			if err != nil || start.After(now.Add(-24*time.Hour)) {
 				t.Errorf("metric window coverage too narrow: %s", r.URL.String())
 			}
-			data = remoteRequestErrorPage{Items: []remoteRequestError{{ID: 4, CreatedAt: now.Add(-3 * time.Minute).Format(time.RFC3339), ErrorOwner: "provider", StatusCode: 502, Message: "Recovered upstream error after retry"}}}
+			data = map[string]any{"items": []map[string]any{{"id": 4, "request_type": 2, "created_at": now.Add(-3 * time.Minute).Format(time.RFC3339), "error_owner": "provider", "status_code": 502, "message": "Recovered upstream error after retry"}}}
 		} else {
 			t.Errorf("unexpected request: %s", r.URL.String())
 			http.NotFound(w, r)
