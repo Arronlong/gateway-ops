@@ -22,6 +22,7 @@ func normalizedPelicanHistoryCount(count int) int {
 }
 
 type PelicanConfig struct {
+	ChannelID         uint       `gorm:"not null;default:0" json:"-"`
 	ID                uint       `gorm:"primaryKey" json:"id"`
 	RelayStationID    uint       `gorm:"not null;uniqueIndex:idx_pelican_account" json:"relay_station_id"`
 	AccountExternalID int64      `gorm:"not null;uniqueIndex:idx_pelican_account" json:"account_external_id"`
@@ -97,7 +98,7 @@ func (r *RelayStations) SavePelicanConfig(config *PelicanConfig) error {
 		if err := tx.Where("relay_station_id = ? AND external_id = ?", config.RelayStationID, config.AccountExternalID).First(&account).Error; err != nil {
 			return err
 		}
-		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "relay_station_id"}, {Name: "account_external_id"}}, DoUpdates: clause.AssignmentColumns([]string{"enabled", "model", "prompt", "reasoning_effort", "parallel_count", "cron_expression", "next_run_at", "updated_at"})}).Create(config).Error
+		return tx.Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "relay_station_id"}, {Name: "account_external_id"}}, DoUpdates: clause.AssignmentColumns([]string{"channel_id", "enabled", "model", "prompt", "reasoning_effort", "parallel_count", "cron_expression", "next_run_at", "updated_at"})}).Create(config).Error
 	})
 }
 func (r *RelayStations) ListPelicanConfigs(stationID uint) ([]PelicanConfig, error) {
@@ -107,7 +108,7 @@ func (r *RelayStations) ListPelicanConfigs(stationID uint) ([]PelicanConfig, err
 }
 func (r *RelayStations) DuePelicanConfigs(now time.Time) ([]PelicanConfig, error) {
 	rows := make([]PelicanConfig, 0)
-	err := r.db.Table("relay_pelican_configs c").Select("c.*").Joins("JOIN relay_stations s ON s.id = c.relay_station_id AND s.deleted_at IS NULL").Joins("JOIN relay_accounts a ON a.relay_station_id = c.relay_station_id AND a.external_id = c.account_external_id").Where("(s.type = ? OR s.type = '') AND c.enabled = ? AND c.next_run_at <= ? AND (c.lease_until IS NULL OR c.lease_until <= ?)", "sub2api", true, now, now).Order("c.next_run_at ASC").Limit(8).Find(&rows).Error
+	err := r.db.Table("relay_pelican_configs c").Select("c.*").Joins("JOIN relay_stations s ON s.id = c.relay_station_id AND s.deleted_at IS NULL").Joins("JOIN relay_accounts a ON a.relay_station_id = c.relay_station_id AND a.external_id = c.account_external_id").Where("c.enabled = ? AND c.next_run_at <= ? AND (c.lease_until IS NULL OR c.lease_until <= ?)", true, now, now).Order("c.next_run_at ASC").Limit(8).Find(&rows).Error
 	return rows, err
 }
 func (r *RelayStations) ClaimPelican(configID uint, now, until, expected time.Time, scheduled bool) (bool, error) {

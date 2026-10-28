@@ -101,6 +101,7 @@ type CreateInput struct {
 	ManualBalance      float64
 	Remark             string
 	TokenCredential    string // JSON：password 模式时为空
+	PelicanAPIKey      string
 	LoginHeaders       *[]RequestKV
 	LoginParams        *[]RequestKV
 	TurnstileEnabled   bool
@@ -141,6 +142,10 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 	if in.ManualBalance < 0 {
 		return nil, errors.New("手动余额不能小于 0")
 	}
+	pelicanKeyCipher, err := encryptPelicanAPIKey(s.Cipher, in.PelicanAPIKey)
+	if err != nil {
+		return nil, err
+	}
 	remark := strings.TrimSpace(in.Remark)
 	if len(remark) > 512 {
 		return nil, errors.New("备注不能超过 512 个字符")
@@ -179,6 +184,7 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 		SiteURL:          in.SiteURL,
 		Username:         in.Username,
 		PasswordCipher:   enc,
+		PelicanKeyCipher: pelicanKeyCipher,
 		CredentialMode:   mode,
 		LoginHeadersJSON: loginHeadersJSON,
 		LoginParamsJSON:  loginParamsJSON,
@@ -227,6 +233,7 @@ type UpdateInput struct {
 	ManualBalance      *float64
 	Remark             *string
 	TokenCredential    *string // JSON
+	PelicanAPIKey      *string
 	LoginHeaders       *[]RequestKV
 	LoginParams        *[]RequestKV
 	TurnstileEnabled   *bool
@@ -239,6 +246,9 @@ type UpdateInput struct {
 func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
 	c, err := s.Channels.FindByID(id)
 	if err != nil {
+		return nil, err
+	}
+	if err := applyPelicanAPIKey(s.Cipher, c, in.PelicanAPIKey); err != nil {
 		return nil, err
 	}
 	if in.Name != nil {

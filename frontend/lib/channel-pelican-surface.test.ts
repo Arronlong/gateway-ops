@@ -29,6 +29,9 @@ test("独立页使用精简渠道标题和绘制入口，不重复配置面板",
   assert.match(page, /compact/)
   assert.doesNotMatch(page, /channelTypeLabel|group\.targets\.length.*个关联账号/)
   assert.match(panel, /<PelicanRunButton/)
+  assert.match(panel, /channelID=\{channel\.id\}/)
+  assert.match(panel, /compact&&targets\.length\?/)
+  assert.doesNotMatch(panel, /station_type==="newapi".*暂不支持读取/)
 })
 
 test("测智作品页渠道名称链接到该渠道的上游网站", () => {

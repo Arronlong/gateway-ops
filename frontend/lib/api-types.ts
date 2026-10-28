@@ -46,6 +46,7 @@ export interface Channel {
   site_url: string
   username: string
   credential_mode: CredentialMode
+	pelican_key_configured: boolean
   login_headers: RequestKV[]
   login_params: RequestKV[]
   newapi_auth_type?: "cookie" | "access_token"
@@ -716,7 +717,7 @@ export interface ChannelPelicanTarget {
 }
 
 export interface ChannelPelicanGroup {
-  channel: Pick<Channel, "id" | "name" | "type" | "site_url">
+  channel: Pick<Channel, "id" | "name" | "type" | "site_url" | "pelican_key_configured">
   targets: ChannelPelicanTarget[]
   results: PelicanLibraryItem[]
 }

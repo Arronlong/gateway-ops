@@ -21,13 +21,13 @@ import { PelicanArtwork } from "./pelican-artwork"
 
 const timeLabel=(value:string)=>new Date(value).toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"Asia/Shanghai"})
 const running=(config?:PelicanConfig)=>Boolean(config?.lease_until&&Date.parse(config.lease_until)>Date.now())
-type PelicanAccount = Pick<RelayAccountView,"external_id"|"name"> & {relay_station_id?:number}
+type PelicanAccount = Pick<RelayAccountView,"external_id"|"name"> & {relay_station_id?:number;channel_id?:number}
 type PelicanContextValue={
 	showKeyGroup:boolean
 	readOnly:boolean
  stationID:number|null; data:PelicanGallery|null; error:string|null
  open:(result:PelicanResult)=>void
-	 toggle:(account:PelicanAccount,enabled:boolean)=>void; run:(accountID:number,stationID?:number,plan?:PelicanTestPlan)=>Promise<void>
+	 toggle:(account:PelicanAccount,enabled:boolean)=>void; run:(accountID:number,stationID?:number,plan?:PelicanTestPlan,channelID?:number)=>Promise<void>
  body:(result:PelicanResult,signal:AbortSignal)=>Promise<PelicanResult>
  remove:(result:PelicanResult)=>Promise<void>; deletingID:number|null
 }
@@ -52,17 +52,17 @@ export function PelicanProvider({stationID,children,libraryQuery,galleryQuery,sc
   const timer=window.setInterval(()=>{if(!document.hidden)void refetch.current().catch(()=>{})},5000)
   return()=>window.clearInterval(timer)
  },[anyRunning,stationID])
-	const run=async(accountID:number,targetStationID=stationID??undefined,plan?:PelicanTestPlan)=>{
+	const run=async(accountID:number,targetStationID=stationID??undefined,plan?:PelicanTestPlan,channelID?:number)=>{
   if(targetStationID==null||readOnly)return
   setActionError(null)
-	try{await apiFetch(`/relay-stations/${targetStationID}/${scope==="group"?"groups":"accounts"}/${accountID}/pelican/run`,{method:"POST",...(plan?{body:JSON.stringify(plan)}:{})});await query.refetch()}
+	try{const channelQuery=channelID?`?channel_id=${channelID}`:"";await apiFetch(`/relay-stations/${targetStationID}/${scope==="group"?"groups":"accounts"}/${accountID}/pelican/run${channelQuery}`,{method:"POST",...(plan?{body:JSON.stringify(plan)}:{})});await query.refetch()}
   catch(error){setActionError(error instanceof Error?error.message:"启动测智失败")}
  }
  const toggle=async(account:PelicanAccount,enabled:boolean)=>{
   const targetStationID=account.relay_station_id??stationID
   if(targetStationID==null||readOnly)return
   setActionError(null)
-  try{await apiFetch(`/relay-stations/${targetStationID}/${scope==="group"?"groups":"accounts"}/${account.external_id}/pelican`,{method:"PUT",body:JSON.stringify({enabled})});await query.refetch()}
+  try{const channelQuery=account.channel_id?`?channel_id=${account.channel_id}`:"";await apiFetch(`/relay-stations/${targetStationID}/${scope==="group"?"groups":"accounts"}/${account.external_id}/pelican${channelQuery}`,{method:"PUT",body:JSON.stringify({enabled})});await query.refetch()}
   catch(error){setActionError(error instanceof Error?error.message:"保存失败")}
  }
  const body=(result:PelicanResult,signal:AbortSignal)=>apiFetch<PelicanResult>(pelicanResultPath(result,readOnly),{signal})
@@ -159,7 +159,7 @@ export function PelicanAccountPanel({account,controlsOnly=false,compactControls=
  const config=context.data?.configs.find(item=>item.account_external_id===account.external_id&&(!account.relay_station_id||item.relay_station_id===account.relay_station_id))
  const results=context.data?.results.filter(item=>item.account_external_id===account.external_id&&(!account.relay_station_id||item.relay_station_id===account.relay_station_id))??[]
  const active=running(config)||starting
- const run=async(plan?:PelicanTestPlan)=>{setStarting(true);try{await context.run(account.external_id,account.relay_station_id,plan)}finally{setStarting(false)}}
+ const run=async(plan?:PelicanTestPlan)=>{setStarting(true);try{await context.run(account.external_id,account.relay_station_id,plan,account.channel_id)}finally{setStarting(false)}}
   const controls=<div className="flex items-center gap-2">
    <Switch checked={config?.enabled??false} disabled={!context.data||settings.loading||(!configured&&!config?.enabled)} aria-label={`${account.name}启用鹈鹕测智`} onCheckedChange={enabled=>context.toggle(account,enabled)}/>
    <PelicanOneShotButton name={account.name} active={active} disabled={!context.data||context.readOnly} onRun={run}/>
@@ -183,14 +183,14 @@ function usePelicanBody(result:PelicanResult,visible:boolean){
  useEffect(()=>{setValue(null);setError("");if(!visible||result.status!=="success")return;const controller=new AbortController();context.body(result,controller.signal).then(value=>{if(!controller.signal.aborted)setValue(value)}).catch(error=>{if(!controller.signal.aborted)setError(error instanceof Error?error.message:"读取失败")});return()=>controller.abort()},[visible,result.id,result.relay_station_id,result.account_external_id])
  return {value,error}
 }
-export function PelicanRunButton({targets,channelName}:{targets:ChannelPelicanTarget[];channelName:string}) {
+export function PelicanRunButton({targets,channelName,channelID}:{targets:ChannelPelicanTarget[];channelName:string;channelID:number}) {
  const context=usePelican()
  const [selected,setSelected]=useState(""),[starting,setStarting]=useState(false)
- const available=targets.filter(target=>target.station_type!=="newapi")
+ const available=targets
  const key=(target:ChannelPelicanTarget)=>`${target.relay_station_id}/${target.account_external_id}`
  const target=available.find(item=>key(item)===selected)??available[0]
  const active=Boolean(target&&running(context.data?.configs.find(config=>config.relay_station_id===target.relay_station_id&&config.account_external_id===target.account_external_id)))
- const run=async(plan?:PelicanTestPlan)=>{if(!target)return;setStarting(true);try{await context.run(target.account_external_id,target.relay_station_id,plan)}finally{setStarting(false)}}
+ const run=async(plan?:PelicanTestPlan)=>{if(!target)return;setStarting(true);try{await context.run(target.account_external_id,target.relay_station_id,plan,channelID)}finally{setStarting(false)}}
  return <div className="flex max-w-full flex-wrap items-center justify-end gap-2">
   {available.length>1?<Select value={target?key(target):""} onValueChange={setSelected}><SelectTrigger className="h-7 w-40 text-xs" aria-label={`${channelName}测智账号`}><SelectValue/></SelectTrigger><SelectContent>{available.map(item=><SelectItem key={key(item)} value={key(item)}>{item.account_name||item.station_name}</SelectItem>)}</SelectContent></Select>:null}
   <PelicanOneShotButton name={channelName} active={starting||active} disabled={!target||!context.data||context.readOnly} onRun={run}/>

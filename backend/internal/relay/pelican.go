@@ -21,15 +21,7 @@ const pelicanContract = "\n\n直接返回独立 HTML，不使用 Markdown 代码
 const pelicanTimeout = 10 * time.Minute
 
 var ErrPelicanRunning = errors.New("该账号正在进行鹈鹕测智")
-var ErrPelicanUnsupportedStation = errors.New("鹈鹕测智仅支持 Sub2API 中转站")
 var pelicanStart = regexp.MustCompile(`(?i)<(?:!doctype\s+html|html|svg)[\s>]`)
-
-func validatePelicanStation(station *storage.RelayStation) error {
-	if station != nil && station.Type == string(storage.ChannelTypeNewAPI) {
-		return ErrPelicanUnsupportedStation
-	}
-	return nil
-}
 
 func applyPelicanSettings(config *storage.PelicanConfig, settings storage.PelicanSettings) {
 	plans := settings.Plans
@@ -130,11 +122,12 @@ func extractPelicanArtwork(text string) (string, error) {
 	return html, nil
 }
 func (s *Service) SavePelicanConfig(stationID uint, accountID int64, config storage.PelicanConfig) (*storage.PelicanConfig, error) {
-	station, err := s.stations.FindByID(stationID)
+	return s.SavePelicanConfigForChannel(stationID, accountID, 0, config)
+}
+
+func (s *Service) SavePelicanConfigForChannel(stationID uint, accountID int64, channelID uint, config storage.PelicanConfig) (*storage.PelicanConfig, error) {
+	_, err := s.stations.FindByID(stationID)
 	if err != nil {
-		return nil, err
-	}
-	if err = validatePelicanStation(station); err != nil {
 		return nil, err
 	}
 	settings, err := s.pelicanSettings()
@@ -148,6 +141,7 @@ func (s *Service) SavePelicanConfig(stationID uint, accountID int64, config stor
 	config.ID = 0
 	config.RelayStationID = stationID
 	config.AccountExternalID = accountID
+	config.ChannelID = channelID
 	config.LeaseUntil = nil
 	config.CreatedAt = time.Time{}
 	config.UpdatedAt = time.Time{}
@@ -168,12 +162,45 @@ func (s *Service) generatePelican(ctx context.Context, station storage.RelayStat
 	defer target.close()
 	return target.generate(ctx, config)
 }
-func (s *Service) StartPelican(ctx context.Context, stationID uint, accountID int64, requested ...storage.PelicanTestPlan) (*storage.PelicanConfig, error) {
-	station, err := s.stations.FindByID(stationID)
-	if err != nil {
-		return nil, err
+
+func (s *Service) pelicanChannelKey(station storage.RelayStation, accountID int64, channelID uint) (string, error) {
+	if channelID != 0 {
+		key, err := s.stations.ChannelPelicanKeyForAccount(station.ID, accountID, channelID)
+		if err != nil {
+			return "", errors.New("当前监控渠道未关联到所选中转站账号")
+		}
+		if key.Ciphertext == "" {
+			return "", nil
+		}
+		return s.cipher.Decrypt(key.Ciphertext)
 	}
-	if err = validatePelicanStation(station); err != nil {
+	keys, err := s.stations.ChannelPelicanKeysForAccount(station.ID, accountID)
+	if err != nil {
+		return "", err
+	}
+	var selected string
+	for _, item := range keys {
+		if item.Ciphertext == "" {
+			continue
+		}
+		value, decryptErr := s.cipher.Decrypt(item.Ciphertext)
+		if decryptErr != nil {
+			return "", decryptErr
+		}
+		if selected != "" && selected != value {
+			return "", errors.New("该 NewAPI 账号关联了多个不同的测智 API Key，请从对应渠道发起测智")
+		}
+		selected = value
+	}
+	return selected, nil
+}
+func (s *Service) StartPelican(ctx context.Context, stationID uint, accountID int64, requested ...storage.PelicanTestPlan) (*storage.PelicanConfig, error) {
+	return s.StartPelicanForChannel(ctx, stationID, accountID, 0, requested...)
+}
+
+func (s *Service) StartPelicanForChannel(ctx context.Context, stationID uint, accountID int64, channelID uint, requested ...storage.PelicanTestPlan) (*storage.PelicanConfig, error) {
+	_, err := s.stations.FindByID(stationID)
+	if err != nil {
 		return nil, err
 	}
 	settings, err := s.pelicanSettings()
@@ -194,6 +221,7 @@ func (s *Service) StartPelican(ctx context.Context, stationID uint, accountID in
 	if err != nil {
 		return nil, err
 	}
+	config.ChannelID = channelID
 	applyPelicanSettings(config, settings)
 	if _, err = s.stations.FindAccountByExternalID(stationID, accountID); err != nil {
 		return nil, err
@@ -364,6 +392,7 @@ func (s *Service) runPelicanBatchReady(parent context.Context, config storage.Pe
 		}
 		return
 	}
+	manualKey, manualKeyErr := s.pelicanChannelKey(*station, config.AccountExternalID, config.ChannelID)
 	saved.Store(true)
 	var keyInfoOnce sync.Once
 	var keyInfo pelicanKeyGroup
@@ -372,24 +401,30 @@ func (s *Service) runPelicanBatchReady(parent context.Context, config storage.Pe
 		calls.Add(1)
 		go func(plan storage.PelicanTestPlan, result storage.PelicanResult) {
 			defer calls.Done()
+			var runErr error
 			planConfig := config
 			planConfig.Model, planConfig.Prompt, planConfig.ReasoningEffort, planConfig.ParallelCount = plan.Model, plan.Prompt, plan.ReasoningEffort, 1
 			result.Status = "success"
-			target, err := s.preparePelican(ctx, *station, key, planConfig)
+			var target *pelicanTarget
+			if manualKeyErr != nil {
+				runErr = manualKeyErr
+			} else {
+				target, runErr = s.preparePelicanForStation(ctx, *station, key, manualKey, *account, planConfig)
+			}
 			var html string
-			if err == nil {
+			if runErr == nil {
 				result.Model = target.model
 				keyInfoOnce.Do(func() { keyInfo = s.pelicanKeyGroup(ctx, target, config.RelayStationID, config.AccountExternalID) })
 				result.UpstreamGroupName = keyInfo.Name
 				result.UpstreamGroupMultiplier = keyInfo.Multiplier
-				html, err = target.generate(ctx, planConfig)
+				html, runErr = target.generate(ctx, planConfig)
 				target.close()
 			}
 			result.FinishedAt = time.Now().UTC()
 			result.DurationMS = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
-			if err != nil {
+			if runErr != nil {
 				result.Status = "failed"
-				result.Error = redactTestText(err.Error(), key)
+				result.Error = redactTestText(runErr.Error(), key, manualKey)
 				tasklog.Add(parent, "ERROR", "账号 #%d 生成失败：%s", config.AccountExternalID, result.Error)
 			} else {
 				result.HTML = html

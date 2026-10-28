@@ -3,10 +3,16 @@ package storage
 import "sort"
 
 type ChannelPelicanInfo struct {
-	ID      uint        `json:"id"`
-	Name    string      `json:"name"`
-	Type    ChannelType `json:"type"`
-	SiteURL string      `json:"site_url"`
+	ID                   uint        `json:"id"`
+	Name                 string      `json:"name"`
+	Type                 ChannelType `json:"type"`
+	SiteURL              string      `json:"site_url"`
+	PelicanKeyConfigured bool        `json:"pelican_key_configured"`
+}
+
+type ChannelPelicanKey struct {
+	ChannelID  uint
+	Ciphertext string
 }
 
 type ChannelPelicanTarget struct {
@@ -91,7 +97,7 @@ func (r *RelayStations) ChannelPelicanGallery(historyCounts ...int) ([]ChannelPe
 		return nil, err
 	}
 	var channels []ChannelPelicanInfo
-	if err := r.db.Model(&Channel{}).Select("id, name, type, site_url").Order("id ASC").Scan(&channels).Error; err != nil {
+	if err := r.db.Model(&Channel{}).Select("id, name, type, site_url, (COALESCE(pelican_key_cipher, '') <> '') AS pelican_key_configured").Order("id ASC").Scan(&channels).Error; err != nil {
 		return nil, err
 	}
 	var stations []RelayStation
@@ -99,7 +105,7 @@ func (r *RelayStations) ChannelPelicanGallery(historyCounts ...int) ([]ChannelPe
 		return nil, err
 	}
 	var configs []PelicanConfig
-	if err := r.db.Select("id, relay_station_id, account_external_id, enabled, next_run_at, lease_until").Find(&configs).Error; err != nil {
+	if err := r.db.Select("id, channel_id, relay_station_id, account_external_id, enabled, next_run_at, lease_until").Find(&configs).Error; err != nil {
 		return nil, err
 	}
 	results := []PelicanLibraryItem{}
@@ -108,10 +114,32 @@ func (r *RelayStations) ChannelPelicanGallery(historyCounts ...int) ([]ChannelPe
 	 FROM relay_pelican_results results
 	 JOIN relay_stations stations ON stations.id = results.relay_station_id
 	 JOIN relay_accounts accounts ON accounts.relay_station_id = results.relay_station_id AND accounts.external_id = results.account_external_id
-	 WHERE stations.type <> ?
-	) ranked WHERE row_number <= ?`, string(ChannelTypeNewAPI), historyCount).Scan(&results).Error
+	) ranked WHERE row_number <= ?`, historyCount).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}
 	return buildChannelPelicanGroups(channels, snapshot.Links, stations, configs, results, historyCount), nil
+}
+
+func (r *RelayStations) ChannelPelicanKeyForAccount(stationID uint, accountID int64, channelID uint) (ChannelPelicanKey, error) {
+	var key ChannelPelicanKey
+	err := r.db.Table("channels").
+		Select("channels.id AS channel_id, channels.pelican_key_cipher AS ciphertext").
+		Joins("JOIN channel_accounts ON channel_accounts.channel_id = channels.id AND channel_accounts.deleted_at IS NULL").
+		Joins("JOIN channel_relay_account_links ON channel_relay_account_links.channel_account_id = channel_accounts.id").
+		Where("channels.id = ? AND channels.deleted_at IS NULL AND channel_relay_account_links.relay_station_id = ? AND channel_relay_account_links.relay_account_external_id = ?", channelID, stationID, accountID).
+		Take(&key).Error
+	return key, err
+}
+
+func (r *RelayStations) ChannelPelicanKeysForAccount(stationID uint, accountID int64) ([]ChannelPelicanKey, error) {
+	var keys []ChannelPelicanKey
+	err := r.db.Table("channels").
+		Select("DISTINCT channels.id AS channel_id, channels.pelican_key_cipher AS ciphertext").
+		Joins("JOIN channel_accounts ON channel_accounts.channel_id = channels.id AND channel_accounts.deleted_at IS NULL").
+		Joins("JOIN channel_relay_account_links ON channel_relay_account_links.channel_account_id = channel_accounts.id").
+		Where("channels.deleted_at IS NULL AND channel_relay_account_links.relay_station_id = ? AND channel_relay_account_links.relay_account_external_id = ?", stationID, accountID).
+		Order("channels.id ASC").
+		Scan(&keys).Error
+	return keys, err
 }

@@ -24,6 +24,18 @@ func pelicanIDs(c *gin.Context) (uint, int64, error) {
 	return stationID, accountID, nil
 }
 
+func pelicanChannelID(c *gin.Context) (uint, error) {
+	raw := c.Query("channel_id")
+	if raw == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseUint(raw, 10, 32)
+	if err != nil || parsed == 0 {
+		return 0, errors.New("监控渠道 ID 无效")
+	}
+	return uint(parsed), nil
+}
+
 func pelicanRunPlan(c *gin.Context) (*storage.PelicanTestPlan, error) {
 	if c.Request.Body == nil || c.Request.Body == http.NoBody {
 		return nil, nil
@@ -145,7 +157,12 @@ func saveRelayPelicanConfig(c *gin.Context, d *Deps) {
 		fail(c, 400, err)
 		return
 	}
-	config, err := d.Relay.SavePelicanConfig(stationID, accountID, storage.PelicanConfig{Enabled: input.Enabled})
+	channelID, err := pelicanChannelID(c)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	config, err := d.Relay.SavePelicanConfigForChannel(stationID, accountID, channelID, storage.PelicanConfig{Enabled: input.Enabled})
 	if err != nil {
 		fail(c, 400, err)
 		return
@@ -163,7 +180,12 @@ func startRelayPelican(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	config, err := d.Relay.StartPelican(c.Request.Context(), stationID, accountID, pelicanRequestedPlans(plan)...)
+	channelID, err := pelicanChannelID(c)
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	config, err := d.Relay.StartPelicanForChannel(c.Request.Context(), stationID, accountID, channelID, pelicanRequestedPlans(plan)...)
 	if err != nil {
 		status := http.StatusBadRequest
 		if errors.Is(err, relay.ErrPelicanRunning) {

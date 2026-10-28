@@ -120,11 +120,11 @@ func TestSavePelicanAccountUsesGlobalSettingsAndOnlyAccountSwitch(t *testing.T) 
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT .*relay_stations.*FOR UPDATE`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 	mock.ExpectQuery(`SELECT .*relay_accounts`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(20))
-	mock.ExpectQuery(`INSERT INTO "relay_pelican_configs"`).WithArgs(uint(7), int64(20), true, "global-model", "global drawing", "high", 1, "0 * * * *", sqlmock.AnyArg(), nil, sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+	mock.ExpectQuery(`INSERT INTO "relay_pelican_configs"`).WithArgs(uint(55), uint(7), int64(20), true, "global-model", "global drawing", "high", 1, "0 * * * *", sqlmock.AnyArg(), nil, sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
 	mock.ExpectCommit()
-	mock.ExpectQuery(`SELECT .*relay_pelican_configs`).WillReturnRows(sqlmock.NewRows([]string{"id", "enabled"}).AddRow(1, true))
-	config, err := service.SavePelicanConfig(7, 20, storage.PelicanConfig{Enabled: true, Model: "must-not-override-global", Prompt: "ignored", ParallelCount: 8})
-	if err != nil || !config.Enabled {
+	mock.ExpectQuery(`SELECT .*relay_pelican_configs`).WillReturnRows(sqlmock.NewRows([]string{"id", "channel_id", "enabled"}).AddRow(1, 55, true))
+	config, err := service.SavePelicanConfigForChannel(7, 20, 55, storage.PelicanConfig{Enabled: true, Model: "must-not-override-global", Prompt: "ignored", ParallelCount: 8})
+	if err != nil || !config.Enabled || config.ChannelID != 55 {
 		t.Fatalf("config=%#v err=%v", config, err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -233,7 +233,7 @@ func TestManualPelicanCreatesDisabledAccountConfigOnFirstRun(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectQuery(`SELECT .*relay_stations.*FOR UPDATE`).WillReturnRows(stationRows())
 	mock.ExpectQuery(`SELECT .*relay_accounts`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(20))
-	mock.ExpectQuery(`INSERT INTO "relay_pelican_configs"`).WithArgs(uint(7), int64(20), false, "global-model", "global drawing", "high", 1, "0 * * * *", sqlmock.AnyArg(), nil, sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+	mock.ExpectQuery(`INSERT INTO "relay_pelican_configs"`).WithArgs(uint(0), uint(7), int64(20), false, "global-model", "global drawing", "high", 1, "0 * * * *", sqlmock.AnyArg(), nil, sqlmock.AnyArg(), sqlmock.AnyArg()).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
 	mock.ExpectCommit()
 	mock.ExpectQuery(`SELECT .*relay_pelican_configs`).WillReturnRows(sqlmock.NewRows([]string{"id", "relay_station_id", "account_external_id", "enabled"}).AddRow(1, 7, 20, false))
 	mock.ExpectQuery(`SELECT .*relay_accounts`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(20))
@@ -355,6 +355,7 @@ func TestPelicanNoTextModelSavesFailureAndReleasesLease(t *testing.T) {
 			errorText := "\u8be5\u8d26\u53f7\u4e0d\u652f\u6301\u7cfb\u7edf\u914d\u7f6e\u7684\u6d4b\u667a\u6a21\u578b \"missing-model\"\uff1b\u53ef\u7528\u6a21\u578b: text-embedding-3-large"
 			for i := 0; i < 1; i++ {
 				expectPelicanPlaceholder(mock, "missing-model", "draw", "medium", trigger, uint(i+1))
+				mock.ExpectQuery(`SELECT DISTINCT channels.id AS channel_id, channels.pelican_key_cipher AS ciphertext`).WithArgs(uint(7), int64(20)).WillReturnRows(sqlmock.NewRows([]string{"channel_id", "ciphertext"}))
 				mock.ExpectBegin()
 				mock.ExpectQuery(`SELECT .*relay_stations.*FOR UPDATE`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 				mock.ExpectExec(`UPDATE "relay_pelican_results" SET .* WHERE id = .*relay_station_id = .*account_external_id =`).WithArgs(uint(7), int64(20), "test account", "missing-model", "draw", "medium", trigger, "failed", "", errorText, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "", nil, uint(i+1), uint(7), int64(20)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -405,6 +406,7 @@ func TestPelicanPriorityFallbackPersistsActualModelWithoutChangingSettings(t *te
 			mock.ExpectQuery(`SELECT .*relay_stations`).WillReturnRows(sqlmock.NewRows([]string{"id", "base_url"}).AddRow(7, server.URL))
 			mock.ExpectQuery(`SELECT .*relay_accounts`).WillReturnRows(sqlmock.NewRows([]string{"id", "name"}).AddRow(20, "test account"))
 			expectPelicanPlaceholder(mock, "gpt-6.1-sol\ndeepseek-flash", "draw", "medium", trigger, uint(1))
+			mock.ExpectQuery(`SELECT DISTINCT channels.id AS channel_id, channels.pelican_key_cipher AS ciphertext`).WithArgs(uint(7), int64(20)).WillReturnRows(sqlmock.NewRows([]string{"channel_id", "ciphertext"}))
 			mock.ExpectBegin()
 			mock.ExpectQuery(`SELECT .*relay_stations.*FOR UPDATE`).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(7))
 			mock.ExpectExec(`UPDATE "relay_pelican_results" SET .* WHERE id = .*relay_station_id = .*account_external_id =`).WithArgs(uint(7), int64(20), "test account", "actual-deepseek-flash", "draw", "medium", trigger, "success", "<svg></svg>", "", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), "", nil, uint(1), uint(7), int64(20)).WillReturnResult(sqlmock.NewResult(0, 1))
@@ -493,6 +495,7 @@ func testPelicanRunsEachIndependentPlanConcurrently(t *testing.T, trigger string
 	service, mock := pelicanExecutionDB(t)
 	service.client.Transport = pelicanRewriteTransport{base: server.Client().Transport, target: server.URL}
 	mock.MatchExpectationsInOrder(false)
+	mock.ExpectQuery(`SELECT DISTINCT channels.id AS channel_id, channels.pelican_key_cipher AS ciphertext`).WithArgs(uint(7), int64(20)).WillReturnRows(sqlmock.NewRows([]string{"channel_id", "ciphertext"}))
 	service.channels = storage.NewChannels(nil)
 	service.cipher, _ = crypto.NewCipher("pelican-metadata-test-secret")
 	sessionCipher, _ := service.cipher.Encrypt("login-session")

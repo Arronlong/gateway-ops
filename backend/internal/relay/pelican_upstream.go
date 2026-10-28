@@ -224,6 +224,101 @@ func (s *Service) preparePelican(ctx context.Context, station storage.RelayStati
 	return target, nil
 }
 
+func (s *Service) preparePelicanWithManualKey(ctx context.Context, station storage.RelayStation, account storage.RelayAccount, key string, config storage.PelicanConfig, adminKey string) (*pelicanTarget, error) {
+	if strings.TrimSpace(account.BaseURL) == "" {
+		return nil, errors.New("关联中转站账号没有上游 Base URL，无法使用渠道测智 Key")
+	}
+	client := *s.client
+	client.Timeout = pelicanTimeout
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	admin := &Service{client: &client}
+	models, err := admin.accountModelsFromUpstream(ctx, strings.TrimRight(station.BaseURL, "/"), adminKey, config.AccountExternalID)
+	if err != nil {
+		return nil, err
+	}
+	selectedModel, err := selectPelicanModel(config.Model, models)
+	if err != nil {
+		return nil, err
+	}
+	if selectedModel == "" {
+		return nil, errors.New("请先在系统设置中配置测智模型")
+	}
+	endpoint, err := pelicanOpenAIChatURL(account.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	return &pelicanTarget{
+		client: client, endpoint: endpoint, model: selectedModel, token: key, chat: true,
+		headers: make(http.Header), secrets: []string{key, adminKey},
+	}, nil
+}
+
+func (s *Service) prepareNewAPIPelican(ctx context.Context, station storage.RelayStation, credential newAPICredential, accountID int64, key string, account storage.RelayAccount, config storage.PelicanConfig) (*pelicanTarget, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, errors.New("NewAPI 测智需要在关联的监控渠道中配置测智 API Key")
+	}
+	if accountID <= 0 {
+		return nil, errors.New("NewAPI 渠道 ID 无效")
+	}
+	envelope, err := s.newAPIRequest(ctx, http.MethodGet, fmt.Sprintf("%s/api/channel/%d", strings.TrimRight(station.BaseURL, "/"), accountID), credential, nil)
+	if err != nil {
+		return nil, fmt.Errorf("读取 NewAPI 渠道信息失败: %w", err)
+	}
+	var remote newAPIChannel
+	if err := json.Unmarshal(envelope.Data, &remote); err != nil || remote.ID != accountID {
+		return nil, errors.New("NewAPI 未返回匹配的渠道信息")
+	}
+	model, err := selectPelicanModel(config.Model, newAPISplit(remote.Models))
+	if err != nil {
+		return nil, err
+	}
+	base := strings.TrimSpace(remote.BaseURL)
+	if base == "" {
+		base = account.BaseURL
+	}
+	endpoint, err := pelicanOpenAIChatURL(base)
+	if err != nil {
+		return nil, err
+	}
+	client := *s.client
+	client.Timeout = pelicanTimeout
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &pelicanTarget{
+		client: client, endpoint: endpoint, model: model, token: key, chat: true,
+		headers: make(http.Header), secrets: []string{key, credential.Token, credential.Cookie, credential.Password},
+	}, nil
+}
+
+func (s *Service) preparePelicanForStation(ctx context.Context, station storage.RelayStation, relayCredential, manualKey string, account storage.RelayAccount, config storage.PelicanConfig) (*pelicanTarget, error) {
+	if station.Type == string(storage.ChannelTypeNewAPI) {
+		credential, ok := decodeNewAPICredential(relayCredential)
+		if !ok {
+			return nil, errors.New("NewAPI 管理凭据格式无效")
+		}
+		return s.prepareNewAPIPelican(ctx, station, credential, config.AccountExternalID, manualKey, account, config)
+	}
+	if strings.TrimSpace(manualKey) != "" {
+		return s.preparePelicanWithManualKey(ctx, station, account, manualKey, config, relayCredential)
+	}
+	return s.preparePelican(ctx, station, relayCredential, config)
+}
+
+func pelicanOpenAIChatURL(base string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(base))
+	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return "", errors.New("上游 Base URL 无效")
+	}
+	path := strings.TrimRight(u.Path, "/")
+	for _, ending := range []string{"/chat/completions", "/responses", "/models"} {
+		path = strings.TrimSuffix(path, ending)
+	}
+	if !strings.HasSuffix(path, "/v1") && !strings.HasSuffix(path, "/v4") {
+		path += "/v1"
+	}
+	u.Path, u.RawPath = path+"/chat/completions", ""
+	return u.String(), nil
+}
+
 func pelicanUpstreamURL(base, suffix string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(base))
 	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || u.RawQuery != "" || u.Fragment != "" {

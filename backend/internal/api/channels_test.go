@@ -3,12 +3,24 @@ package api
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/guliansheng/gateway-ops/internal/channel"
 	appcrypto "github.com/guliansheng/gateway-ops/internal/crypto"
 	"github.com/guliansheng/gateway-ops/internal/storage"
 )
+
+func TestChannelPelicanKeyCipherIsNeverSerialized(t *testing.T) {
+	raw, err := json.Marshal(storage.Channel{PelicanKeyCipher: "upstream-secret", PelicanKeyConfigured: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded := string(raw)
+	if strings.Contains(encoded, "upstream-secret") || !strings.Contains(encoded, `"pelican_key_configured":true`) {
+		t.Fatalf("channel response leaked key or omitted configured state: %s", encoded)
+	}
+}
 
 func TestNewAPIEditMetadataPreservesTemplateAndMasksLiteralToken(t *testing.T) {
 	cipher, err := appcrypto.NewCipher("test-secret")

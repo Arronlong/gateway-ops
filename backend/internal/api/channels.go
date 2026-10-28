@@ -131,6 +131,7 @@ type channelInput struct {
 	ManualBalance    float64                `json:"manual_balance"`
 	Remark           string                 `json:"remark"`
 	TokenCredential  string                 `json:"token_credential"` // JSON：token 模式时填写
+	PelicanAPIKey    string                 `json:"pelican_api_key"`
 	LoginHeaders     *[]channel.RequestKV   `json:"login_headers"`
 	LoginParams      *[]channel.RequestKV   `json:"login_params"`
 	TurnstileEnabled bool                   `json:"turnstile_enabled"`
@@ -160,6 +161,7 @@ type channelUpdateInput struct {
 	ManualBalance    *float64                `json:"manual_balance"`
 	Remark           *string                 `json:"remark"`
 	TokenCredential  *string                 `json:"token_credential"`
+	PelicanAPIKey    *string                 `json:"pelican_api_key"`
 	LoginHeaders     *[]channel.RequestKV    `json:"login_headers"`
 	LoginParams      *[]channel.RequestKV    `json:"login_params"`
 	TurnstileEnabled *bool                   `json:"turnstile_enabled"`
@@ -221,6 +223,7 @@ func channelViews(d *Deps, channels []storage.Channel) ([]channelView, error) {
 	}
 	views := make([]channelView, 0, len(channels))
 	for _, item := range channels {
+		item.PelicanKeyConfigured = item.PelicanKeyCipher != ""
 		accounts := make([]channelAccountView, 0, len(accountsByChannel[item.ID]))
 		for _, account := range accountsByChannel[item.ID] {
 			authType, userID, tokenHeaders, err := newAPIEditMetadata(d, item.Type, account.CredentialMode, account.PasswordCipher)
@@ -590,6 +593,7 @@ func createChannel(c *gin.Context, d *Deps) {
 		Password:           in.Password,
 		CredentialMode:     in.CredentialMode,
 		TokenCredential:    in.TokenCredential,
+		PelicanAPIKey:      in.PelicanAPIKey,
 		LoginHeaders:       in.LoginHeaders,
 		LoginParams:        in.LoginParams,
 		BalanceMode:        in.BalanceMode,
@@ -650,6 +654,7 @@ func updateChannel(c *gin.Context, d *Deps) {
 		Password:           in.Password,
 		CredentialMode:     in.CredentialMode,
 		TokenCredential:    in.TokenCredential,
+		PelicanAPIKey:      in.PelicanAPIKey,
 		LoginHeaders:       in.LoginHeaders,
 		LoginParams:        in.LoginParams,
 		BalanceMode:        in.BalanceMode,

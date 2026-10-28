@@ -33,7 +33,7 @@ function PelicanLibraryContent({historyCount}:{historyCount:number}) {
   const [status,setStatus]=useState("all")
   const stations=useMemo(()=>{
     const entries=new Map<number,string>()
-    for(const group of query.data?.groups??[])for(const target of group.targets)if(target.station_type!=="newapi")entries.set(target.relay_station_id,target.station_name)
+    for(const group of query.data?.groups??[])for(const target of group.targets)entries.set(target.relay_station_id,target.station_name)
     for(const group of sourcesQuery.data?.groups??[])entries.set(group.station_id,group.station_name)
     return [...entries]
   },[query.data,sourcesQuery.data])

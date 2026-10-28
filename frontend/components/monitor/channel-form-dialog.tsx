@@ -54,6 +54,8 @@ interface FormState {
   name: string
   type: ChannelType
   site_url: string
+  pelican_api_key: string
+  clear_pelican_api_key: boolean
   username: string
   password: string
 
@@ -150,6 +152,8 @@ function initialState(c?: Channel | null): FormState {
     name: c?.name ?? "",
     type,
     site_url: c?.site_url ?? "",
+    pelican_api_key: "",
+    clear_pelican_api_key: false,
     username: c?.username ?? "",
     password: "",
     credential_mode: c?.credential_mode ?? "password",
@@ -325,6 +329,8 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
           balance_threshold: threshold,
           monitor_enabled: form.monitor_enabled,
         }
+        if (form.clear_pelican_api_key) body.pelican_api_key = ""
+        else if (form.pelican_api_key.trim()) body.pelican_api_key = form.pelican_api_key.trim()
         if (isEdit) {
           await apiFetch(`/channels/${channel!.id}`, { method: "PUT", body: JSON.stringify(body) })
         } else {
@@ -403,6 +409,8 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
           captcha_config_id: captchaConfigID,
 		  accounts: additionalAccounts,
         }
+        if (form.clear_pelican_api_key) body.pelican_api_key = ""
+        else if (form.pelican_api_key.trim()) body.pelican_api_key = form.pelican_api_key.trim()
         if (!isTokenMode && form.password) body.password = form.password
         if (isTokenMode && tokenCredential) body.token_credential = tokenCredential
         await apiFetch(`/channels/${channel!.id}`, {
@@ -416,6 +424,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
             name: form.name,
             type: form.type,
             site_url: form.site_url,
+            pelican_api_key: form.pelican_api_key.trim(),
             username: form.username,
             credential_mode: form.credential_mode,
             login_headers: form.login_headers,
@@ -499,6 +508,23 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
               required
               disabled={submitting}
             />
+          </div>
+
+          <div className="space-y-1.5 border-t border-border pt-3">
+            <Label htmlFor="pelican-api-key">测智 API Key（可选）</Label>
+            <Input
+              id="pelican-api-key"
+              type="password"
+              autoComplete="new-password"
+              value={form.pelican_api_key}
+              placeholder={isEdit && channel?.pelican_key_configured ? "已配置，留空保持不变" : "填写用于测智的上游 API Key"}
+              onChange={(event) => setForm({ ...form, pelican_api_key: event.target.value, clear_pelican_api_key: false })}
+              disabled={submitting || form.clear_pelican_api_key}
+            />
+            <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
+              <span>{isEdit && channel?.pelican_key_configured ? "已配置，密钥不会回显；留空表示保持不变。" : form.type === "newapi" ? "NewAPI 关联渠道需填写 Key；Sub2API 未填写时自动读取关联账号凭据。" : "优先使用此 Key；未填写时自动读取关联的 Sub2API 账号凭据。"}</span>
+              {isEdit && channel?.pelican_key_configured ? <label className="inline-flex shrink-0 items-center gap-2"><Switch checked={form.clear_pelican_api_key} onCheckedChange={(checked) => setForm({ ...form, clear_pelican_api_key: checked })} disabled={submitting}/><span>清除</span></label> : null}
+            </div>
           </div>
 
           <div className="space-y-1.5">
