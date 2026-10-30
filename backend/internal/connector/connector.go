@@ -64,6 +64,14 @@ type Channel struct {
 	TurnstileToken string
 }
 
+func (ch *Channel) RequestHeaders() map[string]string {
+	return ExpandRequestKV(ch.LoginHeaders, map[string]string{
+		"username":        ch.Username,
+		"password":        ch.Password,
+		"turnstile_token": ch.TurnstileToken,
+	})
+}
+
 // AuthSession 登录后产生的会话凭据。明文，由 channel 层负责加密落库。
 type AuthSession struct {
 	// UserID 上游账号 ID 字符串。NewAPI Cookie 会话需要在后续请求头里附带 `New-Api-User: <id>`。

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"strings"
 	"time"
@@ -38,7 +39,7 @@ type sub2Resp struct {
 }
 
 func (c *Client) GetTurnstileSiteKey(ctx context.Context, ch *connector.Channel) (string, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/settings/public", nil)
+	body, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/settings/public", nil)
 	if err != nil {
 		return "", fmt.Errorf("sub2api public settings: %w", err)
 	}
@@ -62,7 +63,7 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 
 	resp, err := c.http.R().
 		SetContext(ctx).
-		SetHeaders(connector.ExpandRequestKV(ch.LoginHeaders, vars)).
+		SetHeaders(requestHeaders(ch, nil)).
 		SetBody(body).
 		Post(site + "/api/v1/auth/login")
 	if err != nil {
@@ -111,6 +112,7 @@ func (c *Client) RefreshToken(ctx context.Context, ch *connector.Channel, refres
 	resp, err := c.http.R().
 		SetContext(ctx).
 		SetHeader("Content-Type", "application/json").
+		SetHeaders(requestHeaders(ch, nil)).
 		SetBody(map[string]string{"refresh_token": refreshToken}).
 		Post(site + "/api/v1/auth/refresh")
 	if err != nil {
@@ -151,12 +153,12 @@ func (c *Client) CheckAuth(ctx context.Context, ch *connector.Channel, session *
 	if session == nil || session.AccessToken == "" {
 		return errors.New("missing sub2api access_token")
 	}
-	_, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/auth/me", session)
+	_, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/auth/me", session)
 	return err
 }
 
 func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) (*connector.BalanceResult, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/auth/me", session)
+	body, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/v1/auth/me", session)
 	if err != nil {
 		return nil, fmt.Errorf("sub2api me: %w", err)
 	}
@@ -175,7 +177,7 @@ func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session 
 func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) ([]connector.RateResult, error) {
 	site := strings.TrimRight(ch.SiteURL, "/")
 
-	availBody, err := c.getJSON(ctx, site+"/api/v1/groups/available", session)
+	availBody, err := c.getJSON(ctx, ch, site+"/api/v1/groups/available", session)
 	if err != nil {
 		return nil, fmt.Errorf("sub2api groups available: %w", err)
 	}
@@ -190,7 +192,7 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 	}
 
 	overrides := map[string]float64{}
-	if ratesBody, err := c.getJSON(ctx, site+"/api/v1/groups/rates", session); err == nil {
+	if ratesBody, err := c.getJSON(ctx, ch, site+"/api/v1/groups/rates", session); err == nil {
 		_ = json.Unmarshal(ratesBody, &overrides)
 	}
 
@@ -221,8 +223,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 	if pageSize <= 0 || pageSize > 1000 {
 		pageSize = 100
 	}
-	req := c.http.R().SetContext(ctx).
-		SetHeader("Authorization", "Bearer "+session.AccessToken).
+	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session)).
 		SetQueryParam("page", strconv.Itoa(page)).
 		SetQueryParam("page_size", strconv.Itoa(pageSize)).
 		SetQueryParam("sort_by", "created_at").
@@ -293,11 +294,29 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 	return out, nil
 }
 
-func (c *Client) getJSON(ctx context.Context, url string, session *connector.AuthSession) ([]byte, error) {
-	req := c.http.R().SetContext(ctx)
+func requestHeaders(ch *connector.Channel, session *connector.AuthSession) map[string]string {
+	vars := map[string]string{"username": ch.Username, "password": ch.Password, "turnstile_token": ch.TurnstileToken}
+	headers := make(map[string]string)
 	if session != nil && session.AccessToken != "" {
-		req.SetHeader("Authorization", "Bearer "+session.AccessToken)
+		vars["access_token"] = session.AccessToken
+		vars["token"] = session.AccessToken
+		headers["Authorization"] = "Bearer " + session.AccessToken
 	}
+	items := make([]connector.RequestKV, 0, len(ch.LoginHeaders))
+	for _, item := range ch.LoginHeaders {
+		if (session == nil || session.AccessToken == "") && (strings.Contains(item.Value, "{{access_token}}") || strings.Contains(item.Value, "{{token}}")) {
+			continue
+		}
+		items = append(items, item)
+	}
+	for key, value := range connector.ExpandRequestKV(items, vars) {
+		headers[http.CanonicalHeaderKey(key)] = value
+	}
+	return headers
+}
+
+func (c *Client) getJSON(ctx context.Context, ch *connector.Channel, url string, session *connector.AuthSession) ([]byte, error) {
+	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session))
 	resp, err := req.Get(url)
 	if err != nil {
 		return nil, err

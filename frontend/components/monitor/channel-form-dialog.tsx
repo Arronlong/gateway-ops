@@ -100,9 +100,9 @@ interface AdditionalAccountForm {
   captcha_config_id: string
 }
 
-function defaultLoginConfig(type: ChannelType): { headers: RequestKV[]; params: RequestKV[] } {
+function defaultLoginConfig(type: ChannelType, mode: CredentialMode = "password", authType: FormState["newapi_auth_type"] = "cookie"): { headers: RequestKV[]; params: RequestKV[] } {
   return {
-    headers: [{ key: "Content-Type", value: "application/json" }],
+    headers: withCredentialHeaders([{ key: "Content-Type", value: "application/json" }], type, mode, authType),
     params: type === "newapi"
       ? [{ key: "username", value: "{{username}}" }, { key: "password", value: "{{password}}" }]
       : [
@@ -111,6 +111,36 @@ function defaultLoginConfig(type: ChannelType): { headers: RequestKV[]; params: 
           { key: "turnstile_token", value: "{{turnstile_token}}" },
         ],
   }
+}
+
+function withCredentialHeaders(
+  items: RequestKV[],
+  type: ChannelType,
+  mode: CredentialMode,
+  authType: FormState["newapi_auth_type"] = "cookie",
+  legacyTokenHeaders: RequestKV[] = [],
+): RequestKV[] {
+  if (mode !== "token") return items
+  const defaults = type === "sub2api"
+    ? [{ key: "Authorization", value: "Bearer {{access_token}}" }]
+    : authType === "cookie"
+      ? [{ key: "Cookie", value: "{{cookie}}" }, { key: "New-Api-User", value: "{{user_id}}" }]
+      : [{ key: "Authorization", value: "Bearer {{token}}" }, { key: "New-Api-User", value: "{{user_id}}" }]
+  const credentialKeys = new Set(["authorization", "cookie", "new-api-user"])
+  const activeKeys = new Set(type === "sub2api"
+    ? ["authorization"]
+    : authType === "cookie"
+      ? ["cookie", "new-api-user"]
+      : ["authorization", "new-api-user"])
+  const configured = new Map<string, RequestKV>()
+  for (const item of [...items, ...(type === "newapi" && authType === "access_token" ? legacyTokenHeaders : []), ...defaults]) {
+    const key = item.key.trim().toLowerCase()
+    if (activeKeys.has(key) && !configured.has(key)) configured.set(key, { ...item })
+  }
+  return [
+    ...items.filter((item) => !credentialKeys.has(item.key.trim().toLowerCase())),
+    ...[...activeKeys].map((key) => configured.get(key)).filter((item): item is RequestKV => Boolean(item)),
+  ]
 }
 
 function defaultNewAPITokenHeaders(): RequestKV[] {
@@ -147,7 +177,10 @@ function editableManualBalance(value: number | null | undefined): string {
 
 function initialState(c?: Channel | null): FormState {
   const type = c?.type ?? "newapi"
-  const defaults = defaultLoginConfig(type)
+  const credentialMode = c?.credential_mode ?? "password"
+  const newapiAuthType = c?.newapi_auth_type ?? "cookie"
+  const legacyTokenHeaders = c?.newapi_token_headers?.map((item) => ({ ...item })) ?? defaultNewAPITokenHeaders()
+  const defaults = defaultLoginConfig(type, credentialMode, newapiAuthType)
   return {
     name: c?.name ?? "",
     type,
@@ -156,17 +189,17 @@ function initialState(c?: Channel | null): FormState {
     clear_pelican_api_key: false,
     username: c?.username ?? "",
     password: "",
-    credential_mode: c?.credential_mode ?? "password",
+    credential_mode: credentialMode,
     balance_mode: c?.balance_mode ?? "auto",
     manual_balance: c?.balance_mode === "manual" ? editableManualBalance(c.last_balance ?? c.manual_balance) : (c?.manual_balance != null ? String(c.manual_balance) : "0"),
     remark: c?.remark ?? "",
-    login_headers: c?.login_headers?.map((item) => ({ ...item })) ?? defaults.headers,
+    login_headers: withCredentialHeaders(c?.login_headers?.map((item) => ({ ...item })) ?? defaults.headers, type, credentialMode, newapiAuthType, legacyTokenHeaders),
     login_params: c?.login_params?.map((item) => ({ ...item })) ?? defaults.params,
-    newapi_auth_type: c?.newapi_auth_type ?? "cookie",
+    newapi_auth_type: newapiAuthType,
     newapi_cookie: "",
     newapi_user_id: c?.newapi_user_id ?? "",
     newapi_access_token: "",
-    newapi_token_headers: c?.newapi_token_headers?.map((item) => ({ ...item })) ?? defaultNewAPITokenHeaders(),
+    newapi_token_headers: legacyTokenHeaders,
     sub2api_access_token: "",
     sub2api_refresh_token: "",
     balance_threshold: c?.balance_threshold != null ? String(c.balance_threshold) : "0",
@@ -206,7 +239,7 @@ function buildTokenCredential(form: FormState): string {
         auth_type: "access_token",
         user_id: form.newapi_user_id.trim(),
         token: form.newapi_access_token.trim(),
-        headers: form.newapi_token_headers,
+        headers: form.login_headers,
       })
     }
     return JSON.stringify({
@@ -224,17 +257,18 @@ function buildTokenCredential(form: FormState): string {
 function buildAdditionalTokenCredential(account: AdditionalAccountForm, type: ChannelType): string {
   if (type === "newapi") {
     if (account.newapi_auth_type === "access_token") {
-      return JSON.stringify({ auth_type: "access_token", user_id: account.newapi_user_id.trim(), token: account.newapi_access_token.trim(), headers: account.newapi_token_headers })
+      return JSON.stringify({ auth_type: "access_token", user_id: account.newapi_user_id.trim(), token: account.newapi_access_token.trim() })
     }
     return JSON.stringify({ auth_type: "cookie", cookie: account.newapi_cookie.trim(), user_id: account.newapi_user_id.trim() })
   }
   return JSON.stringify({ access_token: account.sub2api_access_token.trim(), refresh_token: account.sub2api_refresh_token.trim() })
 }
 
-function buildAdditionalAccountPayloads(accounts: AdditionalAccountForm[], type: ChannelType) {
+function buildAdditionalAccountPayloads(accounts: AdditionalAccountForm[], type: ChannelType, savedAccounts: Channel["accounts"] = []) {
   return accounts.map((account, index) => {
     const label = `附加账号 ${index + 1}`
     const isExisting = account.id != null
+    const savedAccount = savedAccounts.find((saved) => saved.id === account.id)
     const modeChanged = isExisting && account.credential_mode !== account.initial_credential_mode
     const isToken = account.credential_mode === "token"
     const payload: Record<string, unknown> = {
@@ -250,7 +284,7 @@ function buildAdditionalAccountPayloads(accounts: AdditionalAccountForm[], type:
       const hasCredential = type === "newapi"
         ? account.newapi_auth_type === "access_token"
           ? Boolean(account.newapi_access_token.trim() || account.newapi_user_id.trim())
-          : Boolean(account.newapi_cookie.trim() || account.newapi_user_id.trim())
+          : Boolean(account.newapi_cookie.trim() || account.newapi_user_id.trim() !== (savedAccount?.newapi_user_id ?? "").trim())
         : Boolean(account.sub2api_access_token.trim() || account.sub2api_refresh_token.trim())
       if (!isExisting || modeChanged || hasCredential) {
         if (type === "newapi" && account.newapi_auth_type === "cookie" && (!account.newapi_cookie.trim() || !account.newapi_user_id.trim())) {
@@ -303,6 +337,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
     form.credential_mode !== (channel?.credential_mode ?? "password") ||
     form.balance_mode !== (channel?.balance_mode ?? "auto")
   )
+  const newAPIUserIDChanged = form.newapi_user_id.trim() !== (channel?.newapi_user_id ?? "").trim()
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -353,7 +388,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
             if (!isEdit || modeChanged || form.newapi_access_token) {
               if (!form.newapi_access_token.trim()) throw new Error("NewAPI 访问令牌模式必须填写 Token")
             }
-          } else if (!isEdit || modeChanged || form.newapi_cookie || form.newapi_user_id) {
+          } else if (!isEdit || modeChanged || form.newapi_cookie || newAPIUserIDChanged) {
             if (!form.newapi_cookie.trim()) throw new Error("NewAPI Cookie 模式必须填写 Cookie")
             if (!form.newapi_user_id.trim()) throw new Error("NewAPI Cookie 模式必须填写 User ID")
           }
@@ -367,7 +402,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
           !isEdit ||
           modeChanged ||
           form.newapi_cookie ||
-          form.newapi_user_id ||
+          newAPIUserIDChanged ||
           form.newapi_access_token ||
           (form.type === "newapi" && form.newapi_auth_type === "access_token") ||
           form.sub2api_access_token ||
@@ -391,7 +426,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
         if (modeChanged && !form.password) throw new Error("切换到账号密码模式时必须填写密码")
       }
 
-      const additionalAccounts = buildAdditionalAccountPayloads(form.additional_accounts, form.type)
+      const additionalAccounts = buildAdditionalAccountPayloads(form.additional_accounts, form.type, channel?.accounts)
 
       if (isEdit) {
         const body: Record<string, unknown> = {
@@ -480,8 +515,9 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
               value={form.type}
               onValueChange={(v) => {
                 const type = v as ChannelType
-                const defaults = defaultLoginConfig(type)
-                setForm({ ...form, type, login_headers: defaults.headers, login_params: defaults.params })
+                const defaults = defaultLoginConfig(type, form.credential_mode, form.newapi_auth_type)
+                const loginHeaders = withCredentialHeaders(form.login_headers, type, form.credential_mode, form.newapi_auth_type, form.newapi_token_headers)
+                setForm({ ...form, type, login_headers: loginHeaders, login_params: defaults.params })
               }}
               disabled={isEdit || submitting}
             >
@@ -562,42 +598,30 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
             ) : null}
           </div>
 
-          {/* 凭据类型 toggle */}
+          {/* 登录方式选择 */}
           {!isManualBalance ? <div className="space-y-1.5">
-            <Label>凭据类型</Label>
-            <div className="grid grid-cols-2 gap-2 rounded-lg border border-border p-1">
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={() => setForm({ ...form, credential_mode: "password" })}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                  !isTokenMode
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:bg-muted",
-                )}
-              >
-                账号密码
-              </button>
-              <button
-                type="button"
-                disabled={submitting}
-                onClick={() => setForm({ ...form, credential_mode: "token" })}
-                className={cn(
-                  "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
-                  isTokenMode
-                    ? "bg-foreground text-background"
-                    : "text-muted-foreground hover:bg-muted",
-                )}
-              >
-                Token (跳过登录)
-              </button>
-            </div>
+            <Label>登录方式</Label>
+            <LoginMethodSelector
+              type={form.type}
+              value={form}
+              disabled={submitting}
+              onChange={(selection) => {
+                const loginHeaders = withCredentialHeaders(form.login_headers, form.type, selection.credential_mode, selection.newapi_auth_type, form.newapi_token_headers)
+                setForm({
+                  ...form,
+                  ...selection,
+                  login_headers: loginHeaders,
+                  newapi_token_headers: form.type === "newapi" && selection.newapi_auth_type === "access_token" ? loginHeaders : form.newapi_token_headers,
+                })
+              }}
+            />
             <p className="text-[11px] text-muted-foreground">
               {isTokenMode
                 ? form.type === "sub2api"
                   ? "填写 Access Token + Refresh Token，系统会在过期前自动刷新并保存新 Token。"
-                  : "可使用 Cookie + User ID，或长期有效的访问令牌；访问令牌 Headers 可自定义。"
+                  : form.newapi_auth_type === "cookie"
+                    ? "填写已登录会话的 Cookie 和 User ID，无需再提供账号密码。"
+                    : "填写长期有效的访问令牌和 User ID；Headers 可自定义。"
                 : "提供账号密码，系统自动登录并续期。可能需要配打码 provider。"}
             </p>
           </div> : null}
@@ -636,29 +660,6 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
                   />
                 </div>
               </div>
-              <div className="space-y-2 rounded-lg border border-border p-3">
-                <div className="flex items-center justify-between gap-2">
-                  <div>
-                    <p className="text-xs font-medium">登录请求配置</p>
-                    <p className="text-[11px] text-muted-foreground">支持变量：{'{{username}}'}、{'{{password}}'}、{'{{turnstile_token}}'}</p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8 text-xs"
-                    disabled={submitting}
-                    onClick={() => {
-                      const defaults = defaultLoginConfig(form.type)
-                      setForm({ ...form, login_headers: defaults.headers, login_params: defaults.params })
-                    }}
-                  >
-                    恢复默认
-                  </Button>
-                </div>
-                <RequestKVEditor title="Headers" items={form.login_headers} disabled={submitting} onChange={(items) => setForm({ ...form, login_headers: items })} />
-                <RequestKVEditor title="参数" items={form.login_params} disabled={submitting} onChange={(items) => setForm({ ...form, login_params: items })} />
-              </div>
             </>
           ) : null}
 
@@ -678,33 +679,12 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
                   disabled={submitting}
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  Token 模式下不参与鉴权；自动关联会使用此标识匹配中转站账号身份
+                  此标识不参与鉴权；自动关联会使用它匹配中转站账号身份
                 </p>
               </div>
 
               {form.type === "newapi" ? (
                 <>
-                  <div className="space-y-1.5">
-                    <Label>NewAPI Token 方式</Label>
-                    <div className="grid grid-cols-2 gap-2 rounded-md border border-border p-1">
-                      <button
-                        type="button"
-                        disabled={submitting}
-                        onClick={() => setForm({ ...form, newapi_auth_type: "cookie" })}
-                        className={cn("rounded px-2 py-1.5 text-xs font-medium transition-colors", form.newapi_auth_type === "cookie" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}
-                      >
-                        Cookie + User ID
-                      </button>
-                      <button
-                        type="button"
-                        disabled={submitting}
-                        onClick={() => setForm({ ...form, newapi_auth_type: "access_token" })}
-                        className={cn("rounded px-2 py-1.5 text-xs font-medium transition-colors", form.newapi_auth_type === "access_token" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}
-                      >
-                        访问令牌
-                      </button>
-                    </div>
-                  </div>
                   {form.newapi_auth_type === "cookie" ? (
                     <>
                       <div className="space-y-1.5">
@@ -757,16 +737,6 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
                           disabled={submitting}
                         />
                       </div>
-                      <div className="space-y-2 rounded-lg border border-border p-3">
-                        <div className="flex items-center justify-between gap-2">
-                          <div>
-                            <p className="text-xs font-medium">访问令牌 Headers</p>
-                            <p className="text-[11px] text-muted-foreground">默认包含 Authorization = Bearer {'{{token}}'} 和 New-Api-User = {'{{user_id}}'}；可增删改，直接写入真实 Token 时重新编辑仅对 Token 本身脱敏。</p>
-                          </div>
-                          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" disabled={submitting} onClick={() => setForm({ ...form, newapi_token_headers: defaultNewAPITokenHeaders() })}>恢复默认</Button>
-                        </div>
-                        <RequestKVEditor title="Headers" items={form.newapi_token_headers} disabled={submitting} onChange={(items) => setForm({ ...form, newapi_token_headers: items })} />
-                      </div>
                     </>
                   )}
                 </>
@@ -805,6 +775,46 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
                 </>
               ) : null}
             </>
+          ) : null}
+
+          {!isManualBalance ? (
+            <div className="space-y-2 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <p className="text-xs font-medium">自定义 Headers</p>
+                  <p className="text-[11px] text-muted-foreground">{isTokenMode ? "用于 Token 校验、续期、余额和费率等渠道请求。" : "用于登录和后续渠道请求；支持变量：{{username}}、{{password}}、{{turnstile_token}}。"}</p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  disabled={submitting}
+                  onClick={() => {
+                    const defaults = defaultLoginConfig(form.type, form.credential_mode, form.newapi_auth_type)
+                    setForm({
+                      ...form,
+                      login_headers: defaults.headers,
+                      newapi_token_headers: form.type === "newapi" && form.newapi_auth_type === "access_token" ? defaults.headers : form.newapi_token_headers,
+                      login_params: isTokenMode ? form.login_params : defaults.params,
+                    })
+                  }}
+                >
+                  恢复默认
+                </Button>
+              </div>
+              <RequestKVEditor
+                title="Headers"
+                items={form.login_headers}
+                disabled={submitting}
+                onChange={(items) => setForm({
+                  ...form,
+                  login_headers: items,
+                  newapi_token_headers: form.type === "newapi" && form.newapi_auth_type === "access_token" ? items : form.newapi_token_headers,
+                })}
+              />
+              {!isTokenMode ? <RequestKVEditor title="登录参数" items={form.login_params} disabled={submitting} onChange={(items) => setForm({ ...form, login_params: items })} /> : null}
+            </div>
           ) : null}
 
           {!isManualBalance ? (
@@ -989,6 +999,58 @@ function RequestKVEditor({
   )
 }
 
+type LoginMethodSelection = Pick<FormState, "credential_mode" | "newapi_auth_type">
+
+function LoginMethodSelector({
+  type,
+  value,
+  disabled,
+  ariaLabel = "登录方式",
+  onChange,
+}: {
+  type: ChannelType
+  value: LoginMethodSelection
+  disabled: boolean
+  ariaLabel?: string
+  onChange: (selection: LoginMethodSelection) => void
+}) {
+  const options: (LoginMethodSelection & { label: string })[] = [
+    { label: "账号密码", credential_mode: "password", newapi_auth_type: value.newapi_auth_type },
+    ...(type === "newapi"
+      ? [
+          { label: "Cookie + User ID", credential_mode: "token" as const, newapi_auth_type: "cookie" as const },
+          { label: "访问令牌", credential_mode: "token" as const, newapi_auth_type: "access_token" as const },
+        ]
+      : [{ label: "Token", credential_mode: "token" as const, newapi_auth_type: value.newapi_auth_type }]),
+  ]
+
+  return (
+    <div
+      role="group"
+      aria-label={ariaLabel}
+      className={cn("grid gap-1 rounded-lg border border-border p-1", type === "newapi" ? "grid-cols-1 min-[400px]:grid-cols-3" : "grid-cols-2")}
+    >
+      {options.map(({ label, ...selection }) => {
+        const selected = value.credential_mode === selection.credential_mode && (
+          selection.credential_mode === "password" || type !== "newapi" || value.newapi_auth_type === selection.newapi_auth_type
+        )
+        return (
+          <button
+            key={label}
+            type="button"
+            disabled={disabled}
+            aria-pressed={selected}
+            onClick={() => onChange(selection)}
+            className={cn("min-w-0 rounded-md px-2 py-1.5 text-xs font-medium transition-colors", selected ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}
+          >
+            {label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 function AdditionalAccountsEditor({
   type,
   accounts,
@@ -1057,11 +1119,14 @@ function AdditionalAccountsEditor({
             </div>
 
             <div className="space-y-1.5">
-              <Label>凭据类型</Label>
-              <div className="grid grid-cols-2 gap-2 rounded-md border border-border p-1" role="group" aria-label={`账号 ${index + 2} 凭据类型`}>
-                <button type="button" disabled={disabled} onClick={() => patch(index, { credential_mode: "password" })} className={cn("rounded px-2 py-1.5 text-xs font-medium transition-colors", !isToken ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}>账号密码</button>
-                <button type="button" disabled={disabled} onClick={() => patch(index, { credential_mode: "token" })} className={cn("rounded px-2 py-1.5 text-xs font-medium transition-colors", isToken ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}>Token</button>
-              </div>
+              <Label>登录方式</Label>
+              <LoginMethodSelector
+                type={type}
+                value={account}
+                disabled={disabled}
+                ariaLabel={`账号 ${index + 2} 登录方式`}
+                onChange={(selection) => patch(index, selection)}
+              />
             </div>
 
             {!isToken ? (
@@ -1096,13 +1161,6 @@ function AdditionalAccountsEditor({
               </>
             ) : type === "newapi" ? (
               <>
-                <div className="space-y-1.5">
-                  <Label>NewAPI Token 方式</Label>
-                  <div className="grid grid-cols-2 gap-2 rounded-md border border-border p-1">
-                    <button type="button" disabled={disabled} onClick={() => patch(index, { newapi_auth_type: "cookie" })} className={cn("rounded px-2 py-1.5 text-xs font-medium transition-colors", account.newapi_auth_type === "cookie" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}>Cookie + User ID</button>
-                    <button type="button" disabled={disabled} onClick={() => patch(index, { newapi_auth_type: "access_token" })} className={cn("rounded px-2 py-1.5 text-xs font-medium transition-colors", account.newapi_auth_type === "access_token" ? "bg-foreground text-background" : "text-muted-foreground hover:bg-muted")}>访问令牌</button>
-                  </div>
-                </div>
                 {account.newapi_auth_type === "cookie" ? (
                   <>
                     <div className="space-y-1.5">
@@ -1123,16 +1181,6 @@ function AdditionalAccountsEditor({
                     <div className="space-y-1.5">
                       <Label htmlFor={`additional-newapi-access-token-${index}`}>访问令牌</Label>
                       <Textarea id={`additional-newapi-access-token-${index}`} rows={3} className="field-sizing-fixed min-w-0 max-w-full resize-y text-xs font-mono" placeholder={account.id != null && !modeChanged ? "留空不变；填写则覆盖" : "粘贴访问令牌"} value={account.newapi_access_token} onChange={(event) => patch(index, { newapi_access_token: event.target.value })} disabled={disabled} />
-                    </div>
-                    <div className="space-y-2 rounded-md border border-border p-2.5">
-                      <div className="flex items-center justify-between gap-2">
-                        <div>
-                          <p className="text-xs font-medium">访问令牌 Headers</p>
-                          <p className="text-[11px] text-muted-foreground">默认包含 Authorization = Bearer {'{{token}}'} 和 New-Api-User = {'{{user_id}}'}；直接写入真实 Token 时重新编辑仅对 Token 本身脱敏。</p>
-                        </div>
-                        <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => patch(index, { newapi_token_headers: defaultNewAPITokenHeaders() })}>恢复默认</Button>
-                      </div>
-                      <RequestKVEditor title="Headers" items={account.newapi_token_headers} disabled={disabled} onChange={(items) => patch(index, { newapi_token_headers: items })} />
                     </div>
                   </>
                 )}

@@ -40,7 +40,7 @@ type newapiResp struct {
 }
 
 func (c *Client) GetTurnstileSiteKey(ctx context.Context, ch *connector.Channel) (string, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/status", nil)
+	body, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/status", nil)
 	if err != nil {
 		return "", fmt.Errorf("newapi status: %w", err)
 	}
@@ -62,7 +62,7 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 	vars := map[string]string{"username": ch.Username, "password": ch.Password, "turnstile_token": ch.TurnstileToken}
 	req := c.http.R().
 		SetContext(ctx).
-		SetHeaders(connector.ExpandRequestKV(ch.LoginHeaders, vars)).
+		SetHeaders(requestHeaders(ch, nil)).
 		SetBody(connector.ExpandRequestKV(ch.LoginParams, vars))
 	if ch.TurnstileToken != "" {
 		req.SetQueryParam("turnstile", ch.TurnstileToken)
@@ -112,13 +112,13 @@ func (c *Client) CheckAuth(ctx context.Context, ch *connector.Channel, session *
 	if session == nil || (session.Cookie == "" && len(session.Headers) == 0) {
 		return errors.New("missing newapi auth credential")
 	}
-	_, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self", session)
+	_, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self", session)
 	return err
 }
 
 func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) (*connector.BalanceResult, error) {
 	site := strings.TrimRight(ch.SiteURL, "/")
-	statusBody, err := c.getJSON(ctx, site+"/api/status", nil)
+	statusBody, err := c.getJSON(ctx, ch, site+"/api/status", nil)
 	if err != nil {
 		return nil, fmt.Errorf("newapi status: %w", err)
 	}
@@ -132,7 +132,7 @@ func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session 
 		status.QuotaPerUnit = 500000
 	}
 
-	selfBody, err := c.getJSON(ctx, site+"/api/user/self", session)
+	selfBody, err := c.getJSON(ctx, ch, site+"/api/user/self", session)
 	if err != nil {
 		return nil, fmt.Errorf("newapi self: %w", err)
 	}
@@ -149,7 +149,7 @@ func (c *Client) GetBalance(ctx context.Context, ch *connector.Channel, session 
 }
 
 func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *connector.AuthSession) ([]connector.RateResult, error) {
-	body, err := c.getJSON(ctx, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self/groups", session)
+	body, err := c.getJSON(ctx, ch, strings.TrimRight(ch.SiteURL, "/")+"/api/user/self/groups", session)
 	if err != nil {
 		return nil, fmt.Errorf("newapi groups: %w", err)
 	}
@@ -190,7 +190,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 		pageSize = 100
 	}
 	site := strings.TrimRight(ch.SiteURL, "/")
-	statusBody, err := c.getJSON(ctx, site+"/api/status", nil)
+	statusBody, err := c.getJSON(ctx, ch, site+"/api/status", nil)
 	if err != nil {
 		return nil, fmt.Errorf("newapi usage status: %w", err)
 	}
@@ -204,19 +204,10 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 		status.QuotaPerUnit = 500000
 	}
 
-	req := c.http.R().SetContext(ctx).
+	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session)).
 		SetQueryParam("p", strconv.Itoa(page)).
 		SetQueryParam("page_size", strconv.Itoa(pageSize)).
 		SetQueryParam("type", "0")
-	if len(session.Headers) > 0 {
-		req.SetHeaders(session.Headers)
-	}
-	if session.Cookie != "" {
-		req.SetHeader("Cookie", session.Cookie)
-	}
-	if session.UserID != "" {
-		req.SetHeader("New-Api-User", session.UserID)
-	}
 	if !query.Since.IsZero() {
 		req.SetQueryParam("start_timestamp", strconv.FormatInt(query.Since.Unix(), 10))
 	}
@@ -295,19 +286,45 @@ func firstTokenMSFromOther(other string) *int64 {
 	return &value
 }
 
-func (c *Client) getJSON(ctx context.Context, url string, session *connector.AuthSession) ([]byte, error) {
-	req := c.http.R().SetContext(ctx)
+func requestHeaders(ch *connector.Channel, session *connector.AuthSession) map[string]string {
+	vars := map[string]string{"username": ch.Username, "password": ch.Password, "turnstile_token": ch.TurnstileToken}
+	headers := make(map[string]string)
 	if session != nil {
-		if len(session.Headers) > 0 {
-			req.SetHeaders(session.Headers)
-		}
+		vars["cookie"] = session.Cookie
+		vars["user_id"] = session.UserID
+		vars["token"] = session.AccessToken
+		vars["access_token"] = session.AccessToken
 		if session.Cookie != "" {
-			req.SetHeader("Cookie", session.Cookie)
+			headers["Cookie"] = session.Cookie
 		}
 		if session.UserID != "" {
-			req.SetHeader("New-Api-User", session.UserID)
+			headers["New-Api-User"] = session.UserID
+		}
+		for key, value := range session.Headers {
+			headers[http.CanonicalHeaderKey(key)] = value
 		}
 	}
+	items := make([]connector.RequestKV, 0, len(ch.LoginHeaders))
+	for _, item := range ch.LoginHeaders {
+		unresolved := false
+		for _, name := range []string{"cookie", "user_id", "token", "access_token"} {
+			if strings.Contains(item.Value, "{{"+name+"}}") && vars[name] == "" {
+				unresolved = true
+				break
+			}
+		}
+		if !unresolved {
+			items = append(items, item)
+		}
+	}
+	for key, value := range connector.ExpandRequestKV(items, vars) {
+		headers[http.CanonicalHeaderKey(key)] = value
+	}
+	return headers
+}
+
+func (c *Client) getJSON(ctx context.Context, ch *connector.Channel, url string, session *connector.AuthSession) ([]byte, error) {
+	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session))
 	resp, err := req.Get(url)
 	if err != nil {
 		return nil, err
