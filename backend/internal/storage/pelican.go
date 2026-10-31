@@ -42,6 +42,7 @@ func (PelicanConfig) TableName() string { return "relay_pelican_configs" }
 
 type PelicanResult struct {
 	GroupExternalID         int64     `gorm:"-" json:"group_external_id,omitempty"`
+	ChannelID               uint      `gorm:"->;not null;default:0;index:idx_channel_pelican_history,priority:1" json:"channel_id,omitempty"`
 	ID                      uint      `gorm:"primaryKey" json:"id"`
 	RelayStationID          uint      `gorm:"not null;index:idx_pelican_history,priority:1" json:"relay_station_id"`
 	AccountExternalID       int64     `gorm:"not null;index:idx_pelican_history,priority:2" json:"account_external_id"`
@@ -127,6 +128,9 @@ func (r *RelayStations) FinishPelican(configID uint, until time.Time) error {
 	return r.db.Model(&PelicanConfig{}).Where("id = ? AND lease_until = ?", configID, until).Update("lease_until", nil).Error
 }
 func (r *RelayStations) SavePelicanResult(result *PelicanResult) error {
+	if result.ChannelID > 0 && result.RelayStationID == 0 {
+		return r.saveDirectPelicanResult(result)
+	}
 	return r.db.Transaction(func(tx *gorm.DB) error {
 		var station RelayStation
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&station, result.RelayStationID).Error; err != nil {
@@ -165,6 +169,53 @@ func (r *RelayStations) SavePelicanResult(result *PelicanResult) error {
 		return tx.Where("relay_station_id = ? AND account_external_id = ? AND status <> 'running' AND id NOT IN (?)", result.RelayStationID, result.AccountExternalID, kept).Delete(&PelicanResult{}).Error
 	})
 }
+
+func (r *RelayStations) saveDirectPelicanResult(result *PelicanResult) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		values := []any{result.ChannelID, result.RelayStationID, result.AccountExternalID, result.AccountName, result.Model, result.Prompt, result.ReasoningEffort, result.Trigger, result.Status, result.HTML, result.Error, result.DurationMS, result.StartedAt, result.FinishedAt, result.UpstreamGroupName, result.UpstreamGroupMultiplier}
+		if result.ID == 0 {
+			var inserted struct{ ID uint }
+			if err := tx.Raw(`INSERT INTO relay_pelican_results
+				(channel_id, relay_station_id, account_external_id, account_name, model, prompt, reasoning_effort, trigger, status, html, error, duration_ms, started_at, finished_at, upstream_group_name, upstream_group_multiplier)
+				VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`, values...).Scan(&inserted).Error; err != nil {
+				return err
+			}
+			result.ID = inserted.ID
+		} else {
+			updated := tx.Model(&PelicanResult{}).Where("id = ? AND channel_id = ?", result.ID, result.ChannelID).Updates(map[string]any{
+				"channel_id": result.ChannelID, "relay_station_id": result.RelayStationID, "account_external_id": result.AccountExternalID, "account_name": result.AccountName,
+				"model": result.Model, "prompt": result.Prompt, "reasoning_effort": result.ReasoningEffort, "trigger": result.Trigger, "status": result.Status,
+				"html": result.HTML, "error": result.Error, "duration_ms": result.DurationMS, "started_at": result.StartedAt, "finished_at": result.FinishedAt,
+				"upstream_group_name": result.UpstreamGroupName, "upstream_group_multiplier": result.UpstreamGroupMultiplier,
+			})
+			if updated.Error != nil {
+				return updated.Error
+			}
+			if updated.RowsAffected == 0 {
+				return gorm.ErrRecordNotFound
+			}
+		}
+		if result.Status == "running" {
+			return nil
+		}
+		historyCount := PelicanHistoryLimit
+		var setting AppSetting
+		if err := tx.First(&setting, "key = ?", SettingPelicanHistoryCount).Error; err != nil {
+			if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
+		} else {
+			parsed, err := strconv.Atoi(strings.TrimSpace(setting.Value))
+			if err != nil || parsed < 1 || parsed > PelicanHistoryLimitMax {
+				return errors.New("invalid pelican history count")
+			}
+			historyCount = parsed
+		}
+		kept := tx.Model(&PelicanResult{}).Select("id").Where("channel_id = ?", result.ChannelID).Order("finished_at DESC, id DESC").Limit(historyCount)
+		return tx.Where("channel_id = ? AND status <> 'running' AND id NOT IN (?)", result.ChannelID, kept).Delete(&PelicanResult{}).Error
+	})
+}
+
 func (r *RelayStations) PelicanGallery(stationID uint, historyCounts ...int) ([]PelicanResult, error) {
 	rows := make([]PelicanResult, 0)
 	historyCount := PelicanHistoryLimit
@@ -234,6 +285,23 @@ func (r *RelayStations) PelicanResult(stationID uint, accountID int64, resultID 
 	var result PelicanResult
 	err := r.db.Where("relay_station_id = ? AND account_external_id = ? AND id = ?", stationID, accountID, resultID).First(&result).Error
 	return &result, err
+}
+
+func (r *RelayStations) ChannelPelicanResult(channelID, resultID uint) (*PelicanResult, error) {
+	var result PelicanResult
+	err := r.db.Where("channel_id = ? AND id = ?", channelID, resultID).First(&result).Error
+	return &result, err
+}
+
+func (r *RelayStations) DeleteChannelPelicanResult(channelID, resultID uint) error {
+	result := r.db.Where("channel_id = ? AND id = ?", channelID, resultID).Delete(&PelicanResult{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
 }
 
 func (r *RelayStations) PoolPelicanGallery(stationID uint, limit int) ([]PelicanResult, error) {

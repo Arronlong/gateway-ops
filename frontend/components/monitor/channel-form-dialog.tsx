@@ -558,7 +558,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
               disabled={submitting || form.clear_pelican_api_key}
             />
             <div className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
-              <span>{isEdit && channel?.pelican_key_configured ? "已配置，密钥不会回显；留空表示保持不变。" : form.type === "newapi" ? "NewAPI 关联渠道需填写 Key；Sub2API 未填写时自动读取关联账号凭据。" : "优先使用此 Key；未填写时自动读取关联的 Sub2API 账号凭据。"}</span>
+              <span>{isEdit && channel?.pelican_key_configured ? "已配置，密钥不会回显；留空表示保持不变。" : form.type === "newapi" ? "优先使用此 Key；未关联中转站时可直接通过渠道地址测试。" : "优先使用此 Key；未填写时自动读取关联的 Sub2API 账号凭据。"}</span>
               {isEdit && channel?.pelican_key_configured ? <label className="inline-flex shrink-0 items-center gap-2"><Switch checked={form.clear_pelican_api_key} onCheckedChange={(checked) => setForm({ ...form, clear_pelican_api_key: checked })} disabled={submitting}/><span>清除</span></label> : null}
             </div>
           </div>

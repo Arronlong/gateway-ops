@@ -14,6 +14,16 @@ test("渠道卡片直接展示最近三份结果，不再弹出独立配置面�
   assert.match(panel, /<PelicanAccountPanel/)
 })
 
+
+
+test("unlinked channel with a configured Pelican key exposes a direct test entry", () => {
+  const panel = source("../components/monitor/channel-pelican-panel.tsx")
+  const provider = source("../components/relay/pelican.tsx")
+  assert.match(panel, /pelican_key_configured/)
+  assert.match(panel, /PelicanChannelRunButton/)
+  assert.match(provider, /\/channels\/\$\{channelID\}\/pelican\/run/)
+})
+
 test("独立作品页按渠道逐行展示且不再按作品分页或平铺", () => {
   const page = source("../app/pelican-library-page.tsx")
   assert.match(page, /useChannelPelicanGallery/)

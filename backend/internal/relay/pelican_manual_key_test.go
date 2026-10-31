@@ -153,3 +153,26 @@ func TestNewAPIPelicanMissingManualKeyMakesNoUpstreamRequest(t *testing.T) {
 		t.Fatalf("missing manual key should fail before transport: target=%v err=%v", target, err)
 	}
 }
+
+func TestPrepareDirectPelicanUsesChannelSiteAndManualKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/chat/completions" {
+			t.Errorf("unexpected route: %s", r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer manual-secret" {
+			t.Errorf("manual key was not used: %q", r.Header.Get("Authorization"))
+		}
+		w.Write([]byte(`{"choices":[{"message":{"content":"<svg></svg>"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+	s := NewService(nil, nil)
+	target, err := s.prepareDirectPelican(storage.Channel{SiteURL: server.URL}, "manual-secret", storage.PelicanConfig{Model: "test-model"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer target.close()
+	html, err := target.generate(context.Background(), storage.PelicanConfig{Model: "test-model", Prompt: "draw"})
+	if err != nil || html != "<svg></svg>" {
+		t.Fatalf("html=%q err=%v", html, err)
+	}
+}

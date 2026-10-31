@@ -48,13 +48,18 @@ func buildChannelPelicanGroups(channels []ChannelPelicanInfo, links []ChannelRel
 		configByAccount[accountKey{config.RelayStationID, config.AccountExternalID}] = config
 	}
 	resultsByAccount := make(map[accountKey][]PelicanLibraryItem)
+	directResultsByChannel := make(map[uint][]PelicanLibraryItem)
 	for _, result := range results {
+		if result.ChannelID > 0 {
+			directResultsByChannel[result.ChannelID] = append(directResultsByChannel[result.ChannelID], result)
+			continue
+		}
 		key := accountKey{result.RelayStationID, result.AccountExternalID}
 		resultsByAccount[key] = append(resultsByAccount[key], result)
 	}
 	groups := make([]ChannelPelicanGroup, 0, len(channels))
 	for _, channel := range channels {
-		group := ChannelPelicanGroup{Channel: channel, Targets: []ChannelPelicanTarget{}, Results: []PelicanLibraryItem{}}
+		group := ChannelPelicanGroup{Channel: channel, Targets: []ChannelPelicanTarget{}, Results: append([]PelicanLibraryItem(nil), directResultsByChannel[channel.ID]...)}
 		seen := make(map[accountKey]bool)
 		for _, link := range links {
 			if link.ChannelID != channel.ID || !link.Linked || link.RelayAccountExternalID <= 0 {
@@ -109,15 +114,26 @@ func (r *RelayStations) ChannelPelicanGallery(historyCounts ...int) ([]ChannelPe
 		return nil, err
 	}
 	results := []PelicanLibraryItem{}
-	err = r.db.Raw(`SELECT id, relay_station_id, account_external_id, account_name, model, reasoning_effort, trigger, status, error, duration_ms, started_at, finished_at, upstream_group_name, upstream_group_multiplier, station_name FROM (
+	err = r.db.Raw(`SELECT id, channel_id, relay_station_id, account_external_id, account_name, model, reasoning_effort, trigger, status, error, duration_ms, started_at, finished_at, upstream_group_name, upstream_group_multiplier, station_name FROM (
 	 SELECT results.*, stations.name AS station_name, ROW_NUMBER() OVER (PARTITION BY results.relay_station_id, results.account_external_id ORDER BY results.finished_at DESC, results.id DESC) AS row_number
 	 FROM relay_pelican_results results
 	 JOIN relay_stations stations ON stations.id = results.relay_station_id
 	 JOIN relay_accounts accounts ON accounts.relay_station_id = results.relay_station_id AND accounts.external_id = results.account_external_id
+	 WHERE results.channel_id = 0
 	) ranked WHERE row_number <= ?`, historyCount).Scan(&results).Error
 	if err != nil {
 		return nil, err
 	}
+	directResults := []PelicanLibraryItem{}
+	err = r.db.Raw(`SELECT id, channel_id, relay_station_id, account_external_id, account_name, model, reasoning_effort, trigger, status, error, duration_ms, started_at, finished_at, upstream_group_name, upstream_group_multiplier, '' AS station_name FROM (
+	 SELECT results.*, ROW_NUMBER() OVER (PARTITION BY results.channel_id ORDER BY results.finished_at DESC, results.id DESC) AS row_number
+	 FROM relay_pelican_results results
+	 WHERE results.channel_id > 0
+	) ranked WHERE row_number <= ?`, historyCount).Scan(&directResults).Error
+	if err != nil {
+		return nil, err
+	}
+	results = append(results, directResults...)
 	return buildChannelPelicanGroups(channels, snapshot.Links, stations, configs, results, historyCount), nil
 }
 

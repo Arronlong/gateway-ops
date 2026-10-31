@@ -153,3 +153,22 @@ func TestPelicanDeleteLocksStationFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestDirectPelicanResultPersistsChannelIDWithoutRelayLock(t *testing.T) {
+	repo, mock := pelicanDB(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`INSERT INTO relay_pelican_results`).WithArgs(
+		uint(5), uint(0), int64(0), "Channel A", "test-model", "draw", "medium", "manual", "running", "", "", int64(0), sqlmock.AnyArg(), sqlmock.AnyArg(), "", nil,
+	).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(31))
+	mock.ExpectCommit()
+	result := PelicanResult{ChannelID: 5, AccountName: "Channel A", Model: "test-model", Prompt: "draw", ReasoningEffort: "medium", Trigger: "manual", Status: "running", StartedAt: time.Now(), FinishedAt: time.Now()}
+	if err := repo.SavePelicanResult(&result); err != nil {
+		t.Fatal(err)
+	}
+	if result.ID != 31 {
+		t.Fatalf("direct result ID = %d, want 31", result.ID)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

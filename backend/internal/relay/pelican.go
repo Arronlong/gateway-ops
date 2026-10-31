@@ -194,6 +194,79 @@ func (s *Service) pelicanChannelKey(station storage.RelayStation, accountID int6
 	}
 	return selected, nil
 }
+func (s *Service) StartChannelPelican(ctx context.Context, channelID uint, requested ...storage.PelicanTestPlan) error {
+	_ = ctx
+	if s.channels == nil || s.cipher == nil {
+		return errors.New("渠道测智依赖未初始化")
+	}
+	channel, err := s.channels.FindByID(channelID)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(channel.PelicanKeyCipher) == "" {
+		return errors.New("请先在渠道中配置测智 API Key")
+	}
+	settings, err := s.pelicanSettings()
+	if err != nil {
+		return err
+	}
+	if !settings.TasksEnabled {
+		return errors.New("鹈鹕测智任务执行已关闭，请在系统设置中开启")
+	}
+	plans, err := pelicanManualRunPlans(settings.Plans, requested)
+	if err != nil {
+		return err
+	}
+	key, err := s.cipher.Decrypt(channel.PelicanKeyCipher)
+	if err != nil {
+		return fmt.Errorf("decrypt channel pelican key: %w", err)
+	}
+	if strings.TrimSpace(key) == "" {
+		return errors.New("请先在渠道中配置测智 API Key")
+	}
+	results := make([]storage.PelicanResult, len(plans))
+	for i, plan := range plans {
+		started := time.Now().UTC()
+		results[i] = storage.PelicanResult{ChannelID: channelID, AccountName: channel.Name, Model: strings.TrimSpace(plan.Model), Prompt: plan.Prompt, ReasoningEffort: plan.ReasoningEffort, Trigger: "manual", Status: "running", StartedAt: started, FinishedAt: started}
+		if err := s.stations.SavePelicanResult(&results[i]); err != nil {
+			return err
+		}
+	}
+	go s.runChannelPelicanBatch(context.Background(), *channel, key, results, plans)
+	return nil
+}
+
+func (s *Service) runChannelPelicanBatch(parent context.Context, channel storage.Channel, key string, results []storage.PelicanResult, plans []storage.PelicanTestPlan) {
+	ctx, cancel := context.WithTimeout(parent, pelicanTimeout)
+	defer cancel()
+	var calls sync.WaitGroup
+	for i, plan := range plans {
+		calls.Add(1)
+		go func(index int, plan storage.PelicanTestPlan) {
+			defer calls.Done()
+			result := results[index]
+			target, err := s.prepareDirectPelican(channel, key, storage.PelicanConfig{Model: plan.Model, Prompt: plan.Prompt, ReasoningEffort: plan.ReasoningEffort})
+			if err == nil {
+				result.Model = target.model
+				result.HTML, err = target.generate(ctx, storage.PelicanConfig{Model: plan.Model, Prompt: plan.Prompt, ReasoningEffort: plan.ReasoningEffort})
+				target.close()
+			}
+			result.FinishedAt = time.Now().UTC()
+			result.DurationMS = result.FinishedAt.Sub(result.StartedAt).Milliseconds()
+			if err != nil {
+				result.Status = "failed"
+				result.Error = redactTestText(err.Error(), key)
+			} else {
+				result.Status = "success"
+			}
+			if saveErr := s.stations.SavePelicanResult(&result); saveErr != nil {
+				slog.Error("save direct channel pelican result failed", "channel", channel.ID, "error", saveErr)
+			}
+		}(i, plan)
+	}
+	calls.Wait()
+}
+
 func (s *Service) StartPelican(ctx context.Context, stationID uint, accountID int64, requested ...storage.PelicanTestPlan) (*storage.PelicanConfig, error) {
 	return s.StartPelicanForChannel(ctx, stationID, accountID, 0, requested...)
 }

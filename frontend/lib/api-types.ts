@@ -649,6 +649,7 @@ export interface PelicanConfig {
 }
 export interface PelicanResult {
 	group_external_id?: number
+	channel_id?: number
   id: number
   relay_station_id: number
   station_name?: string

@@ -72,3 +72,17 @@ func TestChannelPelicanGroupsBreakTimestampTiesByResultID(t *testing.T) {
 		t.Fatal("equal timestamp order is unstable")
 	}
 }
+
+func TestChannelPelicanGroupsIncludeDirectResultsWithoutRelayAssociation(t *testing.T) {
+	result := PelicanLibraryItem{PelicanResult: PelicanResult{ID: 9, ChannelID: 5, AccountName: "Channel A", Status: "success"}}
+	groups := buildChannelPelicanGroups(
+		[]ChannelPelicanInfo{{ID: 5, Name: "Channel A", PelicanKeyConfigured: true}},
+		nil,
+		nil,
+		nil,
+		[]PelicanLibraryItem{result},
+	)
+	if len(groups) != 1 || len(groups[0].Targets) != 0 || len(groups[0].Results) != 1 || groups[0].Results[0].ID != 9 {
+		t.Fatalf("direct channel result should not require a relay target: %#v", groups)
+	}
+}

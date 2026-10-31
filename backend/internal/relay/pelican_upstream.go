@@ -253,6 +253,24 @@ func (s *Service) preparePelicanWithManualKey(ctx context.Context, station stora
 	}, nil
 }
 
+func (s *Service) prepareDirectPelican(channel storage.Channel, key string, config storage.PelicanConfig) (*pelicanTarget, error) {
+	if strings.TrimSpace(key) == "" {
+		return nil, errors.New("渠道未配置测智 API Key")
+	}
+	models := storage.PelicanModelPriorityList(config.Model)
+	if len(models) == 0 || strings.Contains(models[0], "*") {
+		return nil, errors.New("直连测智需要配置具体模型")
+	}
+	endpoint, err := pelicanOpenAIChatURL(channel.SiteURL)
+	if err != nil {
+		return nil, err
+	}
+	client := *s.client
+	client.Timeout = pelicanTimeout
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &pelicanTarget{client: client, endpoint: endpoint, model: models[0], token: key, chat: true, headers: make(http.Header), secrets: []string{key}}, nil
+}
+
 func (s *Service) prepareNewAPIPelican(ctx context.Context, station storage.RelayStation, credential newAPICredential, accountID int64, key string, account storage.RelayAccount, config storage.PelicanConfig) (*pelicanTarget, error) {
 	if strings.TrimSpace(key) == "" {
 		return nil, errors.New("NewAPI 测智需要在关联的监控渠道中配置测智 API Key")

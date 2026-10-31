@@ -183,6 +183,22 @@ function usePelicanBody(result:PelicanResult,visible:boolean){
  useEffect(()=>{setValue(null);setError("");if(!visible||result.status!=="success")return;const controller=new AbortController();context.body(result,controller.signal).then(value=>{if(!controller.signal.aborted)setValue(value)}).catch(error=>{if(!controller.signal.aborted)setError(error instanceof Error?error.message:"读取失败")});return()=>controller.abort()},[visible,result.id,result.relay_station_id,result.account_external_id])
  return {value,error}
 }
+export function PelicanChannelRunButton({channelID,channelName,onRefresh}:{channelID:number;channelName:string;onRefresh:()=>Promise<unknown>}) {
+ const [starting,setStarting]=useState(false)
+ const run=async(plan?:PelicanTestPlan)=>{
+  setStarting(true)
+  try{
+   const body=plan?{body:JSON.stringify(plan)}:{}
+   await apiFetch(`/channels/${channelID}/pelican/run`,{method:"POST",...body})
+   await onRefresh()
+  }catch(error){
+   toast.error(error instanceof Error?error.message:"启动测智失败")
+  }finally{setStarting(false)}
+ }
+ return <PelicanOneShotButton name={channelName} active={starting} onRun={run}/>
+}
+
+
 export function PelicanRunButton({targets,channelName,channelID}:{targets:ChannelPelicanTarget[];channelName:string;channelID:number}) {
  const context=usePelican()
  const [selected,setSelected]=useState(""),[starting,setStarting]=useState(false)
