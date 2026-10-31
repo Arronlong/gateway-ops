@@ -59,7 +59,7 @@ func buildChannelPelicanGroups(channels []ChannelPelicanInfo, links []ChannelRel
 	}
 	groups := make([]ChannelPelicanGroup, 0, len(channels))
 	for _, channel := range channels {
-		group := ChannelPelicanGroup{Channel: channel, Targets: []ChannelPelicanTarget{}, Results: append([]PelicanLibraryItem(nil), directResultsByChannel[channel.ID]...)}
+		group := ChannelPelicanGroup{Channel: channel, Targets: []ChannelPelicanTarget{}, Results: append([]PelicanLibraryItem{}, directResultsByChannel[channel.ID]...)}
 		seen := make(map[accountKey]bool)
 		for _, link := range links {
 			if link.ChannelID != channel.ID || !link.Linked || link.RelayAccountExternalID <= 0 {

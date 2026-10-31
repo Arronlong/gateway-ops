@@ -7,6 +7,7 @@ import { createSharedRequestRegistry } from "@/lib/shared-request"
 import { scheduleQueryUpdate } from "@/lib/query-transition"
 import { normalizeRecentMetricsLimit } from "@/lib/recent-request-metrics"
 import { latencyBucketQuery } from "@/lib/latency"
+import { normalizeChannelPelicanGallery } from "@/lib/pelican-library"
 import { useRefreshTick } from "@/lib/refresh-context"
 import type {
   BalanceTrendPoint,
@@ -364,7 +365,8 @@ export function useGroupPelicanGallery(stationID:number|null,readOnly=false):Que
 }
 export function useChannelPelicanGallery(enabled = true) {
   const query=useApi<import("./api-types").ChannelPelicanGallery>(enabled ? "/channels/pelican" : null)
-  const anyRunning=enabled&&query.data?.groups.some(group=>group.targets.some(target=>target.config.lease_until&&Date.parse(target.config.lease_until)>Date.now()))
+  const data=useMemo(()=>query.data?normalizeChannelPelicanGallery(query.data):null,[query.data])
+  const anyRunning=enabled&&data?.groups.some(group=>group.targets.some(target=>target.config.lease_until&&Date.parse(target.config.lease_until)>Date.now()))
   const refetch=useRef(query.refetch)
   refetch.current=query.refetch
   useEffect(()=>{
@@ -372,7 +374,7 @@ export function useChannelPelicanGallery(enabled = true) {
     const timer=window.setInterval(()=>{if(!document.hidden)void refetch.current().catch(()=>{})},5000)
     return()=>window.clearInterval(timer)
   },[anyRunning])
-  return query
+  return {...query,data}
 }
 
 export function usePelicanLibrary(path: string | null) {

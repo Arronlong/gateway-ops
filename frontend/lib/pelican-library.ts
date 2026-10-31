@@ -1,6 +1,10 @@
-import type { PelicanResult } from "./api-types"
+import type { ChannelPelicanGallery, ChannelPelicanGroup, PelicanResult } from "./api-types"
 // @ts-expect-error Node 22 原生 TypeScript 测试需要显式扩展名。
 import { pelicanEffortOptions } from "./pelican.ts"
+
+export function normalizeChannelPelicanGallery(gallery: {groups: readonly (Omit<ChannelPelicanGroup, "results"> & {results: ChannelPelicanGroup["results"] | null})[]}): ChannelPelicanGallery {
+  return {...gallery, groups: gallery.groups.map(group => ({...group, results: group.results ?? []}))}
+}
 
 export function getPelicanFilterOptions(groups: readonly {results: readonly Pick<PelicanResult, "model" | "reasoning_effort">[]}[]) {
   const models = new Set<string>()

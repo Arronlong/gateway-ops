@@ -86,3 +86,27 @@ func TestChannelPelicanGroupsIncludeDirectResultsWithoutRelayAssociation(t *test
 		t.Fatalf("direct channel result should not require a relay target: %#v", groups)
 	}
 }
+
+func TestChannelPelicanGroupsSerializeEmptyResultsAsArrays(t *testing.T) {
+	channels := []ChannelPelicanInfo{{ID: 5}, {ID: 6, PelicanKeyConfigured: true}}
+	links := []ChannelRelayAssociation{{ChannelID: 5, RelayStationID: 1, RelayAccountExternalID: 42, Linked: true}}
+	groups := buildChannelPelicanGroups(channels, links, []RelayStation{{ID: 1}}, nil, nil)
+	encoded, err := json.Marshal(groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload []struct {
+		Results json.RawMessage `json:"results"`
+	}
+	if err := json.Unmarshal(encoded, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload) != len(channels) {
+		t.Fatalf("group count = %d, want %d", len(payload), len(channels))
+	}
+	for i, group := range payload {
+		if string(group.Results) != "[]" {
+			t.Fatalf("channel %d results = %s, want []", channels[i].ID, group.Results)
+		}
+	}
+}
