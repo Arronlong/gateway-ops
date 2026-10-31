@@ -61,7 +61,10 @@ export function ChannelPelicanPanel({channel,query,limit=3,showMore=true,status=
       </header>:targets.length?targets.map(target=><div key={`${target.relay_station_id}/${target.account_external_id}`} className="min-w-0">
         {targets.length>1?<p className="truncate pt-2 text-[10px] text-muted-foreground" title={`${target.station_name} · ${target.account_name}`}>{target.station_name} · {target.account_name}</p>:null}
         <PelicanAccountPanel account={{external_id:target.account_external_id,name:target.account_name||channel.name,relay_station_id:target.relay_station_id,channel_id:channel.id}} controlsOnly/>
-      </div>):directTarget?<div className="flex items-center gap-2 border-t border-border pt-3 text-xs text-muted-foreground"><Bird className="size-3.5"/>鹈鹕测智 · 使用渠道中配置的 API Key 直连测试。</div>:<p className="flex items-center gap-1.5 border-t border-border pt-3 text-xs text-muted-foreground"><Bird className="size-3.5"/>鹈鹕测智 · 请先在“渠道 / 账号”中关联中转站账号。</p>}
+      </div>):directTarget?<div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
+        <p className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground"><Bird className="size-3.5 shrink-0"/>鹈鹕测智 · 使用渠道中配置的 API Key 直连测试。</p>
+        <div className="ml-auto"><PelicanChannelRunButton channelID={channel.id} channelName={channel.name} onRefresh={query.refetch}/></div>
+      </div>:<p className="flex items-center gap-1.5 border-t border-border pt-3 text-xs text-muted-foreground"><Bird className="size-3.5"/>鹈鹕测智 · 请先在“渠道 / 账号”中关联中转站账号。</p>}
       {!compact?<div className="flex min-w-0 items-center gap-2 whitespace-nowrap text-[10px] text-muted-foreground" data-pelican-summary>
         <span className="min-w-0 truncate" title={!tasksEnabled?"请在系统设置中开启测智任务执行":nextRun?`${scheduleLabel}（北京时间）`:"定时测智已关闭，仍可手动测试"}>{scheduleLabel}</span>
         <span className="shrink-0" title={`最近 ${displayLimit} 份 · 最新在前`}>{retainedResults.length}/{settings.data?.pelican_history_count??30} 份</span>
