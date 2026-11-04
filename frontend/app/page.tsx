@@ -6,19 +6,21 @@ import { KpiRow } from "@/components/monitor/kpi-row"
 import { BalanceOverview } from "@/components/monitor/balance-overview"
 import { MultiplierChanges } from "@/components/monitor/multiplier-changes"
 import { useDashboardSummary, useOperationSummary } from "@/lib/queries"
-import type { DashboardRange } from "@/lib/api-types"
+import type { DashboardRangePreset } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
+import { TimeRangeFilter } from "@/components/ui/time-range-filter"
 import { cn } from "@/lib/utils"
 import { RelayAdjustmentLog } from "@/components/monitor/relay-adjustment-log"
 import { OperationSummaryCards } from "@/components/operations/summary-cards"
 
-const ranges: { value: DashboardRange; label: string }[] = [
+const ranges: { value: DashboardRangePreset; label: string }[] = [
   { value: "today", label: "今天" },
   { value: "24h", label: "24 小时" },
   { value: "7d", label: "7 天" },
   { value: "30d", label: "30 天" },
 ]
 
-function RelayRiskOverview({ range }: { range: DashboardRange }) {
+function RelayRiskOverview({ range }: { range: TimeRangeSelection<DashboardRangePreset> }) {
   const summary = useDashboardSummary(range)
   const stats = summary.data?.relay ?? []
   const totals = useMemo(() => stats.reduce((acc, stat) => ({
@@ -51,13 +53,13 @@ function RelayRiskOverview({ range }: { range: DashboardRange }) {
   )
 }
 
-function RelayAdjustmentsOverview({ range }: { range: DashboardRange }) {
+function RelayAdjustmentsOverview({ range }: { range: TimeRangeSelection<DashboardRangePreset> }) {
   const summary = useDashboardSummary(range)
   const rows = summary.data?.recent_relay_adjustments ?? []
   return <RelayAdjustmentLog rows={rows} title="中转站调整记录" storageKey="uh_dashboard_relay_adjustment_log_open" showStation />
 }
 
-function CostOverview({ range }: { range: DashboardRange }) {
+function CostOverview({ range }: { range: TimeRangeSelection<DashboardRangePreset> }) {
   const summary = useOperationSummary(range)
   return (
     <section aria-labelledby="cost-stats-heading" className="space-y-3">
@@ -69,13 +71,13 @@ function CostOverview({ range }: { range: DashboardRange }) {
 }
 
 export default function Page() {
-  const [range, setRange] = useState<DashboardRange>("today")
+  const [range, setRange] = useState<TimeRangeSelection<DashboardRangePreset>>("today")
 
   return (
     <section className="space-y-5">
       <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
         <div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><ProductIcon className="size-5 sm:size-6"/>{"运营总览"}</h1><p className="mt-1 text-xs text-muted-foreground">{"汇总渠道余额、倍率变化、中转站账号风险和经营收支；账本记录请在成本管理中维护。"}</p></div>
-        <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="统计时间范围">{ranges.map((item) => <button key={item.value} type="button" onClick={() => setRange(item.value)} className={cn("h-11 rounded px-3 text-xs transition-colors sm:h-8", range === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>{item.label}</button>)}</div>
+        <TimeRangeFilter value={range} options={ranges} onChange={setRange} label="统计时间范围" />
       </header>
 
       <CostOverview range={range} />

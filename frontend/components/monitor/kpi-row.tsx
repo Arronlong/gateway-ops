@@ -4,7 +4,9 @@ import { ArrowUpRight, CircleDollarSign, DollarSign, MessageSquare, WalletCards 
 import { Card } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
 import { useChannelSummary, useDashboardSummary, useSystemSettings } from "@/lib/queries"
-import type { RelayUsageRange } from "@/lib/api-types"
+import type { RelayUsageRangePreset } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
+import { timeRangeLabel } from "@/lib/time-range"
 import { money } from "@/lib/format"
 import type { LucideIcon } from "lucide-react"
 import type { ReactNode } from "react"
@@ -18,7 +20,7 @@ interface Kpi {
   footer: ReactNode
 }
 
-export function KpiRow({ range = "today", source = "dashboard" }: { range?: RelayUsageRange; source?: "dashboard" | "channels" }) {
+export function KpiRow({ range = "today", source = "dashboard" }: { range?: TimeRangeSelection<RelayUsageRangePreset>; source?: "dashboard" | "channels" }) {
   const dashboardSummary = useDashboardSummary(range, source === "dashboard")
   const channelSummary = useChannelSummary(range, source === "channels")
   const systemSettings = useSystemSettings()
@@ -38,7 +40,7 @@ export function KpiRow({ range = "today", source = "dashboard" }: { range?: Rela
 
   const changeCount = data?.rate_change_count ?? 0
   const showRateChanges = systemSettings.data?.channels_show_rate_changes === true
-  const rangeLabel = range === "all" ? "全部时间" : range === "today" ? "今日" : range === "24h" ? "24 小时" : range === "7d" ? "7 天" : "30 天"
+  const rangeLabel = timeRangeLabel(range, [{ value: "all", label: "全部时间" }, { value: "today", label: "今日" }, { value: "24h", label: "24 小时" }, { value: "7d", label: "7 天" }, { value: "30d", label: "30 天" }])
 
   const kpis: Kpi[] = [
     {

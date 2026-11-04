@@ -24,7 +24,9 @@ import { apiFetch } from "@/lib/api"
 import { useRelayLatencyTrends, useSystemSettings } from "@/lib/queries"
 import { RecentRequestMetrics } from "@/components/monitor/recent-request-metrics"
 import { normalizeRecentMetricsLimit, recentRequestMetrics } from "@/lib/recent-request-metrics"
-import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, RelayAccountBatchActionResult, RelayAccountBatchCloneGroup, RelayAccountBatchCloneResult, RelayAccountConsumptionBucket, RelayLatencySample, RelayUsageRange, RelayAccountTestResult, RelayAccountView, RelayGroupOption, RelayGroupTestResult, RelayGroupView, RelayOverview, RelayRecentUsage, RelayStation, RelayStationAuthMode, RelayStationPayload, RelayStationType } from "@/lib/api-types"
+import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, RelayAccountBatchActionResult, RelayAccountBatchCloneGroup, RelayAccountBatchCloneResult, RelayAccountConsumptionBucket, RelayLatencySample, RelayUsageRange, RelayUsageRangePreset, RelayAccountTestResult, RelayAccountView, RelayGroupOption, RelayGroupTestResult, RelayGroupView, RelayOverview, RelayRecentUsage, RelayStation, RelayStationAuthMode, RelayStationPayload, RelayStationType } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
+import { TimeRangeFilter } from "@/components/ui/time-range-filter"
 import { useChannelConsumptionBuckets, useChannelLatencyBuckets, useChannelLatencyTrends, useChannelRelayAssociations, useChannels, usePrefetchRelayOverviews, useRelayAccountConsumptionBuckets, useRelayAccountModelCatalog, useRelayDailyConsumption, useRelayLatencyBuckets, useRelayOverview, useRelayRecentUsage, useRelayStations, useRelayUsage, useRelayUserBalanceHistory } from "@/lib/queries"
 import { RelayAdjustmentLog } from "@/components/monitor/relay-adjustment-log"
 import { UserManagement } from "@/components/relay/user-management"
@@ -149,7 +151,7 @@ type BatchCloneFormGroup = { source_account_external_id: number; rows: BatchClon
 
 const batchCloneableAccountTypes = new Set(["apikey", "upstream", "bedrock", "service_account"])
 
-const usageRanges: { value: RelayUsageRange; label: string }[] = [
+const usageRanges: { value: RelayUsageRangePreset; label: string }[] = [
   { value: "today", label: "今天" },
   { value: "24h", label: "24 小时" },
   { value: "7d", label: "7 天" },
@@ -204,7 +206,7 @@ export function stationAccountColumns(type: RelayStationType = "sub2api") {
   return accountColumnDefinitions.filter((column) => !((column.key === "concurrency" || column.key === "capacity") && !capabilities.accountConcurrency) && !(column.key === "retry" && !capabilities.poolRetry))
 }
 
-export function NewAPIUserManagement({ stationID, range }: { stationID: number; range: RelayUsageRange }) {
+export function NewAPIUserManagement({ stationID, range }: { stationID: number; range: TimeRangeSelection<RelayUsageRangePreset> }) {
   return <UserManagement stationID={stationID} range={range} stationType="newapi" />
 }
 
@@ -674,7 +676,7 @@ export function RecentUsageTable({
   refreshing: boolean;
   error: string | null;
   onRefresh: () => void;
-  range: RelayUsageRange;
+  range: TimeRangeSelection<RelayUsageRangePreset>;
   groupNames: Map<number, string>;
   accountNames: Map<number, string>;
   accountURLs: Map<number, string>;
@@ -1799,7 +1801,7 @@ export default function RelayStationsPage() {
   const { confirm, dialog: confirmDialog } = useConfirm()
   const [selectedID, setSelectedID] = useState<number | null>(null)
   const [detailModule, setDetailModule] = usePersistedDetailModule("uh_relay_detail_module")
-  const [usageRange, setUsageRange] = useState<RelayUsageRange>("today")
+  const [usageRange, setUsageRange] = useState<TimeRangeSelection<RelayUsageRangePreset>>("today")
   const [latencyGranularity, setLatencyGranularity] = useState<LatencyBucketGranularity>("auto")
   const [accountViewMode, setAccountViewMode] = usePersistedRelayAccountViewMode()
   const [storedAccountColumns, setVisibleAccountColumns] = usePersistedAccountColumns("gatewayops_relay_account_columns")
@@ -1813,7 +1815,7 @@ export default function RelayStationsPage() {
   const channelLatencyBuckets = useChannelLatencyBuckets(usageRange, latencyGranularity, accountDisplayBucketCount, detailModule === "accounts" && overviewReady)
   const channelConsumptionBuckets = useChannelConsumptionBuckets(usageRange, latencyGranularity, accountDisplayBucketCount, detailModule === "accounts" && overviewReady)
   const accountModelCatalog = useRelayAccountModelCatalog(selectedID, detailModule === "accounts")
-  const dailyConsumption = useRelayDailyConsumption(overviewReady ? selectedID : null, "30d")
+  const dailyConsumption = useRelayDailyConsumption(overviewReady ? selectedID : null, usageRange)
   const usage = useRelayUsage(detailModule === "accounts" && overviewReady ? selectedID : null, usageRange)
   const latencyBuckets = useRelayLatencyBuckets(detailModule === "accounts" && overviewReady ? selectedID : null, usageRange, latencyGranularity, accountDisplayBucketCount)
   const accountConsumptionBuckets = useRelayAccountConsumptionBuckets(detailModule === "accounts" && overviewReady ? selectedID : null, usageRange, latencyGranularity, accountDisplayBucketCount)
@@ -1894,7 +1896,7 @@ export default function RelayStationsPage() {
         const stats = usageByAccount.get(account.external_id)
         return { ...account, latency_samples: relayRecentSamplesByAccount.get(account.external_id) ?? [], usage_total_tokens: stats?.usage_total_tokens ?? null, user_charge_amount: stats?.user_charge_amount ?? null, account_cost_amount: stats?.account_cost_amount ?? null }
       }),
-      range: usage.data?.range ?? usageRange,
+      range: usage.data?.range ?? (typeof usageRange === "string" ? usageRange : "custom"),
       usage_complete: usage.data?.complete ?? false,
       usage_failed_accounts: usage.data?.failed_accounts ?? 0,
     }
@@ -2060,7 +2062,7 @@ export default function RelayStationsPage() {
   async function saveStation(form: StationForm) { setBusy(true); try { const payload = buildRelayStationPayload(form, stations.data?.find((station) => station.id === editingID)); const station = await apiFetch<RelayStation>(editingID == null ? "/relay-stations" : `/relay-stations/${editingID}`, { method: editingID == null ? "POST" : "PUT", body: JSON.stringify(payload) }); setShowForm(false); setSelectedID(station.id); await reload(); toast.success(editingID == null ? "中转站已添加" : "中转站配置已更新") } catch (error) { toast.error(relayStationErrorMessage(form.type, "save", error instanceof Error ? error.message : "保存失败")) } finally { setBusy(false) } }
   async function sync() { if (!selectedID) return; setBusy(true); try { await apiFetch(`/relay-stations/${selectedID}/sync`, { method: "POST" }); await reload(); toast.success(stationType === "newapi" ? "NewAPI 账号、分组与成本数据已同步" : "已实时探测 API Key 成本并刷新账号快照") } catch (error) { toast.error(relayStationErrorMessage(stationType, "sync", error instanceof Error ? error.message : "同步失败")); await reload() } finally { setBusy(false) } }
   async function syncAll() { setBusy(true); try { const result = await apiFetch<{ synced: number; failed: number }>("/relay-stations/sync-all", { method: "POST" }); await reload(); toast.success(`已同步 ${result.synced} 个中转站${result.failed ? `，${result.failed} 个失败` : ""}`) } catch (error) { toast.error(error instanceof Error ? error.message : "同步失败") } finally { setBusy(false) } }
-  function changeUsageRange(nextRange: RelayUsageRange) {
+  function changeUsageRange(nextRange: TimeRangeSelection<RelayUsageRangePreset>) {
     setUsageRange(nextRange)
     setLatencyGranularity((current) => normalizeLatencyGranularity(nextRange, current))
   }
@@ -2144,13 +2146,7 @@ export default function RelayStationsPage() {
           ))}
         </div>
         <div className="list-panel-controls flex min-w-0 max-w-full flex-wrap items-center justify-end gap-2" aria-label="中转站统一时间条件">
-          <div className="inline-flex max-w-full flex-wrap rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="中转站统计时间范围">
-            {usageRanges.map((item) => (
-              <button key={item.value} type="button" onClick={() => changeUsageRange(item.value)} className={cn("h-11 rounded px-3 text-xs transition-colors sm:h-8", usageRange === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
-                {item.label}
-              </button>
-            ))}
-          </div>
+          <TimeRangeFilter value={usageRange} options={usageRanges} onChange={changeUsageRange} label="中转站统计时间范围" buttonClassName="h-8" />
           <Select value={latencyGranularity} onValueChange={(value) => setLatencyGranularity(value as LatencyBucketGranularity)}>
             <SelectTrigger className="h-11 w-36 text-xs sm:h-9" aria-label="时间稳定性与调用消耗趋势聚合粒度" title="作用于时间稳定性与消费趋势"><SelectValue /></SelectTrigger>
             <SelectContent>{latencyGranularityOptionsForRange(usageRange).map((item) => <SelectItem key={item.value} value={item.value}>{`粒度：${item.label}`}</SelectItem>)}</SelectContent>

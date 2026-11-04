@@ -32,8 +32,19 @@ type Operations struct{ db *gorm.DB }
 
 func NewOperations(db *gorm.DB) *Operations { return &Operations{db: db} }
 
+func applyTimeWindow(query *gorm.DB, column string, since, until time.Time) *gorm.DB {
+	if !since.IsZero() {
+		query = query.Where(column+" >= ?", since)
+	}
+	if !until.IsZero() {
+		query = query.Where(column+" < ?", until)
+	}
+	return query
+}
+
 type LedgerFilter struct {
 	Since     time.Time
+	Until     time.Time
 	Direction string
 	Category  string
 	Query     string
@@ -70,9 +81,7 @@ func (o *Operations) ListLedger(filter LedgerFilter) ([]OperationLedgerEntryView
 			COALESCE(station.name, '') AS relay_station_name`).
 		Joins("LEFT JOIN channels AS channel ON channel.id = entry.channel_id AND channel.deleted_at IS NULL").
 		Joins("LEFT JOIN relay_stations AS station ON station.id = entry.relay_station_id AND station.deleted_at IS NULL")
-	if !filter.Since.IsZero() {
-		query = query.Where("entry.occurred_at >= ?", filter.Since)
-	}
+	query = applyTimeWindow(query, "entry.occurred_at", filter.Since, filter.Until)
 	if filter.Direction != "" && filter.Direction != "all" {
 		query = query.Where("entry.direction = ?", filter.Direction)
 	}
@@ -99,7 +108,11 @@ func ledgerSearchPattern(query string) string {
 	return "%" + query + "%"
 }
 
-func (o *Operations) LedgerSummary(since time.Time) (LedgerSummary, []LedgerCategorySummary, error) {
+func (o *Operations) LedgerSummary(since time.Time, until ...time.Time) (LedgerSummary, []LedgerCategorySummary, error) {
+	var end time.Time
+	if len(until) > 0 {
+		end = until[0]
+	}
 	var summary LedgerSummary
 	summaryQuery := o.db.Model(&OperationLedgerEntry{}).
 		Select(`
@@ -110,9 +123,7 @@ func (o *Operations) LedgerSummary(since time.Time) (LedgerSummary, []LedgerCate
 			COALESCE(SUM(CASE WHEN category = 'upstream_recharge' THEN amount ELSE 0 END), 0) AS upstream_recharge_amount,
 			COUNT(*) AS entry_count
 		`)
-	if !since.IsZero() {
-		summaryQuery = summaryQuery.Where("occurred_at >= ?", since)
-	}
+	summaryQuery = applyTimeWindow(summaryQuery, "occurred_at", since, end)
 	if err := summaryQuery.Scan(&summary).Error; err != nil {
 		return LedgerSummary{}, nil, err
 	}
@@ -121,9 +132,7 @@ func (o *Operations) LedgerSummary(since time.Time) (LedgerSummary, []LedgerCate
 		Select("direction, category, COALESCE(SUM(amount), 0) AS amount, COUNT(*) AS count").
 		Group("direction, category").
 		Order("amount DESC")
-	if !since.IsZero() {
-		breakdownQuery = breakdownQuery.Where("occurred_at >= ?", since)
-	}
+	breakdownQuery = applyTimeWindow(breakdownQuery, "occurred_at", since, end)
 	if err := breakdownQuery.Scan(&breakdown).Error; err != nil {
 		return LedgerSummary{}, nil, err
 	}
@@ -160,7 +169,7 @@ type StationExpenseTotal struct {
 }
 
 // StationExpenseTotals returns period expenses grouped by relay station.
-func (o *Operations) StationExpenseTotals(since time.Time) (map[uint]StationExpenseTotal, error) {
+func (o *Operations) StationExpenseTotals(since time.Time, until ...time.Time) (map[uint]StationExpenseTotal, error) {
 	type row struct {
 		RelayStationID   uint
 		AccountPurchase  float64
@@ -173,9 +182,11 @@ func (o *Operations) StationExpenseTotals(since time.Time) (map[uint]StationExpe
 			COALESCE(SUM(CASE WHEN category = 'upstream_recharge' THEN amount ELSE 0 END), 0) AS upstream_recharge`).
 		Where("relay_station_id IS NOT NULL AND direction = ? AND category IN ?", "expense", []string{"account_purchase", "upstream_recharge"}).
 		Group("relay_station_id")
-	if !since.IsZero() {
-		query = query.Where("occurred_at >= ?", since)
+	var end time.Time
+	if len(until) > 0 {
+		end = until[0]
 	}
+	query = applyTimeWindow(query, "occurred_at", since, end)
 	if err := query.Scan(&rows).Error; err != nil {
 		return nil, err
 	}

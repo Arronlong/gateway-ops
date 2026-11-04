@@ -410,6 +410,38 @@ func TestNewAPIRejectsLogicalFailure(t *testing.T) {
 	}
 }
 
+func TestNewAPIUsageStatisticsExcludeExactEndTimestamp(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/status" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"quota_per_unit": 100}})
+			return
+		}
+		items := []map[string]any{
+			{"id": 1, "type": 2, "user_id": 8, "quota": 100, "created_at": 1700000060, "model_name": "model"},
+			{"id": 2, "type": 2, "user_id": 8, "quota": 200, "created_at": 1700000119, "model_name": "model"},
+			{"id": 3, "type": 2, "user_id": 8, "quota": 400, "created_at": 1700000120, "model_name": "model"},
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"success": true, "data": map[string]any{"items": items, "total": 3, "page_size": 100}})
+	}))
+	defer server.Close()
+	service := NewService(nil, nil)
+	query := url.Values{"start_time": {"2023-11-14T22:14:20Z"}, "end_time": {"2023-11-14T22:15:20Z"}}
+	var stats remoteUsageStats
+	if err := service.newAPIUsageStats(context.Background(), server.URL, newAPICredential{Token: "token", UserID: "7"}, cloneURLValues(query), &stats); err != nil {
+		t.Fatal(err)
+	}
+	if stats.TotalRequests != 2 || stats.TotalActualCost != 3 {
+		t.Fatalf("custom stats = %#v, want 2 requests and 3 cost", stats)
+	}
+	var ranking remoteUserRanking
+	if err := service.newAPIRanking(context.Background(), server.URL, newAPICredential{Token: "token", UserID: "7"}, cloneURLValues(query), &ranking); err != nil {
+		t.Fatal(err)
+	}
+	if ranking.TotalActualCost != 3 || ranking.TotalRequests != 2 {
+		t.Fatalf("custom ranking = %#v, want 2 requests and 3 cost", ranking)
+	}
+}
+
 func TestNewAPIUserMutationsUseScopedSecurityProof(t *testing.T) {
 	var verifyCalls, manageCalls, unprotectedWrites int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

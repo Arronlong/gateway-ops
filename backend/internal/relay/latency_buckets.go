@@ -274,19 +274,14 @@ func buildDailyConsumption(items []remoteUsage, since, until time.Time, loc *tim
 	}
 	startLocal := since.In(loc)
 	startDay := time.Date(startLocal.Year(), startLocal.Month(), startLocal.Day(), 0, 0, 0, 0, loc)
-	endLocal := until.In(loc)
+	endLocal := until.Add(-time.Nanosecond).In(loc)
 	endDay := time.Date(endLocal.Year(), endLocal.Month(), endLocal.Day(), 0, 0, 0, 0, loc)
-	count := int(endDay.Sub(startDay)/(24*time.Hour)) + 1
-	if count <= 0 {
-		return []DailyConsumptionPoint{}
-	}
-	points := make([]DailyConsumptionPoint, count)
-	indexByDate := make(map[string]int, count)
-	for i := 0; i < count; i++ {
-		day := startDay.AddDate(0, 0, i)
+	points := make([]DailyConsumptionPoint, 0)
+	indexByDate := make(map[string]int)
+	for day := startDay; !day.After(endDay); day = day.AddDate(0, 0, 1) {
 		key := day.Format("2006-01-02")
-		points[i].Date = key
-		indexByDate[key] = i
+		indexByDate[key] = len(points)
+		points = append(points, DailyConsumptionPoint{Date: key})
 	}
 	for _, usage := range items {
 		created, err := time.Parse(time.RFC3339Nano, usage.CreatedAt)
@@ -329,6 +324,20 @@ func (s *Service) StationDailyConsumptionRange(_ context.Context, stationID uint
 		return nil, err
 	}
 	return buildDailyConsumption(items, start.UTC(), until.UTC(), start.Location()), nil
+}
+
+func (s *Service) StationDailyConsumptionWindow(ctx context.Context, stationID uint, since, until time.Time, location *time.Location) ([]DailyConsumptionPoint, error) {
+	if location == nil {
+		location = time.Local
+	}
+	if !until.After(since) {
+		return []DailyConsumptionPoint{}, nil
+	}
+	items, err := s.localUsageItems(stationID, since.UTC(), until.UTC())
+	if err != nil {
+		return nil, err
+	}
+	return buildDailyConsumption(items, since.UTC(), until.UTC(), location), nil
 }
 
 func (s *Service) StationDailyConsumption(ctx context.Context, stationID uint, days int, now time.Time) ([]DailyConsumptionPoint, error) {

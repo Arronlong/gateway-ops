@@ -48,8 +48,12 @@ type operationSummaryView struct {
 }
 
 func operationsSummary(c *gin.Context, d *Deps) {
-	since, rangeName := operationSince(c.DefaultQuery("range", "today"))
-	ledger, breakdown, err := d.Operations.LedgerSummary(since)
+	since, until, rangeName, err := requestedTimeWindow(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	ledger, breakdown, err := d.Operations.LedgerSummary(since, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -59,12 +63,12 @@ func operationsSummary(c *gin.Context, d *Deps) {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	channelBalanceDecrease, err := d.Rates.ChannelConsumptionTotals(since)
+	channelBalanceDecrease, err := d.Rates.ChannelConsumptionTotals(since, customRangeEnd(rangeName, until))
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	stationExpenses, err := d.Operations.StationExpenseTotals(since)
+	stationExpenses, err := d.Operations.StationExpenseTotals(since, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -86,7 +90,7 @@ func operationsSummary(c *gin.Context, d *Deps) {
 	successfulRelayCount := int64(0)
 	for _, station := range stations {
 		stationExpense := stationExpenses[station.ID]
-		revenueUsage, revenueErr := d.Relay.UsageTotal(c.Request.Context(), station.ID, rangeName, since)
+		revenueUsage, revenueErr := d.Relay.UsageTotal(c.Request.Context(), station.ID, rangeName, since, until)
 		if revenueErr != nil {
 			if d.Log != nil {
 				d.Log.Warn("operation relay revenue failed", "station_id", station.ID, "err", revenueErr)
@@ -96,7 +100,7 @@ func operationsSummary(c *gin.Context, d *Deps) {
 			successfulRelayCount++
 		}
 
-		costUsage, costErr := d.Relay.UsageStats(c.Request.Context(), station.ID, rangeName, since)
+		costUsage, costErr := d.Relay.UsageStats(c.Request.Context(), station.ID, rangeName, since, until)
 		stationCost := relayCostSummaryFromUsage(costUsage)
 		if revenueErr == nil {
 			stationCost.UserCharge = revenueUsage.UserCharge
@@ -148,10 +152,14 @@ func operationsSummary(c *gin.Context, d *Deps) {
 }
 
 func listOperationLedger(c *gin.Context, d *Deps) {
-	since, _ := operationSince(c.DefaultQuery("range", "30d"))
+	since, until, _, err := requestedTimeWindow(c, "30d")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "300"))
 	list, err := d.Operations.ListLedger(storage.LedgerFilter{
-		Since: since, Direction: c.Query("direction"), Category: c.Query("category"), Query: c.Query("q"), Limit: limit,
+		Since: since, Until: until, Direction: c.Query("direction"), Category: c.Query("category"), Query: c.Query("q"), Limit: limit,
 	})
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)

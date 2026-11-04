@@ -145,6 +145,24 @@ func TestPublicGroupRecentMetricsFollowSettingsAndKeepHistoryRange(t *testing.T)
 	if requests.Load() != 4 {
 		t.Fatalf("configuration did not invalidate aggregate cache: %d", requests.Load())
 	}
+	windowStart := now.Add(-3 * time.Hour)
+	windowEnd := now.Add(-time.Hour)
+	customView, err := service.PublicGroupMonitorForWindow(context.Background(), station.ID, windowStart, windowEnd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if customView.Range != "custom" || len(customView.Groups) != 1 || customView.Groups[0].SuccessCount != 1 {
+		t.Fatalf("custom monitor range = %#v", customView)
+	}
+	if got := customView.Groups[0].LatencyBuckets; len(got) != groupMonitorLimit || !got[0].Start.Equal(windowStart) || !got[len(got)-1].End.Equal(windowEnd) {
+		t.Fatalf("custom bucket window = %#v", got)
+	}
+	if _, err := service.PublicGroupMonitorForWindow(context.Background(), station.ID, windowStart, windowEnd); err != nil {
+		t.Fatal(err)
+	}
+	if requests.Load() != 6 {
+		t.Fatalf("custom range cache made unexpected requests: %d", requests.Load())
+	}
 }
 
 func TestGroupRecentMetricsKeepRetryAttemptsAndExcludeAuxiliary(t *testing.T) {

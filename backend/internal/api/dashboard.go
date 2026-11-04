@@ -70,7 +70,11 @@ type relayPricingChangeView struct {
 }
 
 func dashboardSummary(c *gin.Context, d *Deps) {
-	since, rangeName := dashboardSince(c.DefaultQuery("range", "today"))
+	since, until, rangeName, err := requestedTimeWindow(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	channels, err := d.Channels.List()
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -115,7 +119,7 @@ func dashboardSummary(c *gin.Context, d *Deps) {
 			}
 		}
 	}
-	consumption, err := d.Rates.ChannelConsumptionTotals(since)
+	consumption, err := d.Rates.ChannelConsumptionTotals(since, customRangeEnd(rangeName, until))
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -126,7 +130,7 @@ func dashboardSummary(c *gin.Context, d *Deps) {
 		return
 	}
 	cumulativeRechargeAmount := dashboardCumulativeRecharge(channels, recharges)
-	usage, err := d.Relay.ChannelUsageTotals(c.Request.Context(), channels, rangeName, since)
+	usage, err := d.Relay.ChannelUsageTotals(c.Request.Context(), channels, rangeName, since, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -145,17 +149,17 @@ func dashboardSummary(c *gin.Context, d *Deps) {
 		}
 	}
 
-	recentChanges, err := d.Rates.ListChangesSince(since, 20)
+	recentChanges, err := d.Rates.ListChangesSince(since, 20, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	rateChangeCount, err := d.Rates.CountChangesSince(since)
+	rateChangeCount, err := d.Rates.CountChangesSince(since, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	relayStats, err := relayDashboardStats(d, since)
+	relayStats, err := relayDashboardStats(d, since, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -262,7 +266,7 @@ func dashboardSinceAt(now time.Time, raw string) (time.Time, string) {
 	}
 }
 
-func relayDashboardStats(d *Deps, since time.Time) ([]relayDashboardStat, error) {
+func relayDashboardStats(d *Deps, since time.Time, until ...time.Time) ([]relayDashboardStat, error) {
 	stations, err := d.RelayStations.List()
 	if err != nil {
 		return nil, err
@@ -322,7 +326,7 @@ func relayDashboardStats(d *Deps, since time.Time) ([]relayDashboardStat, error)
 		if marginCount > 0 {
 			stat.ProfitRatioAverage = stat.ProfitRatioTotal / float64(marginCount)
 		}
-		changes, err := d.RelayStations.ListPricingChanges(station.ID, since, 20)
+		changes, err := d.RelayStations.ListPricingChanges(station.ID, since, 20, until...)
 		if err != nil {
 			return nil, err
 		}
@@ -346,15 +350,29 @@ func relayDashboardStats(d *Deps, since time.Time) ([]relayDashboardStat, error)
 
 func dashboardBalanceTrend(c *gin.Context, d *Deps) {
 	if rawRange := c.Query("range"); rawRange != "" {
-		since, rangeName := dashboardSince(rawRange)
+		since, until, rangeName, err := requestedTimeWindow(c, "today")
+		if err != nil {
+			fail(c, http.StatusBadRequest, err)
+			return
+		}
 		var (
 			trend []storage.DailyAggregate
-			err   error
 		)
-		if rangeName == "today" || rangeName == "24h" {
-			trend, err = d.Rates.AggregateBalanceTrendHourlySince(since)
+		if rangeName == "custom" {
+			location, locationErr := requestedTimeLocation(c)
+			if locationErr != nil {
+				fail(c, http.StatusBadRequest, locationErr)
+				return
+			}
+			bucket := "day"
+			if until.Sub(since) <= 24*time.Hour {
+				bucket = "hour"
+			}
+			trend, err = d.Rates.AggregateBalanceTrendWindow(since, until, bucket, location)
+		} else if rangeName == "today" || rangeName == "24h" {
+			trend, err = d.Rates.AggregateBalanceTrendHourlySince(since, until)
 		} else {
-			trend, err = d.Rates.AggregateBalanceTrendSince(since)
+			trend, err = d.Rates.AggregateBalanceTrendSince(since, until)
 		}
 		if err != nil {
 			fail(c, http.StatusInternalServerError, err)

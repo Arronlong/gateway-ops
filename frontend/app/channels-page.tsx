@@ -7,13 +7,14 @@ import { useSyncSettings, useSystemSettings } from "@/lib/queries"
 import { ChannelCards } from "@/components/monitor/channel-cards"
 import { KpiRow } from "@/components/monitor/kpi-row"
 import { MultiplierChanges } from "@/components/monitor/multiplier-changes"
-import type { LatencyBucketGranularity, RelayUsageRange } from "@/lib/api-types"
-import { cn } from "@/lib/utils"
+import type { LatencyBucketGranularity, RelayUsageRangePreset } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
+import { TimeRangeFilter } from "@/components/ui/time-range-filter"
 import { latencyGranularityOptionsForRange, normalizeLatencyGranularity } from "@/lib/latency"
 import { ConfigurationLoading } from "@/components/ui/configuration-loading"
 import { channelSectionVisible } from "@/lib/system-settings"
 
-const ranges: { value: RelayUsageRange; label: string }[] = [
+const ranges: { value: RelayUsageRangePreset; label: string }[] = [
   { value: "today", label: "今天" },
   { value: "24h", label: "24 小时" },
   { value: "7d", label: "7 天" },
@@ -31,10 +32,10 @@ function channelSyncStatus(enabled: boolean, interval: number) {
 export default function ChannelsPage() {
   const settings = useSyncSettings()
   const systemSettings = useSystemSettings()
-  const [range, setRange] = useState<RelayUsageRange>("today")
+  const [range, setRange] = useState<TimeRangeSelection<RelayUsageRangePreset>>("today")
   const [latencyGranularity, setLatencyGranularity] = useState<LatencyBucketGranularity>("auto")
 
-  function changeRange(nextRange: RelayUsageRange) {
+  function changeRange(nextRange: TimeRangeSelection<RelayUsageRangePreset>) {
     setRange(nextRange)
     setLatencyGranularity((current) => normalizeLatencyGranularity(nextRange, current))
   }
@@ -65,13 +66,7 @@ export default function ChannelsPage() {
           <p className="mt-1 text-xs text-muted-foreground">{"管理渠道可用性、账号、余额、消耗与同步任务。"}</p>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="渠道统计时间范围">
-            {ranges.map((item) => (
-            <button key={item.value} type="button" onClick={() => changeRange(item.value)} className={cn("h-11 rounded px-3 text-xs transition-colors sm:h-8", range === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>
-                {item.label}
-              </button>
-            ))}
-          </div>
+          <TimeRangeFilter value={range} options={ranges} onChange={changeRange} label="渠道统计时间范围" />
           <Select value={latencyGranularity} onValueChange={(value) => setLatencyGranularity(value as LatencyBucketGranularity)}>
             <SelectTrigger className="h-11 w-36 text-xs sm:h-9" aria-label="时间稳定性与调用消耗趋势聚合粒度" title="作用于时间稳定性与调用消耗趋势"><SelectValue /></SelectTrigger>
             <SelectContent>{latencyGranularityOptionsForRange(range).map((item) => <SelectItem key={item.value} value={item.value}>{`粒度：${item.label}`}</SelectItem>)}</SelectContent>

@@ -308,12 +308,17 @@ func (r *RelayStations) ReplaceSnapshot(
 	})
 }
 
-func (r *RelayStations) ListPricingChanges(stationID uint, since time.Time, limit int) ([]RelayChannelPricingChange, error) {
+func (r *RelayStations) ListPricingChanges(stationID uint, since time.Time, limit int, until ...time.Time) ([]RelayChannelPricingChange, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	var list []RelayChannelPricingChange
-	err := r.db.Where("relay_station_id = ? AND changed_at >= ?", stationID, since).
+	var end time.Time
+	if len(until) > 0 {
+		end = until[0]
+	}
+	query := applyTimeWindow(r.db.Where("relay_station_id = ?", stationID), "changed_at", since, end)
+	err := query.
 		Order("changed_at DESC").Limit(limit).Find(&list).Error
 	return list, err
 }

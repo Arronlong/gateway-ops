@@ -252,6 +252,7 @@ type UserListQuery struct {
 	Search         string
 	RangeName      string
 	Since          time.Time
+	Until          time.Time
 	SortBy         string
 	SortOrder      string
 	RiskLevel      string
@@ -1675,7 +1676,7 @@ func extractAccountModelIDs(raw json.RawMessage) []string {
 // UsageStats aggregates Sub2API's actual user charge and token count for every
 // account. Results are cached briefly because the relay account view refreshes
 // regularly, while the source aggregation is read-only but relatively expensive.
-func (s *Service) UsageStats(ctx context.Context, stationID uint, rangeName string, since time.Time) (UsageSummary, error) {
+func (s *Service) UsageStats(ctx context.Context, stationID uint, rangeName string, since time.Time, until ...time.Time) (UsageSummary, error) {
 	accounts, err := s.stations.ListAccounts(stationID)
 	if err != nil {
 		return UsageSummary{}, err
@@ -1684,7 +1685,7 @@ func (s *Service) UsageStats(ctx context.Context, stationID uint, rangeName stri
 	for _, account := range accounts {
 		accountIDs = append(accountIDs, account.ExternalID)
 	}
-	usage, err := s.usageStatsForAccountIDs(ctx, stationID, rangeName, since, accountIDs)
+	usage, err := s.usageStatsForAccountIDs(ctx, stationID, rangeName, since, accountIDs, until...)
 	if err != nil {
 		return usage, err
 	}
@@ -1706,13 +1707,21 @@ func (s *Service) UsageStats(ctx context.Context, stationID uint, rangeName stri
 // usageStatsForAccountIDs reads interval usage only for the specified remote
 // accounts. Channel metrics use this narrower path so a few explicit cost
 // bindings never trigger a fan-out over every account in a relay station.
-func (s *Service) usageStatsForAccountIDs(ctx context.Context, stationID uint, rangeName string, since time.Time, accountIDs []int64) (UsageSummary, error) {
+func (s *Service) usageStatsForAccountIDs(ctx context.Context, stationID uint, rangeName string, since time.Time, accountIDs []int64, until ...time.Time) (UsageSummary, error) {
 	accountIDs = normalizedUsageAccountIDs(accountIDs)
 	result := UsageSummary{Accounts: make(map[int64]AccountUsageStats, len(accountIDs))}
 	if len(accountIDs) == 0 {
 		return result, nil
 	}
-	cacheKey := accountUsageCacheKey(stationID, rangeName, since, accountIDs)
+	var requestedUntil time.Time
+	if len(until) > 0 {
+		requestedUntil = until[0]
+	}
+	cacheUntil := time.Time{}
+	if rangeName == "custom" {
+		cacheUntil = requestedUntil
+	}
+	cacheKey := accountUsageCacheKey(stationID, rangeName, since, accountIDs, cacheUntil)
 	s.usageMu.Lock()
 	if cached, ok := s.usageCache[cacheKey]; ok && time.Now().Before(cached.ExpiresAt) {
 		s.usageMu.Unlock()
@@ -1740,7 +1749,10 @@ func (s *Service) usageStatsForAccountIDs(ctx context.Context, stationID uint, r
 	if len(accountIDs) < workers {
 		workers = len(accountIDs)
 	}
-	until := time.Now()
+	end := time.Now()
+	if rangeName == "custom" && !requestedUntil.IsZero() {
+		end = requestedUntil
+	}
 	var wg sync.WaitGroup
 	for i := 0; i < workers; i++ {
 		wg.Add(1)
@@ -1748,7 +1760,7 @@ func (s *Service) usageStatsForAccountIDs(ctx context.Context, stationID uint, r
 			defer wg.Done()
 			for accountID := range jobs {
 				var remote remoteUsageStats
-				endpoint := usageStatsEndpoint(station.BaseURL, accountID, since, until)
+				endpoint := usageStatsEndpoint(station.BaseURL, accountID, since, end)
 				err := s.get(ctx, endpoint, apiKey, &remote)
 				requests := remote.TotalRequests
 				if requests == 0 {
@@ -1800,7 +1812,7 @@ type ChannelUsageTotal struct {
 // channel-group cost binding always wins; otherwise an account is attributed
 // to the uniquely matching monitored channel based on its Base URL. Both cost
 // and user charge use this exact same account-to-channel mapping.
-func (s *Service) ChannelUsageTotals(ctx context.Context, channels []storage.Channel, rangeName string, since time.Time) (map[uint]ChannelUsageTotal, error) {
+func (s *Service) ChannelUsageTotals(ctx context.Context, channels []storage.Channel, rangeName string, since time.Time, until ...time.Time) (map[uint]ChannelUsageTotal, error) {
 	stations, err := s.stations.List()
 	if err != nil {
 		return nil, err
@@ -1837,7 +1849,7 @@ func (s *Service) ChannelUsageTotals(ctx context.Context, channels []storage.Cha
 		for accountID := range bindings {
 			accountIDs = append(accountIDs, accountID)
 		}
-		usage, usageErr := s.usageStatsForAccountIDs(ctx, station.ID, rangeName, since, accountIDs)
+		usage, usageErr := s.usageStatsForAccountIDs(ctx, station.ID, rangeName, since, accountIDs, until...)
 		for accountID, binding := range bindings {
 			channelID := binding.ChannelID
 			total, exists := totals[channelID]
@@ -2129,16 +2141,20 @@ func (s *Service) ChannelCostTotals(ctx context.Context, channels []storage.Chan
 	return totals, nil
 }
 
-func usageCacheKey(kind string, stationID uint, rangeName string, since time.Time) string {
-	return fmt.Sprintf("%s:%d:%s:%s", kind, stationID, rangeName, usageSinceKey(since))
+func usageCacheKey(kind string, stationID uint, rangeName string, since time.Time, until ...time.Time) string {
+	key := fmt.Sprintf("%s:%d:%s:%s", kind, stationID, rangeName, usageSinceKey(since))
+	if len(until) > 0 && !until[0].IsZero() {
+		key += ":end:" + usageSinceKey(until[0])
+	}
+	return key
 }
 
-func accountUsageCacheKey(stationID uint, rangeName string, since time.Time, accountIDs []int64) string {
+func accountUsageCacheKey(stationID uint, rangeName string, since time.Time, accountIDs []int64, until ...time.Time) string {
 	parts := make([]string, 0, len(accountIDs))
 	for _, accountID := range normalizedUsageAccountIDs(accountIDs) {
 		parts = append(parts, strconv.FormatInt(accountID, 10))
 	}
-	return usageCacheKey("accounts:"+strings.Join(parts, ","), stationID, rangeName, since)
+	return usageCacheKey("accounts:"+strings.Join(parts, ","), stationID, rangeName, since, until...)
 }
 
 func normalizedUsageAccountIDs(accountIDs []int64) []int64 {
@@ -2587,7 +2603,7 @@ func (s *Service) users(ctx context.Context, stationID uint, query UserListQuery
 		totalBalance += user.Balance
 	}
 	users := filterUsersBySearch(allUsers, query.Search)
-	usage, failedUsers := s.userUsage(ctx, stationID, station.BaseURL, apiKey, users, query.RangeName, query.Since)
+	usage, failedUsers := s.userUsage(ctx, stationID, station.BaseURL, apiKey, users, query.RangeName, query.Since, query.Until)
 	registrationIPs, riskDataComplete := s.registrationIPs(ctx, station.BaseURL, apiKey, allUsers)
 
 	items := make([]UserManagementItem, 0, len(users))
@@ -2844,7 +2860,7 @@ func (s *Service) fetchUsers(ctx context.Context, baseURL, apiKey, search string
 	return users, nil
 }
 
-func (s *Service) userUsage(ctx context.Context, stationID uint, baseURL, apiKey string, users []remoteUser, rangeName string, since time.Time) (map[int64]UserUsageStats, int) {
+func (s *Service) userUsage(ctx context.Context, stationID uint, baseURL, apiKey string, users []remoteUser, rangeName string, since, requestedUntil time.Time) (map[int64]UserUsageStats, int) {
 	usage := make(map[int64]UserUsageStats, len(users))
 	if len(users) == 0 {
 		return usage, 0
@@ -2853,7 +2869,11 @@ func (s *Service) userUsage(ctx context.Context, stationID uint, baseURL, apiKey
 	for _, user := range users {
 		_, _ = fmt.Fprintf(hash, "%d,", user.ID)
 	}
-	cacheKey := fmt.Sprintf("users:%d:%s:%s:%x", stationID, rangeName, usageSinceKey(since), hash.Sum(nil))
+	cacheUntil := time.Time{}
+	if rangeName == "custom" {
+		cacheUntil = requestedUntil
+	}
+	cacheKey := fmt.Sprintf("users:%d:%s:%s:%s:%x", stationID, rangeName, usageSinceKey(since), usageSinceKey(cacheUntil), hash.Sum(nil))
 	s.usageMu.Lock()
 	if cached, ok := s.userUsageCache[cacheKey]; ok && time.Now().Before(cached.ExpiresAt) {
 		s.usageMu.Unlock()
@@ -2862,6 +2882,9 @@ func (s *Service) userUsage(ctx context.Context, stationID uint, baseURL, apiKey
 	s.usageMu.Unlock()
 
 	until := time.Now()
+	if rangeName == "custom" && !requestedUntil.IsZero() {
+		until = requestedUntil
+	}
 	if credential, ok := decodeNewAPICredential(apiKey); ok {
 		start := since
 		if start.IsZero() {
@@ -2885,7 +2908,7 @@ func (s *Service) userUsage(ctx context.Context, stationID uint, baseURL, apiKey
 		return usage, 0
 	}
 	remaining := userUsageCandidates(users, rangeName, since)
-	if rangeName != "24h" {
+	if rangeName != "24h" && rangeName != "custom" {
 		var ranking remoteUserRanking
 		if err := s.get(ctx, userRankingEndpoint(baseURL, since, until), apiKey, &ranking); err == nil {
 			for _, item := range ranking.Ranking {
@@ -2921,6 +2944,10 @@ func (s *Service) userUsage(ctx context.Context, stationID uint, baseURL, apiKey
 func userUsageCandidates(users []remoteUser, rangeName string, since time.Time) map[int64]struct{} {
 	candidates := make(map[int64]struct{})
 	for _, user := range users {
+		if rangeName == "custom" {
+			candidates[user.ID] = struct{}{}
+			continue
+		}
 		if user.LastUsedAt == nil {
 			continue
 		}
@@ -3587,8 +3614,16 @@ func sanitizeGatewayMessage(message string, credentials ...string) string {
 
 // UsageTotal reads the aggregate usage directly from Sub2API. The dashboard
 // only needs this total, so it should not fan out one request per account.
-func (s *Service) UsageTotal(ctx context.Context, stationID uint, rangeName string, since time.Time) (UsageSummary, error) {
-	cacheKey := usageCacheKey("total", stationID, rangeName, since)
+func (s *Service) UsageTotal(ctx context.Context, stationID uint, rangeName string, since time.Time, until ...time.Time) (UsageSummary, error) {
+	var requestedUntil time.Time
+	if len(until) > 0 {
+		requestedUntil = until[0]
+	}
+	cacheUntil := time.Time{}
+	if rangeName == "custom" {
+		cacheUntil = requestedUntil
+	}
+	cacheKey := usageCacheKey("total", stationID, rangeName, since, cacheUntil)
 	s.usageMu.Lock()
 	if cached, ok := s.usageCache[cacheKey]; ok && time.Now().Before(cached.ExpiresAt) {
 		s.usageMu.Unlock()
@@ -3604,9 +3639,12 @@ func (s *Service) UsageTotal(ctx context.Context, stationID uint, rangeName stri
 	if err != nil {
 		return UsageSummary{}, fmt.Errorf("decrypt admin API key: %w", err)
 	}
-	until := time.Now()
+	end := time.Now()
+	if rangeName == "custom" && !requestedUntil.IsZero() {
+		end = requestedUntil
+	}
 	var remote remoteUsageStats
-	if err := s.get(ctx, usageTotalEndpoint(station.BaseURL, since, until), apiKey, &remote); err != nil {
+	if err := s.get(ctx, usageTotalEndpoint(station.BaseURL, since, end), apiKey, &remote); err != nil {
 		return UsageSummary{}, err
 	}
 	result := UsageSummary{TotalTokens: remote.TotalTokens, UserCharge: remote.TotalActualCost}

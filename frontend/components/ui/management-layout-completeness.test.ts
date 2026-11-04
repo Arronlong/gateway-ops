@@ -59,7 +59,7 @@ test("\u53f7\u6c60\u53ea\u4fdd\u7559\u4e00\u5957\u641c\u7d22\u7b5b\u9009\u548c\u
   const header = listHeader(file, "OAuth \u53f7\u6c60\u7edf\u8ba1")
   const props = header.openingElement.getText()
   assert.match(props, /setView\("aggregate"\)/)
-  assert.match(props, /setRange\(item.value\)/)
+  assert.match(props, /TimeRangeFilter value=\{range\} options=\{ranges\} onChange=\{setRange\}/)
   assert.match(props, /setStationID/)
 })
 
@@ -67,7 +67,8 @@ test("\u6536\u652f\u8d26\u672c\u4fdd\u7559\u65f6\u95f4\u548c\u64cd\u4f5c\u4e0e\u
   const header = listHeader(parse("../../app/operations-costs-page.tsx"), "\u6536\u652f\u8d26\u672c")
   const props = header.openingElement.getText()
   assert.match(props, /actions=/)
-  assert.match(props, /aria-label="\u8d26\u672c\u65f6\u95f4\u8303\u56f4"/)
+  assert.match(props, /TimeRangeFilter value=\{ledgerRange\}/)
+  assert.match(props, /label="\u8d26\u672c\u65f6\u95f4\u8303\u56f4"/)
   assert.doesNotMatch(props, /secondary=/)
 })
 

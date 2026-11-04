@@ -241,20 +241,31 @@ func (r *Rates) ListChanges(channelID uint, limit int, ratioOnly bool) ([]RateCh
 	return list, nil
 }
 
-func (r *Rates) ListChangesSince(since time.Time, limit int) ([]RateChangeLog, error) {
+func (r *Rates) ListChangesSince(since time.Time, limit int, until ...time.Time) ([]RateChangeLog, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	var list []RateChangeLog
-	err := r.db.Where("changed_at >= ? AND old_ratio IS NOT NULL AND old_ratio <> new_ratio", since).
+	var end time.Time
+	if len(until) > 0 {
+		end = until[0]
+	}
+	query := r.db.Where("old_ratio IS NOT NULL AND old_ratio <> new_ratio")
+	query = applyTimeWindow(query, "changed_at", since, end)
+	err := query.
 		Order("changed_at DESC").Limit(limit).Find(&list).Error
 	return list, err
 }
 
-func (r *Rates) CountChangesSince(since time.Time) (int64, error) {
+func (r *Rates) CountChangesSince(since time.Time, until ...time.Time) (int64, error) {
+	var end time.Time
+	if len(until) > 0 {
+		end = until[0]
+	}
 	var count int64
-	err := r.db.Model(&RateChangeLog{}).
-		Where("changed_at >= ? AND old_ratio IS NOT NULL AND old_ratio <> new_ratio", since).
+	query := r.db.Model(&RateChangeLog{}).Where("old_ratio IS NOT NULL AND old_ratio <> new_ratio")
+	query = applyTimeWindow(query, "changed_at", since, end)
+	err := query.
 		Count(&count).Error
 	return count, err
 }
@@ -262,16 +273,21 @@ func (r *Rates) CountChangesSince(since time.Time) (int64, error) {
 // ListOwnedChangesSince returns channel-owned rate changes only. A current
 // relay_account snapshot marks that group as relay-domain data and excludes
 // all of its changes from channel management.
-func (r *Rates) ListOwnedChangesSince(since time.Time, limit int) ([]RateChangeLog, error) {
+func (r *Rates) ListOwnedChangesSince(since time.Time, limit int, until ...time.Time) ([]RateChangeLog, error) {
 	if limit <= 0 {
 		limit = 50
 	}
 	var list []RateChangeLog
+	var end time.Time
+	if len(until) > 0 {
+		end = until[0]
+	}
 	err := r.db.Table("rate_change_logs AS changes").
 		Select("changes.*").
 		Joins("JOIN rate_snapshots AS snapshots ON snapshots.channel_id = changes.channel_id AND snapshots.model_name = changes.model_name").
 		Where("snapshots.source <> ?", RateSnapshotSourceRelayAccount).
-		Where("changes.changed_at >= ? AND changes.old_ratio IS NOT NULL AND changes.old_ratio <> changes.new_ratio", since).
+		Where("changes.old_ratio IS NOT NULL AND changes.old_ratio <> changes.new_ratio").
+		Scopes(func(query *gorm.DB) *gorm.DB { return applyTimeWindow(query, "changes.changed_at", since, end) }).
 		Order("changes.changed_at DESC, changes.id DESC").
 		Limit(limit).
 		Scan(&list).Error
@@ -290,13 +306,18 @@ func (r *Rates) ListOwnedChangesByChannelSince(channelID uint, since time.Time) 
 	return list, err
 }
 
-func (r *Rates) CountOwnedChangesSince(since time.Time) (int64, error) {
+func (r *Rates) CountOwnedChangesSince(since time.Time, until ...time.Time) (int64, error) {
+	var end time.Time
+	if len(until) > 0 {
+		end = until[0]
+	}
 	var count int64
-	err := r.db.Table("rate_change_logs AS changes").
+	query := r.db.Table("rate_change_logs AS changes").
 		Joins("JOIN rate_snapshots AS snapshots ON snapshots.channel_id = changes.channel_id AND snapshots.model_name = changes.model_name").
 		Where("snapshots.source <> ?", RateSnapshotSourceRelayAccount).
-		Where("changes.changed_at >= ? AND changes.old_ratio IS NOT NULL AND changes.old_ratio <> changes.new_ratio", since).
-		Count(&count).Error
+		Where("changes.old_ratio IS NOT NULL AND changes.old_ratio <> changes.new_ratio")
+	query = applyTimeWindow(query, "changes.changed_at", since, end)
+	err := query.Count(&count).Error
 	return count, err
 }
 
@@ -431,11 +452,12 @@ func (r *Rates) CaptureDailyBalances(at time.Time) (int64, error) {
 // treated as an upstream sampling reset, not a real consumption event. When a
 // reliable range start and end balance are available, the result is capped at
 // the net balance decrease so a reset/recovery pair cannot be double-counted.
-func (r *Rates) ChannelConsumptionTotals(since time.Time) (map[uint]float64, error) {
-	query := r.db.Model(&BalanceChangeLog{})
-	if !since.IsZero() {
-		query = query.Where("detected_at >= ?", since)
+func (r *Rates) ChannelConsumptionTotals(since time.Time, until ...time.Time) (map[uint]float64, error) {
+	var end time.Time
+	if len(until) > 0 {
+		end = until[0]
 	}
+	query := applyTimeWindow(r.db.Model(&BalanceChangeLog{}), "detected_at", since, end)
 	var changes []BalanceChangeLog
 	if err := query.Order("channel_id ASC, detected_at ASC, id ASC").Find(&changes).Error; err != nil {
 		return nil, err
@@ -453,7 +475,7 @@ func (r *Rates) ChannelConsumptionTotals(since time.Time) (map[uint]float64, err
 	if since.IsZero() {
 		return totals, nil
 	}
-	bounds, err := r.rangeBalanceBounds(since)
+	bounds, err := r.rangeBalanceBounds(since, end)
 	if err != nil {
 		return nil, err
 	}
@@ -470,7 +492,10 @@ type balanceRangeBound struct {
 	End   *float64
 }
 
-func (r *Rates) rangeBalanceBounds(since time.Time) (map[uint]balanceRangeBound, error) {
+func (r *Rates) rangeBalanceBounds(since time.Time, until ...time.Time) (map[uint]balanceRangeBound, error) {
+	if len(until) > 0 && !until[0].IsZero() {
+		return r.balanceBoundsForWindow(since, until[0])
+	}
 	localSince := since.In(time.Local)
 	day := localSince.Format("2006-01-02")
 	type row struct {
@@ -514,6 +539,43 @@ func (r *Rates) rangeBalanceBounds(since time.Time) (map[uint]balanceRangeBound,
 	bounds := make(map[uint]balanceRangeBound, len(rows))
 	for _, row := range rows {
 		bounds[row.ChannelID] = balanceRangeBound{Start: row.Start, End: row.End}
+	}
+	return bounds, nil
+}
+
+func (r *Rates) balanceBoundsForWindow(since, until time.Time) (map[uint]balanceRangeBound, error) {
+	type row struct {
+		ChannelID uint
+		Start     *float64
+		End       *float64
+	}
+	var rows []row
+	err := r.db.Raw(`
+		SELECT c.id AS channel_id,
+			COALESCE(
+				NULLIF((SELECT b.balance FROM balance_snapshots b
+					WHERE b.channel_id = c.id AND b.sampled_at <= ?
+					ORDER BY b.sampled_at DESC, b.id DESC LIMIT 1), 0),
+				(SELECT b.balance FROM balance_snapshots b
+					WHERE b.channel_id = c.id AND b.sampled_at >= ? AND b.sampled_at < ? AND b.balance > ?
+					ORDER BY b.sampled_at ASC, b.id ASC LIMIT 1)
+			) AS start,
+			COALESCE(
+				NULLIF((SELECT b.balance FROM balance_snapshots b
+					WHERE b.channel_id = c.id AND b.sampled_at < ?
+					ORDER BY b.sampled_at DESC, b.id DESC LIMIT 1), 0),
+				(SELECT b.balance FROM balance_snapshots b
+					WHERE b.channel_id = c.id AND b.sampled_at >= ? AND b.sampled_at < ? AND b.balance > ?
+					ORDER BY b.sampled_at DESC, b.id DESC LIMIT 1)
+			) AS "end"
+		FROM channels c WHERE c.deleted_at IS NULL
+	`, since, since, until, validBalanceEpsilon, until, since, until, validBalanceEpsilon).Scan(&rows).Error
+	if err != nil {
+		return nil, err
+	}
+	bounds := make(map[uint]balanceRangeBound, len(rows))
+	for _, item := range rows {
+		bounds[item.ChannelID] = balanceRangeBound{Start: item.Start, End: item.End}
 	}
 	return bounds, nil
 }
@@ -636,6 +698,35 @@ type DailyAggregate struct {
 	Balance float64   `json:"balance"`
 }
 
+func (r *Rates) AggregateBalanceTrendWindow(since, until time.Time, bucket string, location *time.Location) ([]DailyAggregate, error) {
+	if bucket != "day" && bucket != "hour" {
+		return nil, errors.New("balance trend bucket must be day or hour")
+	}
+	if location == nil {
+		location = time.Local
+	}
+	var rows []DailyAggregate
+	err := r.db.Raw(`
+		WITH per_bucket AS (
+			SELECT channel_id,
+				date_trunc(?, sampled_at AT TIME ZONE COALESCE(NULLIF(?, 'Local'), current_setting('TimeZone')))
+					AT TIME ZONE COALESCE(NULLIF(?, 'Local'), current_setting('TimeZone')) AS bucket,
+				MAX(sampled_at) AS last_at
+			FROM balance_snapshots
+			WHERE sampled_at >= ? AND sampled_at < ?
+			GROUP BY channel_id, bucket
+		)
+		SELECT pb.bucket AS day, SUM(bs.balance) AS balance
+		FROM per_bucket pb
+		JOIN balance_snapshots bs ON bs.channel_id = pb.channel_id AND bs.sampled_at = pb.last_at
+		GROUP BY pb.bucket ORDER BY pb.bucket ASC
+	`, bucket, location.String(), location.String(), since, until).Scan(&rows).Error
+	if rows == nil {
+		rows = []DailyAggregate{}
+	}
+	return rows, err
+}
+
 // AggregateBalanceTrend 取最近 N 天的"日内最后一次余额"按渠道之和，作为总余额趋势。
 //
 // 实现：对每个 (channel_id, day) 取该天最后一次 BalanceSnapshot 的余额，再按 day 求和。
@@ -649,12 +740,18 @@ func (r *Rates) AggregateBalanceTrend(days int) ([]DailyAggregate, error) {
 	return r.AggregateBalanceTrendSince(start.AddDate(0, 0, -(days - 1)))
 }
 
-func (r *Rates) AggregateBalanceTrendSince(since time.Time) ([]DailyAggregate, error) {
+func (r *Rates) AggregateBalanceTrendSince(since time.Time, until ...time.Time) ([]DailyAggregate, error) {
 	type row struct {
 		Day     time.Time
 		Balance float64
 	}
 	var rows []row
+	where := "sampled_at >= ?"
+	args := []any{since}
+	if len(until) > 0 && !until[0].IsZero() {
+		where += " AND sampled_at < ?"
+		args = append(args, until[0])
+	}
 	err := r.db.Raw(`
 		WITH per_day AS (
 			SELECT
@@ -662,7 +759,7 @@ func (r *Rates) AggregateBalanceTrendSince(since time.Time) ([]DailyAggregate, e
 				date_trunc('day', sampled_at) AS day,
 				MAX(sampled_at)               AS last_at
 			FROM balance_snapshots
-			WHERE sampled_at >= ?
+			WHERE `+where+`
 			GROUP BY channel_id, date_trunc('day', sampled_at)
 		)
 		SELECT pd.day AS day, SUM(bs.balance) AS balance
@@ -671,7 +768,7 @@ func (r *Rates) AggregateBalanceTrendSince(since time.Time) ([]DailyAggregate, e
 		  ON bs.channel_id = pd.channel_id AND bs.sampled_at = pd.last_at
 		GROUP BY pd.day
 		ORDER BY pd.day ASC
-	`, since).Scan(&rows).Error
+	`, args...).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}
@@ -694,12 +791,18 @@ func (r *Rates) AggregateBalanceTrendHourly(hours int) ([]DailyAggregate, error)
 	return r.AggregateBalanceTrendHourlySince(since)
 }
 
-func (r *Rates) AggregateBalanceTrendHourlySince(since time.Time) ([]DailyAggregate, error) {
+func (r *Rates) AggregateBalanceTrendHourlySince(since time.Time, until ...time.Time) ([]DailyAggregate, error) {
 	type row struct {
 		Day     time.Time
 		Balance float64
 	}
 	var rows []row
+	where := "sampled_at >= ?"
+	args := []any{since}
+	if len(until) > 0 && !until[0].IsZero() {
+		where += " AND sampled_at < ?"
+		args = append(args, until[0])
+	}
 	err := r.db.Raw(`
 		WITH per_hour AS (
 			SELECT
@@ -707,7 +810,7 @@ func (r *Rates) AggregateBalanceTrendHourlySince(since time.Time) ([]DailyAggreg
 				date_trunc('hour', sampled_at) AS hour,
 				MAX(sampled_at)                AS last_at
 			FROM balance_snapshots
-			WHERE sampled_at >= ?
+			WHERE `+where+`
 			GROUP BY channel_id, date_trunc('hour', sampled_at)
 		)
 		SELECT ph.hour AS day, SUM(bs.balance) AS balance
@@ -716,7 +819,7 @@ func (r *Rates) AggregateBalanceTrendHourlySince(since time.Time) ([]DailyAggreg
 		  ON bs.channel_id = ph.channel_id AND bs.sampled_at = ph.last_at
 		GROUP BY ph.hour
 		ORDER BY ph.hour ASC
-	`, since).Scan(&rows).Error
+	`, args...).Scan(&rows).Error
 	if err != nil {
 		return nil, err
 	}

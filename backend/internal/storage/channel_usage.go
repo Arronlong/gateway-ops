@@ -120,7 +120,7 @@ func (r *ChannelUsage) EventsBetween(channelID uint, since, until time.Time) ([]
 	return events, err
 }
 
-func (r *ChannelUsage) CostTotals(since time.Time) (map[uint]float64, map[uint]int64, error) {
+func (r *ChannelUsage) CostTotals(since time.Time, until ...time.Time) (map[uint]float64, map[uint]int64, error) {
 	type row struct {
 		ChannelID uint
 		Amount    float64
@@ -130,9 +130,11 @@ func (r *ChannelUsage) CostTotals(since time.Time) (map[uint]float64, map[uint]i
 	q := r.db.Model(&ChannelUsageEvent{}).
 		Select("channel_id, COALESCE(SUM(actual_cost), 0) AS amount, COUNT(*) AS requests").
 		Group("channel_id")
-	if !since.IsZero() {
-		q = q.Where("occurred_at >= ?", since)
+	var end time.Time
+	if len(until) > 0 {
+		end = until[0]
 	}
+	q = applyTimeWindow(q, "occurred_at", since, end)
 	if err := q.Scan(&rows).Error; err != nil {
 		return nil, nil, err
 	}

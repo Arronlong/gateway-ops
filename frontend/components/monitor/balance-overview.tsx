@@ -6,7 +6,9 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis, CartesianG
 import { Card, CardContent, CardTitle } from "@/components/ui/card"
 import { ListPanelHeader } from "@/components/ui/list-panel"
 import { useBalanceTrend, useDashboardSummary } from "@/lib/queries"
-import type { DashboardRange } from "@/lib/api-types"
+import type { DashboardRangePreset } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
+import { timeRangeLabel } from "@/lib/time-range"
 import { money } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
@@ -65,7 +67,7 @@ function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: 
   )
 }
 
-export function BalanceOverview({ range = "today" }: { range?: DashboardRange }) {
+export function BalanceOverview({ range = "today" }: { range?: TimeRangeSelection<DashboardRangePreset> }) {
   const trend = useBalanceTrend(range)
   const summary = useDashboardSummary(range)
   const chartRef = useRef<HTMLDivElement>(null)
@@ -90,8 +92,10 @@ export function BalanceOverview({ range = "today" }: { range?: DashboardRange })
     }
   }, [tooltipPinned])
 
+  const isHourlyRange = typeof range === "string" ? range === "today" || range === "24h" : new Date(range.end).getTime() + 60_000 - new Date(range.start).getTime() <= 86_400_000
+  const rangeTitle = timeRangeLabel(range, [{ value: "today", label: "今天" }, { value: "24h", label: "24 小时" }, { value: "7d", label: "7 天" }, { value: "30d", label: "30 天" }])
   const data = (trend.data ?? []).map((p) => ({
-    day: range === "today" || range === "24h" ? formatHour(p.day) : formatDay(p.day),
+    day: isHourlyRange ? formatHour(p.day) : formatDay(p.day),
     balance: p.balance,
   }))
 
@@ -102,7 +106,7 @@ export function BalanceOverview({ range = "today" }: { range?: DashboardRange })
     <Card className="gap-0 overflow-hidden border border-border py-0 shadow-none lg:h-100">
       <ListPanelHeader
         title={<CardTitle className="text-sm font-semibold">{"渠道余额趋势"}</CardTitle>}
-        meta={<span className="shrink-0 rounded-md border border-border bg-muted/30 px-2 py-1 text-xs text-foreground">{range === "today" ? "今天" : range === "24h" ? "24 小时" : range === "7d" ? "7 天" : "30 天"}</span>}
+        meta={<span className="max-w-64 truncate rounded-md border border-border bg-muted/30 px-2 py-1 text-xs text-foreground" title={rangeTitle}>{rangeTitle}</span>}
       />
       <CardContent className="flex min-h-0 flex-1 flex-col border-t border-border p-4">
         <div ref={chartRef} className="min-h-0 w-full flex-1">
@@ -110,7 +114,7 @@ export function BalanceOverview({ range = "today" }: { range?: DashboardRange })
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">{"加载中…"}</div>
           ) : data.length === 0 ? (
             <div className="flex h-full items-center justify-center text-xs text-muted-foreground">
-              {range === "today" ? "今天暂无余额采样，等待下次扫描或手动刷新" : range === "24h" ? "暂无 24 小时余额采样，等待下次扫描或手动刷新" : "暂无余额采样，等待下次扫描或手动刷新"}
+              {isHourlyRange ? `${rangeTitle}暂无余额采样，等待下次扫描或手动刷新` : "暂无余额采样，等待下次扫描或手动刷新"}
             </div>
           ) : (
             <ResponsiveContainer width="100%" height="100%">

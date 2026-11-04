@@ -1045,7 +1045,11 @@ func relayStationOverview(c *gin.Context, d *Deps) {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	_, rangeName := dashboardSince(c.DefaultQuery("range", "today"))
+	_, _, rangeName, rangeErr := requestedTimeWindow(c, "today")
+	if rangeErr != nil {
+		fail(c, http.StatusBadRequest, rangeErr)
+		return
+	}
 	adjustments, err := d.RelayStations.ListAdjustmentLogsByCategory(id, 50)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -1230,7 +1234,11 @@ func relayStationLatencyBuckets(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	since, until, rangeName := latencyRangeWindow(c.DefaultQuery("range", "today"))
+	since, until, rangeName, err := latencyRangeWindowForQuery(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	spec, err := latencyBucketSpecFromQuery(c, 30)
 	if err != nil {
 		fail(c, http.StatusBadRequest, err)
@@ -1257,7 +1265,11 @@ func relayStationConsumptionBuckets(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	since, until, rangeName := latencyRangeWindow(c.DefaultQuery("range", "today"))
+	since, until, rangeName, err := latencyRangeWindowForQuery(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	spec, err := latencyBucketSpecFromQuery(c, 30)
 	if err != nil {
 		fail(c, http.StatusBadRequest, err)
@@ -1337,13 +1349,30 @@ func relayStationDailyConsumption(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	rawRange := c.DefaultQuery("range", "today")
-	if rawRange != "today" && rawRange != "24h" && rawRange != "7d" && rawRange != "30d" && rawRange != "all" {
-		fail(c, http.StatusBadRequest, errors.New("range 仅支持 today、24h、7d、30d 或 all"))
+	rawRange := strings.ToLower(strings.TrimSpace(c.DefaultQuery("range", "today")))
+	if rawRange != "today" && rawRange != "24h" && rawRange != "7d" && rawRange != "30d" && rawRange != "all" && rawRange != "custom" {
+		fail(c, http.StatusBadRequest, errors.New("range 仅支持 today、24h、7d、30d、all 或 custom"))
 		return
 	}
-	_, rangeName := operationSince(rawRange)
-	points, err := d.Relay.StationDailyConsumptionRange(c.Request.Context(), id, rangeName, time.Now())
+	since, until, rangeName, err := requestedTimeWindow(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	var points []relay.DailyConsumptionPoint
+	if rangeName == "custom" {
+		location, locationErr := requestedTimeLocation(c)
+		if locationErr != nil {
+			fail(c, http.StatusBadRequest, locationErr)
+			return
+		}
+		points, err = d.Relay.StationDailyConsumptionWindow(c.Request.Context(), id, since, until, location)
+	} else if rangeName == "all" || rangeName == "today" || rangeName == "24h" || rangeName == "7d" || rangeName == "30d" {
+		points, err = d.Relay.StationDailyConsumptionRange(c.Request.Context(), id, rangeName, time.Now())
+	} else {
+		fail(c, http.StatusBadRequest, errors.New("range 仅支持 today、24h、7d、30d、all 或 custom"))
+		return
+	}
 	if err != nil {
 		fail(c, http.StatusBadGateway, err)
 		return
@@ -1357,8 +1386,12 @@ func relayStationUsage(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	since, rangeName := operationSince(c.DefaultQuery("range", "today"))
-	usage, usageErr := d.Relay.UsageStats(c.Request.Context(), id, rangeName, since)
+	since, until, rangeName, err := requestedTimeWindow(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	usage, usageErr := d.Relay.UsageStats(c.Request.Context(), id, rangeName, since, until)
 	if usageErr != nil && d.Log != nil {
 		d.Log.Warn("relay usage stats failed", "station_id", id, "range", rangeName, "err", usageErr)
 	}
@@ -1391,8 +1424,12 @@ func relayStationRecentUsage(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
-	since, _ := operationSince(c.DefaultQuery("range", "today"))
-	items, err := d.Relay.RecentUsage(c.Request.Context(), id, since, time.Now())
+	since, until, _, err := requestedTimeWindow(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
+	items, err := d.Relay.RecentUsage(c.Request.Context(), id, since, until)
 	if err != nil {
 		fail(c, http.StatusBadGateway, err)
 		return
@@ -1408,9 +1445,13 @@ func relayStationUsers(c *gin.Context, d *Deps) {
 	}
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	pageSize, _ := strconv.Atoi(c.DefaultQuery("page_size", "50"))
-	since, rangeName := operationSince(c.DefaultQuery("range", "today"))
+	since, until, rangeName, err := requestedTimeWindow(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	result, err := d.Relay.Users(c.Request.Context(), id, relay.UserListQuery{
-		Page: page, PageSize: pageSize, Search: c.Query("search"), RangeName: rangeName, Since: since,
+		Page: page, PageSize: pageSize, Search: c.Query("search"), RangeName: rangeName, Since: since, Until: customRangeEnd(rangeName, until),
 		SortBy: c.DefaultQuery("sort_by", "balance"), SortOrder: c.DefaultQuery("sort_order", "desc"),
 		RiskLevel:      c.DefaultQuery("risk_level", "all"),
 		RegistrationIP: c.Query("registration_ip"),

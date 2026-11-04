@@ -10,7 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { apiFetch } from "@/lib/api"
 import type { LatencyBucket, PublicGroupMonitorGroup, PublicGroupMonitorStatus, PublicGroupMonitorView } from "@/lib/api-types"
-import { defaultPublicRelayMonitorRange, isPublicRelayMonitorViewForSelection, publicRelayMonitorCacheKey, publicRelayMonitorCacheVersion, publicRelayMonitorPath, publicRelayMonitorRanges, resolvePublicRelayMonitorSelection, publicGroupRecentMetrics, type PublicRelayMonitorRange, type PublicRelayMonitorStationOption } from "@/lib/public-relay-monitor"
+import { defaultPublicRelayMonitorRange, isPublicRelayMonitorViewForSelection, publicRelayMonitorCacheKey, publicRelayMonitorCacheVersion, publicRelayMonitorPath, publicRelayMonitorRanges, resolvePublicRelayMonitorSelection, publicGroupRecentMetrics, type PublicRelayMonitorRangePreset, type PublicRelayMonitorStationOption } from "@/lib/public-relay-monitor"
+import type { TimeRangeSelection } from "@/lib/time-range"
+import { TimeRangeFilter } from "@/components/ui/time-range-filter"
 import { cn } from "@/lib/utils"
 import { PlatformBadge } from "@/components/relay/platform-badge"
 import { PublicGroupPelicanResults } from "@/components/relay/pelican-target-panel"
@@ -28,7 +30,7 @@ type MonitorBrowserCache = {
   data: PublicGroupMonitorView
 }
 
-function readMonitorBrowserCache(stationID: number, range: PublicRelayMonitorRange): PublicGroupMonitorView | null {
+function readMonitorBrowserCache(stationID: number, range: TimeRangeSelection<PublicRelayMonitorRangePreset>): PublicGroupMonitorView | null {
   if (typeof window === "undefined" || !Number.isInteger(stationID) || stationID <= 0) return null
   try {
     const raw = window.localStorage.getItem(publicRelayMonitorCacheKey(stationID, range))
@@ -41,7 +43,7 @@ function readMonitorBrowserCache(stationID: number, range: PublicRelayMonitorRan
   }
 }
 
-function writeMonitorBrowserCache(stationID: number, range: PublicRelayMonitorRange, data: PublicGroupMonitorView) {
+function writeMonitorBrowserCache(stationID: number, range: TimeRangeSelection<PublicRelayMonitorRangePreset>, data: PublicGroupMonitorView) {
   if (typeof window === "undefined") return
   try {
     window.localStorage.setItem(publicRelayMonitorCacheKey(stationID, range), JSON.stringify({ version: monitorBrowserCacheVersion, data } satisfies MonitorBrowserCache))
@@ -84,7 +86,7 @@ function successRate(group: PublicGroupMonitorGroup) {
   return total > 0 ? `${((group.success_count / total) * 100).toFixed(1)}%` : "-"
 }
 
-function MonitorRow({ group, range, stationID, pelican }: { group: PublicGroupMonitorGroup; range: PublicRelayMonitorRange; stationID:number; pelican:QueryState<PelicanGallery> }) {
+function MonitorRow({ group, range, stationID, pelican }: { group: PublicGroupMonitorGroup; range: TimeRangeSelection<PublicRelayMonitorRangePreset>; stationID:number; pelican:QueryState<PelicanGallery> }) {
   return <article className="group overflow-hidden rounded-[5px] border border-border/80 bg-card shadow-sm transition-[border-color,box-shadow] duration-200 hover:border-brand/40 hover:shadow-md">
     <div className="p-4 sm:p-5">
       <div className="flex min-w-0 flex-col gap-2">
@@ -166,7 +168,7 @@ export default function PublicRelayMonitorPage() {
   const pelican = useGroupPelicanGallery(numericStationID || null,true)
   const pelicanRefetch=useRef(pelican.refetch)
   pelicanRefetch.current=pelican.refetch
-  const [range, setRange] = useState<PublicRelayMonitorRange>(defaultPublicRelayMonitorRange)
+  const [range, setRange] = useState<TimeRangeSelection<PublicRelayMonitorRangePreset>>(defaultPublicRelayMonitorRange)
   const initialCache = useMemo(() => readMonitorBrowserCache(numericStationID, range), [numericStationID, range])
   const requestIDRef = useRef(0)
   const [data, setData] = useState<PublicGroupMonitorView | null>(initialCache)
@@ -193,10 +195,17 @@ export default function PublicRelayMonitorPage() {
       setLoading(false)
       return
     }
+    const path = publicRelayMonitorPath(numericStationID, range)
+    if (!path) {
+      setLoading(false)
+      setRefreshing(false)
+      setError("开始时间不能晚于结束时间")
+      return
+    }
     const requestID = ++requestIDRef.current
     if (silent) setRefreshing(true)
     try {
-      const next = await apiFetch<PublicGroupMonitorView>(publicRelayMonitorPath(numericStationID, range), { skipAuthErrorHandler: true })
+      const next = await apiFetch<PublicGroupMonitorView>(path, { skipAuthErrorHandler: true })
       if (requestID !== requestIDRef.current) return
       if (!isPublicRelayMonitorViewForSelection(next, numericStationID, range)) {
         throw new Error(next?.station_id === numericStationID && next.range == null
@@ -274,27 +283,7 @@ export default function PublicRelayMonitorPage() {
       </header>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <div className="inline-flex flex-wrap rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="分组监控时间范围">
-          {publicRelayMonitorRanges.map((item) => (
-            <button
-              key={item.value}
-              type="button"
-              aria-pressed={range === item.value}
-              onClick={() => {
-                if (range === item.value) return
-                requestIDRef.current++
-                setData(null)
-                setLoading(true)
-                setRefreshing(false)
-                setError(null)
-                setRange(item.value)
-              }}
-              className={cn("h-11 rounded px-4 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:h-8", range === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}
-            >
-              {item.label}
-            </button>
-          ))}
-        </div>
+        <TimeRangeFilter value={range} options={publicRelayMonitorRanges} onChange={(value) => { requestIDRef.current++; setData(null); setLoading(true); setRefreshing(false); setError(null); setRange(value) }} label="分组监控时间范围" buttonClassName="h-8" />
         <p className="text-[11px] text-muted-foreground">每个分组展示所选时间范围内最近 60 次调用</p>
       </div>
 

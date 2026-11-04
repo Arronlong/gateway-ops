@@ -427,6 +427,9 @@ func TestUsageCacheKeyIncludesExactRange(t *testing.T) {
 	if usageCacheKey("accounts", 1, "today", time.Time{}) == usageCacheKey("accounts", 1, "today", first) {
 		t.Fatal("all-time usage cache key collided with bounded interval")
 	}
+	if usageCacheKey("accounts", 1, "custom", first, second) == usageCacheKey("accounts", 1, "custom", first, second.Add(time.Hour)) {
+		t.Fatal("custom usage cache key reused different interval ends")
+	}
 }
 
 func TestAccountUsageCacheKeyTracksBoundAccounts(t *testing.T) {
@@ -512,6 +515,9 @@ func TestUserUsageCandidatesFollowLastUsedRange(t *testing.T) {
 	}
 	if got := userUsageCandidates(users, "all", time.Time{}); !reflect.DeepEqual(got, map[int64]struct{}{1: {}, 2: {}}) {
 		t.Fatalf("all candidates = %#v", got)
+	}
+	if got := userUsageCandidates(users, "custom", cutoff); !reflect.DeepEqual(got, map[int64]struct{}{1: {}, 2: {}, 3: {}}) {
+		t.Fatalf("custom candidates = %#v", got)
 	}
 }
 

@@ -346,13 +346,17 @@ type channelLatencyTrendView struct {
 }
 
 func channelSummary(c *gin.Context, d *Deps) {
-	since, rangeName := operationSince(c.DefaultQuery("range", "today"))
+	since, until, rangeName, err := requestedTimeWindow(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	channels, err := d.Channels.List()
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	consumption, err := d.Rates.ChannelConsumptionTotals(since)
+	consumption, err := d.Rates.ChannelConsumptionTotals(since, customRangeEnd(rangeName, until))
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -362,7 +366,7 @@ func channelSummary(c *gin.Context, d *Deps) {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	usageCost, usageRequests, err := d.ChannelUsage.CostTotals(since)
+	usageCost, usageRequests, err := d.ChannelUsage.CostTotals(since, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -393,12 +397,12 @@ func channelSummary(c *gin.Context, d *Deps) {
 		usageCostAmount += usageCost[item.ID]
 		usageRequestCount += usageRequests[item.ID]
 	}
-	rateChangeCount, err := d.Rates.CountOwnedChangesSince(since)
+	rateChangeCount, err := d.Rates.CountOwnedChangesSince(since, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	recentRateChanges, err := d.Rates.ListOwnedChangesSince(since, 20)
+	recentRateChanges, err := d.Rates.ListOwnedChangesSince(since, 20, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -412,7 +416,11 @@ func channelSummary(c *gin.Context, d *Deps) {
 }
 
 func channelMetrics(c *gin.Context, d *Deps) {
-	since, _ := operationSince(c.DefaultQuery("range", "today"))
+	since, until, rangeName, err := requestedTimeWindow(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	channels, err := d.Channels.List()
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
@@ -423,12 +431,12 @@ func channelMetrics(c *gin.Context, d *Deps) {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	consumption, err := d.Rates.ChannelConsumptionTotals(since)
+	consumption, err := d.Rates.ChannelConsumptionTotals(since, customRangeEnd(rangeName, until))
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
 	}
-	usageCost, usageRequests, err := d.ChannelUsage.CostTotals(since)
+	usageCost, usageRequests, err := d.ChannelUsage.CostTotals(since, until)
 	if err != nil {
 		fail(c, http.StatusInternalServerError, err)
 		return
@@ -476,6 +484,14 @@ func latencyRangeWindow(raw string) (time.Time, time.Time, string) {
 	return latencyRangeWindowAt(time.Now(), raw)
 }
 
+func latencyRangeWindowForQuery(c *gin.Context, defaultRange string) (time.Time, time.Time, string, error) {
+	if strings.EqualFold(strings.TrimSpace(c.Query("range")), "custom") {
+		return requestedTimeWindow(c, defaultRange)
+	}
+	since, until, rangeName := latencyRangeWindow(c.DefaultQuery("range", defaultRange))
+	return since, until, rangeName, nil
+}
+
 func latencyRangeWindowAt(now time.Time, raw string) (time.Time, time.Time, string) {
 	until := now.UTC().Truncate(time.Minute)
 	localNow := until.In(now.Location())
@@ -507,7 +523,11 @@ func latencySampleWindow(c *gin.Context) (time.Time, time.Time, int, error) {
 }
 
 func channelLatencyBuckets(c *gin.Context, d *Deps) {
-	since, until, rangeName := latencyRangeWindow(c.DefaultQuery("range", "today"))
+	since, until, rangeName, err := latencyRangeWindowForQuery(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	spec, err := latencyBucketSpecFromQuery(c, 60)
 	if err != nil {
 		fail(c, http.StatusBadRequest, err)
@@ -531,7 +551,11 @@ func channelLatencyBuckets(c *gin.Context, d *Deps) {
 }
 
 func channelConsumptionBuckets(c *gin.Context, d *Deps) {
-	since, until, rangeName := latencyRangeWindow(c.DefaultQuery("range", "today"))
+	since, until, rangeName, err := latencyRangeWindowForQuery(c, "today")
+	if err != nil {
+		fail(c, http.StatusBadRequest, err)
+		return
+	}
 	spec, err := latencyBucketSpecFromQuery(c, 60)
 	if err != nil {
 		fail(c, http.StatusBadRequest, err)

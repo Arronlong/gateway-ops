@@ -15,12 +15,15 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { apiFetch } from "@/lib/api"
 import { useChannels, useOperationLedger, useOperationSummary, useRelayStations } from "@/lib/queries"
-import type { OperationLedgerEntry, OperationRange } from "@/lib/api-types"
+import type { OperationLedgerEntry, OperationRangePreset } from "@/lib/api-types"
 import { cn } from "@/lib/utils"
 import { cny, usd, OperationSummaryCards } from "@/components/operations/summary-cards"
 import { useTriggerRefresh } from "@/lib/refresh-context"
+import { TimeRangeFilter } from "@/components/ui/time-range-filter"
+import type { TimeRangeSelection } from "@/lib/time-range"
+import { timeRangeLabel } from "@/lib/time-range"
 
-const ranges: { value: OperationRange; label: string }[] = [
+const ranges: { value: OperationRangePreset; label: string }[] = [
   { value: "all", label: "All" },
   { value: "today", label: "今天" },
   { value: "24h", label: "24 小时" },
@@ -50,8 +53,8 @@ function categoryLabel(value: string) {
   return categories.find((category) => category.value === value)?.label ?? value
 }
 
-function rangeLabel(range: OperationRange) {
-  return ranges.find((item) => item.value === range)?.label ?? range
+function rangeLabel(range: TimeRangeSelection<OperationRangePreset>) {
+  return timeRangeLabel(range, ranges)
 }
 
 function ActiveFilterSubTrigger({ label, value }: { label: string; value?: string | null }) {
@@ -98,8 +101,8 @@ function LedgerRow({ row, onEdit, onDelete }: LedgerRowProps) {
 }
 
 export default function OperationsCostsPage() {
-  const [range, setRange] = useState<OperationRange>("all")
-  const [ledgerRange, setLedgerRange] = useState<OperationRange>("all")
+  const [range, setRange] = useState<TimeRangeSelection<OperationRangePreset>>("all")
+  const [ledgerRange, setLedgerRange] = useState<TimeRangeSelection<OperationRangePreset>>("all")
   const [ledgerDirection, setLedgerDirection] = useState<LedgerDirection>("all")
   const [ledgerCategory, setLedgerCategory] = useState("all")
   const [ledgerQuery, setLedgerQuery] = useState("")
@@ -215,7 +218,7 @@ export default function OperationsCostsPage() {
       <header className="list-panel-controls flex flex-wrap items-end justify-between gap-3 border-l-2 border-brand pl-3">
         <div><h1 className="flex items-center gap-2 text-xl font-bold text-foreground"><ProductIcon className="size-5 sm:size-6"/>成本管理</h1><p className="mt-1 text-xs text-muted-foreground">维护显式收支账本，汇总渠道成本、中转站用户扣费与账号采购成本。</p></div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="成本统计时间范围">{ranges.map((item) => <button type="button" key={item.value} onClick={() => setRange(item.value)} className={cn("h-10 rounded px-3 text-xs transition-colors sm:h-8", range === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>{item.label}</button>)}</div>
+          <TimeRangeFilter value={range} options={ranges} onChange={setRange} label="成本统计时间范围" />
           <Button type="button" size="sm" className="h-9 gap-1.5" onClick={() => resetForm()}><Plus className="size-3.5" />记一笔</Button>
         </div>
       </header>
@@ -247,9 +250,7 @@ export default function OperationsCostsPage() {
           title={<CardTitle className="flex items-center gap-2 text-sm font-semibold"><ReceiptText className="size-4 text-brand" />收支账本</CardTitle>}
           description={<p className="mt-1 truncate text-xs text-muted-foreground">{rangeLabel(ledgerRange)} · {rows.length} 条。现金净额只表示已记录收支差额，不代表利润。</p>}
           actions={<div className="contents" aria-label="收支账本筛选">
-          <div className="inline-flex shrink-0 rounded-md border border-border bg-muted/30 p-0.5" role="group" aria-label="账本时间范围">
-            {ranges.map((item) => <button type="button" key={item.value} onClick={() => setLedgerRange(item.value)} className={cn("h-10 rounded px-3 text-xs transition-colors sm:h-8", ledgerRange === item.value ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground")}>{item.label}</button>)}
-            </div>
+          <TimeRangeFilter value={ledgerRange} options={ranges} onChange={setLedgerRange} label="账本时间范围" buttonClassName="h-8" />
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative shrink-0"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input value={ledgerQuery} onChange={(event) => setLedgerQuery(event.target.value)} placeholder={"搜索说明 / 渠道 / 中转站"} aria-label={"按说明、渠道名称或中转站名称搜索"} className="h-11 w-64 pl-8 text-xs sm:h-9" /></div>
           <DropdownMenu>

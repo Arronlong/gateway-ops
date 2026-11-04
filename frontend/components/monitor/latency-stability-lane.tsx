@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react"
 import type { ComponentProps, ReactNode } from "react"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, PublicGroupMonitorCall, RelayLatencySample, RelayUsageRange } from "@/lib/api-types"
+import type { ChannelUsageSample, LatencyBucket, LatencyBucketGranularity, PublicGroupMonitorCall, RelayLatencySample, RelayUsageRangePreset } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
 import { relayAccountComparisonKey, type ChannelCompareLink, type RelayCompareLink } from "@/lib/channel-relay-association"
 import { ChannelLatencyComparisonTooltip, RelayLatencyComparisonTooltip } from "@/components/monitor/channel-relay-compare"
 import { formatLatency, formatOutputTokenSpeed, latencyBucketGranularityLabel, latencyBucketTones, latencyColor, latencyTone, latencyTooltipTextClass, outputTokenSpeed } from "@/lib/latency"
@@ -251,7 +252,7 @@ function RecentSampleCell({ sample, bucket, onOpen, compact, primarySamples, rel
 
 interface RelayCompareConfig {
   links: RelayCompareLink[]
-  range: RelayUsageRange
+  range: TimeRangeSelection<RelayUsageRangePreset>
   granularity: LatencyBucketGranularity
   bucketCount: number
   recentSamplesByAccount: Map<string, RelayLatencySample[]>
@@ -406,7 +407,7 @@ function LatencyStabilityLaneContent({
   relayAccountName?: string
   /** 传入时保留原有的最近调用样本条带，仅将交互统计指向所属时间桶。 */
   recentSamples?: LatencyDetailSample[]
-  range?: RelayUsageRange
+  range?: TimeRangeSelection<RelayUsageRangePreset>
   bucketCount?: number
   /** 展示的标题，默认“时间稳定性”。 */
   title?: ReactNode

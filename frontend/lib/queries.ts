@@ -7,6 +7,7 @@ import { createSharedRequestRegistry } from "@/lib/shared-request"
 import { scheduleQueryUpdate } from "@/lib/query-transition"
 import { normalizeRecentMetricsLimit } from "@/lib/recent-request-metrics"
 import { latencyBucketQuery } from "@/lib/latency"
+import { serializeTimeRange, type TimeRangeSelection } from "@/lib/time-range"
 import { normalizeChannelPelicanGallery } from "@/lib/pelican-library"
 import { useRefreshTick } from "@/lib/refresh-context"
 import type {
@@ -43,13 +44,13 @@ import type {
   RelayStation,
   PelicanGallery,
   PelicanLibraryPage,
-  DashboardRange,
-  RelayUsageRange,
+  DashboardRangePreset,
+  RelayUsageRangePreset,
   LatencyBucketGranularity,
   SyncSettings,
   SystemSettings,
   LocalAccountListResponse,
-  OperationRange,
+  OperationRangePreset,
   OperationLedgerEntry,
   OperationLinkStation,
   OperationSummary,
@@ -234,14 +235,16 @@ function useApi<T>(path: string | null, cancelOnNavigation = true, cacheTTL = CA
   }
 }
 
-export function useDashboardSummary(range: RelayUsageRange = "today", enabled = true) {
-  return useApi<DashboardSummary>(enabled ? `/dashboard/summary?range=${range}` : null)
+export function useDashboardSummary(range: TimeRangeSelection<RelayUsageRangePreset> = "today", enabled = true) {
+  const query = serializeTimeRange(range)
+  return useApi<DashboardSummary>(enabled && query ? `/dashboard/summary?${query}` : null)
 }
 
-export type BalanceTrendRange = DashboardRange
+export type BalanceTrendRange = DashboardRangePreset
 
-export function useBalanceTrend(range: BalanceTrendRange = "7d") {
-  return useApi<BalanceTrendPoint[]>(`/dashboard/balance-trend?range=${range}`)
+export function useBalanceTrend(range: TimeRangeSelection<BalanceTrendRange> = "7d") {
+  const query = serializeTimeRange(range)
+  return useApi<BalanceTrendPoint[]>(query ? `/dashboard/balance-trend?${query}` : null)
 }
 
 export function useChannels(cancelOnNavigation = true) {
@@ -256,12 +259,14 @@ export function useChannelModelCatalog() {
   return useApi<ChannelModelCatalogItem[]>("/channels/model-catalog")
 }
 
-export function useChannelSummary(range: RelayUsageRange = "today", enabled = true) {
-  return useApi<ChannelSummary>(enabled ? `/channels/summary?range=${range}` : null)
+export function useChannelSummary(range: TimeRangeSelection<RelayUsageRangePreset> = "today", enabled = true) {
+  const query = serializeTimeRange(range)
+  return useApi<ChannelSummary>(enabled && query ? `/channels/summary?${query}` : null)
 }
 
-export function useChannelMetrics(range: RelayUsageRange = "today") {
-  return useApi<ChannelMetric[]>(`/channels/metrics?range=${range}`)
+export function useChannelMetrics(range: TimeRangeSelection<RelayUsageRangePreset> = "today") {
+  const query = serializeTimeRange(range)
+  return useApi<ChannelMetric[]>(query ? `/channels/metrics?${query}` : null)
 }
 
 export function useChannelLatencyTrends(limit = 60, enabled = true) {
@@ -272,32 +277,28 @@ export function useRelayLatencyTrends(limit = 60, enabled = true) {
   return useApi<RelayLatencyTrend[]>(enabled ? `/relay-stations/latency-trends?limit=${normalizeRecentMetricsLimit(limit)}` : null)
 }
 
-export function useChannelLatencyBuckets(range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 60, enabled = true) {
-  const normalized = range === "all" ? "30d" : range
-  const query = latencyBucketQuery(granularity, targetCount)
-  query.set("range", normalized)
-  return useApi<ChannelLatencyBucketSeries[]>(enabled ? `/channels/latency-buckets?${query.toString()}` : null)
+export function useChannelLatencyBuckets(range: TimeRangeSelection<RelayUsageRangePreset> = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 60, enabled = true) {
+  const query = typeof range === "string" && range === "all" ? serializeTimeRange("30d") : serializeTimeRange(range)
+  if (query) for (const [key, value] of latencyBucketQuery(granularity, targetCount)) query.set(key, value)
+  return useApi<ChannelLatencyBucketSeries[]>(enabled && query ? `/channels/latency-buckets?${query}` : null)
 }
 
-export function useChannelConsumptionBuckets(range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 60, enabled = true) {
-  const normalized = range === "all" ? "30d" : range
-  const query = latencyBucketQuery(granularity, targetCount)
-  query.set("range", normalized)
-  return useApi<ChannelConsumptionBucketSeries[]>(enabled ? `/channels/consumption-buckets?${query.toString()}` : null)
+export function useChannelConsumptionBuckets(range: TimeRangeSelection<RelayUsageRangePreset> = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 60, enabled = true) {
+  const query = typeof range === "string" && range === "all" ? serializeTimeRange("30d") : serializeTimeRange(range)
+  if (query) for (const [key, value] of latencyBucketQuery(granularity, targetCount)) query.set(key, value)
+  return useApi<ChannelConsumptionBucketSeries[]>(enabled && query ? `/channels/consumption-buckets?${query}` : null)
 }
 
-export function useRelayLatencyBuckets(stationID: number | null, range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 30) {
-  const normalized = range === "all" ? "30d" : range
-  const query = latencyBucketQuery(granularity, targetCount)
-  query.set("range", normalized)
-  return useApi<RelayAccountLatencyBucketSeries[]>(stationID == null ? null : `/relay-stations/${stationID}/latency-buckets?${query.toString()}`)
+export function useRelayLatencyBuckets(stationID: number | null, range: TimeRangeSelection<RelayUsageRangePreset> = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 30) {
+  const query = typeof range === "string" && range === "all" ? serializeTimeRange("30d") : serializeTimeRange(range)
+  if (query) for (const [key, value] of latencyBucketQuery(granularity, targetCount)) query.set(key, value)
+  return useApi<RelayAccountLatencyBucketSeries[]>(stationID == null || !query ? null : `/relay-stations/${stationID}/latency-buckets?${query}`)
 }
 
-export function useRelayAccountConsumptionBuckets(stationID: number | null, range: RelayUsageRange = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 30) {
-  const normalized = range === "all" ? "30d" : range
-  const query = latencyBucketQuery(granularity, targetCount)
-  query.set("range", normalized)
-  return useApi<RelayAccountConsumptionBucketSeries[]>(stationID == null ? null : `/relay-stations/${stationID}/consumption-buckets?${query.toString()}`)
+export function useRelayAccountConsumptionBuckets(stationID: number | null, range: TimeRangeSelection<RelayUsageRangePreset> = "today", granularity: LatencyBucketGranularity = "auto", targetCount = 30) {
+  const query = typeof range === "string" && range === "all" ? serializeTimeRange("30d") : serializeTimeRange(range)
+  if (query) for (const [key, value] of latencyBucketQuery(granularity, targetCount)) query.set(key, value)
+  return useApi<RelayAccountConsumptionBucketSeries[]>(stationID == null || !query ? null : `/relay-stations/${stationID}/consumption-buckets?${query}`)
 }
 
 export function useChannelRates(channelID: number | null) {
@@ -335,14 +336,15 @@ export function useAlertRules() {
   return useApi<AlertRule[]>("/alerts/rules")
 }
 
-export function useAlertEvents(state?: string, filters: { target?: string; severity?: string; station?: string; offset?: number; from?: string } = {}) {
+export function useAlertEvents(state?: string, filters: { target?: string; severity?: string; station?: string; offset?: number; from?: string; to?: string; enabled?: boolean } = {}) {
   const query = new URLSearchParams({ limit: "50", offset: String(filters.offset ?? 0) })
   if (state) query.set("state", state)
   if (filters.target) query.set("target_type", filters.target)
   if (filters.severity) query.set("severity", filters.severity)
   if (filters.station) query.set("station_id", filters.station)
   if (filters.from) query.set("from", filters.from)
-  return useApi<AlertEvent[]>(`/alerts/events?${query.toString()}`)
+  if (filters.to) query.set("to", filters.to)
+  return useApi<AlertEvent[]>(filters.enabled === false ? null : `/alerts/events?${query.toString()}`)
 }
 
 export function useCaptchaConfigs() {
@@ -409,38 +411,42 @@ export function useRelayAccountModelCatalog(stationID: number | null, enabled = 
   return useApi<RelayAccountModelCatalogItem[]>(stationID == null || !enabled ? null : `/relay-stations/${stationID}/account-models`)
 }
 
-export function useRelayUsage(stationID: number | null, range: RelayUsageRange = "today") {
-  return useApi<RelayUsageView>(stationID == null ? null : `/relay-stations/${stationID}/usage?range=${range}`)
+export function useRelayUsage(stationID: number | null, range: TimeRangeSelection<RelayUsageRangePreset> = "today") {
+  const query = serializeTimeRange(range)
+  return useApi<RelayUsageView>(stationID == null || !query ? null : `/relay-stations/${stationID}/usage?${query}`)
 }
 
-export function useRelayDailyConsumption(stationID: number | null, range: RelayUsageRange = "today") {
-  return useApi<RelayDailyConsumptionPoint[]>(stationID == null ? null : `/relay-stations/${stationID}/usage/daily?range=${range}`)
+export function useRelayDailyConsumption(stationID: number | null, range: TimeRangeSelection<RelayUsageRangePreset> = "today") {
+  const query = serializeTimeRange(range)
+  return useApi<RelayDailyConsumptionPoint[]>(stationID == null || !query ? null : `/relay-stations/${stationID}/usage/daily?${query}`)
 }
 
-export function useRelayRecentUsage(stationID: number | null, range: RelayUsageRange = "today") {
-  return useApi<RelayRecentUsage[]>(stationID == null ? null : `/relay-stations/${stationID}/usage/recent?range=${range}`)
+export function useRelayRecentUsage(stationID: number | null, range: TimeRangeSelection<RelayUsageRangePreset> = "today") {
+  const query = serializeTimeRange(range)
+  return useApi<RelayRecentUsage[]>(stationID == null || !query ? null : `/relay-stations/${stationID}/usage/recent?${query}`)
 }
 
 export function useRelayUsers(stationID: number | null, options: {
   page: number
   pageSize: number
   search: string
-  range: RelayUsageRange
+  range: TimeRangeSelection<RelayUsageRangePreset>
   sortBy: RelayUserSortKey
   sortOrder: "asc" | "desc"
   riskLevel: RelayUserRiskLevel
   registrationIP: string
 }) {
   if (stationID == null) return useApi<RelayUserManagementPage>(null)
-  const query = new URLSearchParams({
-    page: String(options.page),
-    page_size: String(options.pageSize),
-    range: options.range,
+  const query = serializeTimeRange(options.range)
+  if (!query) return useApi<RelayUserManagementPage>(null)
+  query.set("page", String(options.page))
+  query.set("page_size", String(options.pageSize))
+  for (const [key, value] of Object.entries({
     sort_by: options.sortBy,
     sort_order: options.sortOrder,
     risk_level: options.riskLevel,
     registration_ip: options.registrationIP,
-  })
+  })) query.set(key, value)
   if (options.search.trim()) query.set("search", options.search.trim())
   return useApi<RelayUserManagementPage>(`/relay-stations/${stationID}/users?${query.toString()}`)
 }
@@ -471,16 +477,18 @@ export function useSystemSettingsQuery() {
   return { ...query, data: query.data ? { ...query.data, recent_metrics_limit: normalizeRecentMetricsLimit(query.data.recent_metrics_limit) } : null }
 }
 
-export function useOperationSummary(range: OperationRange = "today") {
-  return useApi<OperationSummary>(`/operations/summary?range=${range}`)
+export function useOperationSummary(range: TimeRangeSelection<OperationRangePreset> = "today") {
+  const query = serializeTimeRange(range)
+  return useApi<OperationSummary>(query ? `/operations/summary?${query}` : null)
 }
 
-export function useOperationLedger(range: OperationRange = "30d", filters: { direction?: string; category?: string; q?: string } = {}) {
-  const query = new URLSearchParams({ range })
+export function useOperationLedger(range: TimeRangeSelection<OperationRangePreset> = "30d", filters: { direction?: string; category?: string; q?: string } = {}) {
+  const query = serializeTimeRange(range)
+  if (!query) return useApi<OperationLedgerEntry[]>(null)
   if (filters.direction && filters.direction !== "all") query.set("direction", filters.direction)
   if (filters.category && filters.category !== "all") query.set("category", filters.category)
   if (filters.q?.trim()) query.set("q", filters.q.trim())
-  return useApi<OperationLedgerEntry[]>(`/operations/ledger?${query.toString()}`)
+  return useApi<OperationLedgerEntry[]>(`/operations/ledger?${query}`)
 }
 
 export function useLocalAccounts(filters: { status?: string; platform?: string; q?: string } = {}) {

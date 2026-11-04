@@ -39,6 +39,18 @@ test("monitor requests include the selected station and time range", () => {
   assert.equal(publicRelayMonitorPath(3, "7d"), "/public/relay-stations/3/group-monitor?range=7d")
 })
 
+test("custom monitor requests and caches preserve both bounds", () => {
+  const range = { mode: "custom" as const, start: "2026-10-22T00:00", end: "2026-10-24T23:59" }
+  const path = publicRelayMonitorPath(3, range)
+  assert.ok(path)
+  const query = new URL(path, "https://example.test").searchParams
+  assert.equal(query.get("range"), "custom")
+  assert.equal(Date.parse(query.get("start")!), new Date(range.start).getTime())
+  assert.equal(Date.parse(query.get("end")!), new Date(range.end).getTime() + 60_000)
+  assert.notEqual(publicRelayMonitorCacheKey(3, range), publicRelayMonitorCacheKey(3, { ...range, end: "2026-10-25T23:59" }))
+  assert.equal(publicRelayMonitorPath(3, { ...range, start: "" }), null)
+})
+
 test("browser cache keys isolate ranges and stations and retire the old schema", () => {
   const current = publicRelayMonitorCacheKey(3, "24h")
   assert.notEqual(current, publicRelayMonitorCacheKey(3, "7d"))

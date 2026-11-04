@@ -17,7 +17,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { apiFetch } from "@/lib/api"
-import type { RelayStationType, RelayUsageRange, RelayUserManagementItem, RelayUserRiskLevel, RelayUserSortKey } from "@/lib/api-types"
+import type { RelayStationType, RelayUsageRangePreset, RelayUserManagementItem, RelayUserRiskLevel, RelayUserSortKey } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
 import { useRelayUsers } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 
@@ -130,7 +131,7 @@ function UserRow({ hasLimits, user, selected, busy, onSelect, onStatusChange, on
   </div>
 }
 
-export function UserManagement({ stationID, range, stationType = "sub2api" }: { stationID: number; range: RelayUsageRange; stationType?: RelayStationType }) {
+export function UserManagement({ stationID, range, stationType = "sub2api" }: { stationID: number; range: TimeRangeSelection<RelayUsageRangePreset>; stationType?: RelayStationType }) {
   const hasLimits = stationType === "sub2api"
   const { columns, minWidth } = userTableLayout(hasLimits)
   const [open, setOpen] = usePersistedOpen("uh_relay_user_management_open")

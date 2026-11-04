@@ -354,6 +354,16 @@ func TestDailyConsumptionWindowAtUsesSharedUsageRanges(t *testing.T) {
 	}
 }
 
+func TestBuildDailyConsumptionExcludesTheDayAtExclusiveMidnightEnd(t *testing.T) {
+	loc := time.FixedZone("UTC+8", 8*60*60)
+	since := time.Date(2026, 10, 22, 0, 0, 0, 0, loc)
+	until := time.Date(2026, 10, 25, 0, 0, 0, 0, loc)
+	points := buildDailyConsumption(nil, since, until, loc)
+	if len(points) != 3 || points[2].Date != "2026-10-24" {
+		t.Fatalf("days = %#v, want October 22 through October 24", points)
+	}
+}
+
 func TestUsageEventRoundTripPreservesMonitoringFields(t *testing.T) {
 	rate := 1.7
 	stats := 3.25

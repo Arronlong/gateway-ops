@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -87,8 +88,36 @@ type PublicGroupMonitorLatencyBucket struct {
 type publicMonitorCacheKey struct {
 	stationID    uint
 	rangeName    string
+	windowStart  int64
+	windowEnd    int64
 	metricsHours int
 	metricsLimit int
+}
+
+type monitorTimeWindow struct {
+	since time.Time
+	until time.Time
+}
+
+func groupMonitorFetchWindows(rangeName string, since, until, metricsSince, now time.Time) []monitorTimeWindow {
+	if rangeName != "custom" {
+		if metricsSince.Before(since) {
+			since = metricsSince
+		}
+		return []monitorTimeWindow{{since: since, until: now}}
+	}
+	if !until.Before(metricsSince) && !since.After(now) {
+		start := since
+		if metricsSince.Before(start) {
+			start = metricsSince
+		}
+		end := until
+		if now.After(end) {
+			end = now
+		}
+		return []monitorTimeWindow{{since: start, until: end}}
+	}
+	return []monitorTimeWindow{{since: since, until: until}, {since: metricsSince, until: now}}
 }
 
 type publicMonitorCacheEntry struct {
@@ -376,17 +405,31 @@ func (s *Service) PublicGroupMonitor(ctx context.Context, stationID uint) (Publi
 
 // 按时间范围读取最近调用，日历区间与渠道管理使用相同的本地时区。
 func (s *Service) PublicGroupMonitorForRange(ctx context.Context, stationID uint, rawRange string) (PublicGroupMonitor, error) {
-	rangeName, since, now := publicGroupMonitorWindowAt(time.Now(), rawRange)
+	now := time.Now()
+	rangeName, since, until := publicGroupMonitorWindowAt(now, rawRange)
+	return s.publicGroupMonitorForWindow(ctx, stationID, rangeName, since, until, now)
+}
+
+func (s *Service) PublicGroupMonitorForWindow(ctx context.Context, stationID uint, since, until time.Time) (PublicGroupMonitor, error) {
+	if !until.After(since) {
+		return PublicGroupMonitor{}, errors.New("custom monitor range end must be later than start")
+	}
+	now := time.Now()
+	return s.publicGroupMonitorForWindow(ctx, stationID, "custom", since.UTC(), until.UTC(), now)
+}
+
+func (s *Service) publicGroupMonitorForWindow(ctx context.Context, stationID uint, rangeName string, since, until, now time.Time) (PublicGroupMonitor, error) {
 	metricsHours, metricsLimit, err := s.groupMetricsSettings()
 	if err != nil {
 		return PublicGroupMonitor{}, err
 	}
 	cacheKey := publicMonitorCacheKey{stationID: stationID, rangeName: rangeName, metricsHours: metricsHours, metricsLimit: metricsLimit}
-	metricsSince := now.Add(-45 * time.Second).Add(-time.Duration(metricsHours) * time.Hour)
-	fetchSince := since
-	if metricsSince.Before(fetchSince) {
-		fetchSince = metricsSince
+	if rangeName == "custom" {
+		cacheKey.windowStart = since.UnixNano()
+		cacheKey.windowEnd = until.UnixNano()
 	}
+	metricsSince := now.Add(-45 * time.Second).Add(-time.Duration(metricsHours) * time.Hour)
+	fetchWindows := groupMonitorFetchWindows(rangeName, since, until, metricsSince, now)
 	s.publicMonitorMu.Lock()
 	if cached, ok := s.publicMonitorCache[cacheKey]; ok && now.Before(cached.ExpiresAt) {
 		s.publicMonitorMu.Unlock()
@@ -439,12 +482,34 @@ func (s *Service) PublicGroupMonitorForRange(ctx context.Context, stationID uint
 				result := monitorFetchResult{index: job.index, kind: job.kind}
 				if job.kind == monitorFetchUsage {
 					var items []remoteUsage
-					items, result.err = fetchGroupMonitorUsagePages(ctx, s, station.BaseURL, apiKey, group.ExternalID, fetchSince, now)
+					for _, window := range fetchWindows {
+						var windowItems []remoteUsage
+						windowItems, result.err = fetchGroupMonitorUsagePages(ctx, s, station.BaseURL, apiKey, group.ExternalID, window.since, window.until)
+						for _, item := range windowItems {
+							if created, ok := parseMonitorTime(item.CreatedAt); ok && !created.Before(window.since) && created.Before(window.until) {
+								items = append(items, item)
+							}
+						}
+						if result.err != nil {
+							break
+						}
+					}
 					result.usage = usageMonitorEvents(items)
 					result.samples = groupMetricUsageSamples(items)
 				} else {
 					var items []remoteRequestError
-					items, result.err = fetchGroupMonitorErrorPages(ctx, s, station.BaseURL, apiKey, group.ExternalID, fetchSince, now)
+					for _, window := range fetchWindows {
+						var windowItems []remoteRequestError
+						windowItems, result.err = fetchGroupMonitorErrorPages(ctx, s, station.BaseURL, apiKey, group.ExternalID, window.since, window.until)
+						for _, item := range windowItems {
+							if created, ok := parseMonitorTime(item.CreatedAt); ok && !created.Before(window.since) && created.Before(window.until) {
+								items = append(items, item)
+							}
+						}
+						if result.err != nil {
+							break
+						}
+					}
 					result.errors = errorMonitorEvents(items, group.ExternalID)
 					result.samples = groupMetricErrorSamples(items, group.ExternalID)
 				}
@@ -484,7 +549,7 @@ func (s *Service) PublicGroupMonitorForRange(ctx context.Context, stationID uint
 	}
 	for index, groupIndex := range monitored {
 		group := groups[groupIndex]
-		item := buildPublicGroupMonitorGroupForWindow(group, perGroup[index].usage, perGroup[index].errors, perGroup[index].usageOK && perGroup[index].errorsOK, now, since, now)
+		item := buildPublicGroupMonitorGroupForWindow(group, perGroup[index].usage, perGroup[index].errors, perGroup[index].usageOK && perGroup[index].errorsOK, now, since, until)
 		item.RecentMetrics = buildGroupRecentMetrics(perGroup[index].samples, now, metricsHours, metricsLimit, perGroup[index].usageOK && perGroup[index].errorsOK)
 		view.Groups = append(view.Groups, item)
 		switch item.Status {

@@ -3,7 +3,8 @@
 import { useCallback, useLayoutEffect, useState, useRef } from "react"
 import { createPortal } from "react-dom"
 import type { ReactNode } from "react"
-import type { ConsumptionBucket, LatencyBucket, LatencyBucketGranularity, RelayAccountConsumptionBucket, RelayUsageRange } from "@/lib/api-types"
+import type { ConsumptionBucket, LatencyBucket, LatencyBucketGranularity, RelayAccountConsumptionBucket, RelayUsageRangePreset } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
 import type { ChannelCompareLink, RelayCompareAccount, RelayCompareLink } from "@/lib/channel-relay-association"
 import { useRelayAccountConsumptionBuckets, useRelayLatencyBuckets } from "@/lib/queries"
 import { formatLatency, formatOutputTokenSpeed, latencyTooltipTextClass, latencyTone } from "@/lib/latency"
@@ -50,7 +51,7 @@ const toneStyles: Record<RelayCompareTone, ToneStyle> = {
 
 interface CompareBaseProps {
   links: RelayCompareLink[]
-  range: RelayUsageRange
+  range: TimeRangeSelection<RelayUsageRangePreset>
   granularity: LatencyBucketGranularity
   bucketCount: number
   /** 渠道侧时间桶的起点；缺省时取中转站最近一个有请求的桶。 */
@@ -60,7 +61,7 @@ interface CompareBaseProps {
 
 interface StationCompareProps {
   link: RelayCompareLink
-  range: RelayUsageRange
+  range: TimeRangeSelection<RelayUsageRangePreset>
   granularity: LatencyBucketGranularity
   bucketCount: number
   bucketStart?: string | null
@@ -215,7 +216,7 @@ function RelayConsumptionComparisonAccount({ account, channelBucket, relayBucket
 function RelayConsumptionComparisonStation({ link, channelBucket, range, granularity, bucketCount }: {
   link: RelayCompareLink
   channelBucket: ConsumptionBucket
-  range: RelayUsageRange
+  range: TimeRangeSelection<RelayUsageRangePreset>
   granularity: LatencyBucketGranularity
   bucketCount: number
 }) {
@@ -244,7 +245,7 @@ function RelayConsumptionComparisonStation({ link, channelBucket, range, granula
 export function RelayConsumptionComparisonTooltip({ bucket, links, range, granularity, bucketCount }: {
   bucket: ConsumptionBucket
   links: RelayCompareLink[]
-  range: RelayUsageRange
+  range: TimeRangeSelection<RelayUsageRangePreset>
   granularity: LatencyBucketGranularity
   bucketCount: number
 }) {
@@ -348,7 +349,7 @@ function RelayLatencyComparisonAccount({ account, channelBucket, relayBucket }: 
 function RelayLatencyComparisonStation({ link, channelBucket, range, granularity, bucketCount }: {
   link: RelayCompareLink
   channelBucket: LatencyBucket
-  range: RelayUsageRange
+  range: TimeRangeSelection<RelayUsageRangePreset>
   granularity: LatencyBucketGranularity
   bucketCount: number
 }) {
@@ -377,7 +378,7 @@ function RelayLatencyComparisonStation({ link, channelBucket, range, granularity
 export function RelayLatencyComparisonTooltip({ bucket, links, range, granularity, bucketCount }: {
   bucket: LatencyBucket
   links: RelayCompareLink[]
-  range: RelayUsageRange
+  range: TimeRangeSelection<RelayUsageRangePreset>
   granularity: LatencyBucketGranularity
   bucketCount: number
 }) {

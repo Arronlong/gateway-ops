@@ -1,5 +1,7 @@
 import type { PublicGroupMonitorView, PublicGroupRecentMetrics } from "./api-types"
 import type { RecentRequestMetricValues } from "./recent-request-metrics"
+// @ts-expect-error Node 22 原生 TypeScript 测试需要显式扩展名。
+import { serializeTimeRange, timeRangeKey, type TimeRangeSelection } from "./time-range.ts"
 
 export const publicRelayMonitorRanges = [
   { value: "today", label: "今天" },
@@ -8,8 +10,9 @@ export const publicRelayMonitorRanges = [
   { value: "30d", label: "30 天" },
 ] as const
 
-export type PublicRelayMonitorRange = typeof publicRelayMonitorRanges[number]["value"]
-export const defaultPublicRelayMonitorRange: PublicRelayMonitorRange = "24h"
+export type PublicRelayMonitorRangePreset = typeof publicRelayMonitorRanges[number]["value"]
+export type PublicRelayMonitorRange = PublicRelayMonitorRangePreset | "custom"
+export const defaultPublicRelayMonitorRange: PublicRelayMonitorRangePreset = "24h"
 export const publicRelayMonitorCacheVersion = 3
 
 export function publicGroupRecentMetrics(metrics: PublicGroupRecentMetrics | undefined): RecentRequestMetricValues {
@@ -23,20 +26,21 @@ export function publicGroupRecentMetrics(metrics: PublicGroupRecentMetrics | und
   }
 }
 
-export function publicRelayMonitorPath(stationID: number, range: PublicRelayMonitorRange) {
-  return `/public/relay-stations/${stationID}/group-monitor?range=${range}`
+export function publicRelayMonitorPath(stationID: number, range: TimeRangeSelection<PublicRelayMonitorRangePreset>) {
+  const query = serializeTimeRange(range)
+  return query ? `/public/relay-stations/${stationID}/group-monitor?${query}` : null
 }
 
-export function publicRelayMonitorCacheKey(stationID: number, range: PublicRelayMonitorRange) {
-  return `gatewayops:group-monitor:v${publicRelayMonitorCacheVersion}:${stationID}:${range}`
+export function publicRelayMonitorCacheKey(stationID: number, range: TimeRangeSelection<PublicRelayMonitorRangePreset>) {
+  return `gatewayops:group-monitor:v${publicRelayMonitorCacheVersion}:${stationID}:${timeRangeKey(range)}`
 }
 
 export function isPublicRelayMonitorViewForSelection(
   view: (Pick<PublicGroupMonitorView, "station_id"> & Partial<Pick<PublicGroupMonitorView, "range">>) | null | undefined,
   stationID: number,
-  range: PublicRelayMonitorRange,
+  range: TimeRangeSelection<PublicRelayMonitorRangePreset>,
 ) {
-  return view?.station_id === stationID && (view.range ?? defaultPublicRelayMonitorRange) === range
+  return view?.station_id === stationID && (view.range ?? defaultPublicRelayMonitorRange) === (typeof range === "string" ? range : "custom")
 }
 
 export interface PublicRelayMonitorStationOption {

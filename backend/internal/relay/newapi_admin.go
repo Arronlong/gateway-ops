@@ -1295,6 +1295,8 @@ func (s *Service) newAPIAdmin(ctx context.Context, method, endpoint string, c ne
 
 func (s *Service) newAPIUsageStats(ctx context.Context, base string, c newAPICredential, q url.Values, out any) error {
 	result := remoteUsageStats{}
+	since, _ := time.Parse(time.RFC3339Nano, q.Get("start_time"))
+	until, _ := time.Parse(time.RFC3339Nano, q.Get("end_time"))
 	q.Set("page_size", "100")
 	q.Set("type", "2")
 	for pageNumber := 1; ; pageNumber++ {
@@ -1303,7 +1305,7 @@ func (s *Service) newAPIUsageStats(ctx context.Context, base string, c newAPICre
 		if err != nil {
 			return err
 		}
-		for _, item := range page.Items {
+		for _, item := range filterRecentUsageRange(page.Items, since, until) {
 			result.TotalTokens += item.InputTokens + item.OutputTokens
 			result.TotalActualCost += item.ActualCost
 			result.TotalCost += item.TotalCost
@@ -1391,7 +1393,9 @@ func (s *Service) newAPIRanking(ctx context.Context, base string, c newAPICreden
 	if err != nil {
 		return err
 	}
-	for _, item := range items {
+	since, _ := time.Parse(time.RFC3339Nano, q.Get("start_time"))
+	until, _ := time.Parse(time.RFC3339Nano, q.Get("end_time"))
+	for _, item := range filterRecentUsageRange(items, since, until) {
 		user := users[item.UserID]
 		user.UserID = item.UserID
 		user.ActualCost += item.ActualCost

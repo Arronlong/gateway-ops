@@ -8,9 +8,10 @@ import { useChannelSummary, useDashboardSummary, useChannels, useSystemSettings 
 import { channelTypeLabel, ratioDelta, relativeTime, shortTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useMemo } from "react"
-import type { RelayUsageRange } from "@/lib/api-types"
+import type { RelayUsageRangePreset } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
 
-export function MultiplierChanges({ range = "today", source = "dashboard", className }: { range?: RelayUsageRange; source?: "dashboard" | "channels"; className?: string }) {
+export function MultiplierChanges({ range = "today", source = "dashboard", className }: { range?: TimeRangeSelection<RelayUsageRangePreset>; source?: "dashboard" | "channels"; className?: string }) {
   const dashboardSummary = useDashboardSummary(range, source === "dashboard")
   const channelSummary = useChannelSummary(range, source === "channels")
   const channels = useChannels()

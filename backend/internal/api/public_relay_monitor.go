@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/guliansheng/gateway-ops/internal/relay"
 	"github.com/guliansheng/gateway-ops/internal/storage"
 	"gorm.io/gorm"
 )
@@ -57,12 +58,22 @@ func publicRelayGroupMonitor(c *gin.Context, d *Deps) {
 		rangeName = "24h"
 	}
 	switch rangeName {
-	case "today", "24h", "7d", "30d":
+	case "today", "24h", "7d", "30d", "custom":
 	default:
-		fail(c, http.StatusBadRequest, errors.New("时间范围仅支持 today、24h、7d 或 30d"))
+		fail(c, http.StatusBadRequest, errors.New("时间范围仅支持 today、24h、7d、30d 或 custom"))
 		return
 	}
-	view, err := d.Relay.PublicGroupMonitorForRange(c.Request.Context(), stationID, rangeName)
+	var view relay.PublicGroupMonitor
+	if rangeName == "custom" {
+		since, until, rangeErr := parseCustomTimeRange(c.Query("start"), c.Query("end"))
+		if rangeErr != nil {
+			fail(c, http.StatusBadRequest, rangeErr)
+			return
+		}
+		view, err = d.Relay.PublicGroupMonitorForWindow(c.Request.Context(), stationID, since, until)
+	} else {
+		view, err = d.Relay.PublicGroupMonitorForRange(c.Request.Context(), stationID, rangeName)
+	}
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			fail(c, http.StatusNotFound, errors.New("中转站不存在"))

@@ -1,7 +1,8 @@
 "use client"
 
 import { CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip as RechartsTooltip, XAxis, YAxis } from "recharts"
-import type { ConsumptionBucket, LatencyBucketGranularity, RelayUsageRange } from "@/lib/api-types"
+import type { ConsumptionBucket, LatencyBucketGranularity, RelayUsageRangePreset } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
 import type { RelayCompareLink } from "@/lib/channel-relay-association"
 import { RelayConsumptionComparisonTooltip } from "@/components/monitor/channel-relay-compare"
 import { money } from "@/lib/format"
@@ -53,7 +54,7 @@ interface ConsumptionTooltipProps {
   active?: boolean
   payload?: TooltipPayload[]
   relayLinks: RelayCompareLink[]
-  range: RelayUsageRange
+  range: TimeRangeSelection<RelayUsageRangePreset>
   granularity: LatencyBucketGranularity
   bucketCount: number
 }
@@ -99,7 +100,7 @@ export function ChannelConsumptionTrend({
   compact?: boolean
   emptyLabel?: string
   relayLinks?: RelayCompareLink[]
-  range?: RelayUsageRange
+  range?: TimeRangeSelection<RelayUsageRangePreset>
   bucketCount?: number
 }) {
   const data = buckets.map((bucket) => ({

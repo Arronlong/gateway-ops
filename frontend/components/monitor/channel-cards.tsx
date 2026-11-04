@@ -61,7 +61,9 @@ import { cn } from "@/lib/utils"
 import { syncChannelStream, testLoginStream, type ProgressEvent } from "@/lib/sync-stream"
 import { RecentRequestMetrics } from "@/components/monitor/recent-request-metrics"
 import { normalizeRecentMetricsLimit, recentRequestMetrics } from "@/lib/recent-request-metrics"
-import type { Channel, ChannelAccount, ChannelType, ChannelUsageSample, LatencyBucketGranularity, RateBoundAccount, RateSnapshot, RelayUsageRange, SystemSettings } from "@/lib/api-types"
+import type { Channel, ChannelAccount, ChannelType, ChannelUsageSample, LatencyBucketGranularity, RateBoundAccount, RateSnapshot, RelayUsageRangePreset, SystemSettings } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
+import { timeRangeLabel } from "@/lib/time-range"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
 import { ChannelPelicanPanel } from "@/components/monitor/channel-pelican-panel"
 import { linkedStationsByChannel as buildLinkedStationsByChannel, relayAccountComparisonKey, relayComparisonsByChannel } from "@/lib/channel-relay-association"
@@ -342,7 +344,7 @@ function AccountBalance({ accounts, total }: { accounts: ChannelAccount[]; total
   )
 }
 
-const usageRanges: { value: RelayUsageRange; label: string }[] = [
+const usageRanges: { value: RelayUsageRangePreset; label: string }[] = [
   { value: "all", label: "All" },
   { value: "today", label: "今天" },
   { value: "24h", label: "24 小时" },
@@ -724,7 +726,7 @@ const DebouncedChannelSearchInput = memo(function DebouncedChannelSearchInput({ 
   return <div className="relative min-w-0 flex-1 basis-64"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" /><Input value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="搜索渠道 / 模型 / 渠道备注 / 域名" aria-label="按渠道名称、模型、渠道备注或站点地址搜索" className="h-11 w-full pl-8 text-xs sm:h-9" /></div>
 })
 
-export function ChannelCards({ usageRange = "today", latencyGranularity = "auto", uiSettings }: { usageRange?: RelayUsageRange; latencyGranularity?: LatencyBucketGranularity; uiSettings: SystemSettings }) {
+export function ChannelCards({ usageRange = "today", latencyGranularity = "auto", uiSettings }: { usageRange?: TimeRangeSelection<RelayUsageRangePreset>; latencyGranularity?: LatencyBucketGranularity; uiSettings: SystemSettings }) {
   const { data: channels, loading, error, refetch } = useChannels()
   const associations = useChannelRelayAssociations()
   const pelican = useChannelPelicanGallery(uiSettings.pelican_page_enabled)
@@ -753,7 +755,7 @@ export function ChannelCards({ usageRange = "today", latencyGranularity = "auto"
       ? (associations.data?.stations ?? []).find((station) => station.id === Number(associationFilter.slice("station:".length)))?.name ?? "指定中转站"
       : null
   const hasActiveFilters = activeFilterCount > 0 || searchQuery.trim() !== ""
-  const usageRangeLabel = usageRanges.find((item) => item.value === usageRange)?.label ?? usageRange
+  const usageRangeLabel = timeRangeLabel(usageRange, usageRanges)
   const metrics = useChannelMetrics(usageRange)
   const displayBucketCount = viewMode === "list" ? 30 : 60
   const recentVisible = channelSectionVisible(uiSettings, "recent") && (viewMode === "gallery" || visibleColumns.has("recent"))

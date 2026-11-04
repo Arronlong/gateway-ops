@@ -339,8 +339,10 @@ export interface DashboardSummary {
   recent_relay_adjustments: RelayAdjustmentView[]
 }
 
-export type DashboardRange = "today" | "24h" | "7d" | "30d"
+export type DashboardRange = "today" | "24h" | "7d" | "30d" | "custom"
+export type DashboardRangePreset = Exclude<DashboardRange, "custom">
 export type RelayUsageRange = DashboardRange | "all"
+export type RelayUsageRangePreset = Exclude<RelayUsageRange, "custom">
 export type LatencyBucketGranularity = "auto" | "5" | "10" | "30" | "60" | "180" | "360" | "720"
 
 export interface RelayPricingChange {
@@ -736,6 +738,7 @@ export interface RelayGroupTestResult {
 }
 
 export type OperationRange = DashboardRange | "all"
+export type OperationRangePreset = Exclude<OperationRange, "custom">
 
 export interface OperationLedgerEntry {
   id: number
@@ -1108,7 +1111,7 @@ export interface PublicGroupRecentMetrics {
 export interface PublicGroupMonitorView {
 	station_id: number
 	station_name: string
-	range: "today" | "24h" | "7d" | "30d"
+	range: "today" | "24h" | "7d" | "30d" | "custom"
 	updated_at: string
 	groups: PublicGroupMonitorGroup[]
 	summary: PublicGroupMonitorSummary

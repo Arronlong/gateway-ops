@@ -15,6 +15,23 @@ import (
 	"github.com/guliansheng/gateway-ops/internal/storage"
 )
 
+func TestGroupMonitorFetchWindowsKeepCurrentMetricsSeparateFromHistory(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	metricsSince := now.Add(-24 * time.Hour)
+	historySince := now.Add(-14 * 24 * time.Hour)
+	historyUntil := now.Add(-13 * 24 * time.Hour)
+
+	windows := groupMonitorFetchWindows("custom", historySince, historyUntil, metricsSince, now)
+	if len(windows) != 2 || windows[0] != (monitorTimeWindow{since: historySince, until: historyUntil}) || windows[1] != (monitorTimeWindow{since: metricsSince, until: now}) {
+		t.Fatalf("disjoint windows = %#v", windows)
+	}
+
+	windows = groupMonitorFetchWindows("custom", now.Add(-3*time.Hour), now.Add(-time.Hour), metricsSince, now)
+	if len(windows) != 1 || windows[0] != (monitorTimeWindow{since: metricsSince, until: now}) {
+		t.Fatalf("overlapping windows = %#v", windows)
+	}
+}
+
 func TestPublicGroupMonitorWindowAt(t *testing.T) {
 	loc := time.FixedZone("UTC+8", 8*60*60)
 	now := time.Date(2026, 10, 9, 16, 30, 0, 0, loc)

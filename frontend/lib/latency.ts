@@ -1,4 +1,5 @@
-import type { LatencyBucket, LatencyBucketGranularity, RelayUsageRange } from "@/lib/api-types"
+import type { LatencyBucket, LatencyBucketGranularity, RelayUsageRangePreset } from "@/lib/api-types"
+import type { TimeRangeSelection } from "@/lib/time-range"
 
 // @ts-expect-error Node 22 原生 TypeScript 测试需要显式扩展名。
 import { recentRequestAttemptOutcome, recentRequestMetrics, recentRequestWindow, type RecentRequestSample } from "./recent-request-metrics.ts"
@@ -222,12 +223,12 @@ export const latencyBucketGranularityOptions: Array<{ value: LatencyBucketGranul
   { value: "720", label: "12 小时" },
 ]
 
-export function latencyGranularityOptionsForRange(range: RelayUsageRange) {
-  if (range === "today" || range === "24h") return latencyBucketGranularityOptions
+export function latencyGranularityOptionsForRange(range: TimeRangeSelection<RelayUsageRangePreset>) {
+  if (typeof range !== "string" || range === "today" || range === "24h") return latencyBucketGranularityOptions
   return latencyBucketGranularityOptions.filter((item) => item.value === "auto" || Number(item.value) >= 60)
 }
 
-export function normalizeLatencyGranularity(range: RelayUsageRange, granularity: LatencyBucketGranularity) {
+export function normalizeLatencyGranularity(range: TimeRangeSelection<RelayUsageRangePreset>, granularity: LatencyBucketGranularity) {
   return latencyGranularityOptionsForRange(range).some((item) => item.value === granularity) ? granularity : "60"
 }
 

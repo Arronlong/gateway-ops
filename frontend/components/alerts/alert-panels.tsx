@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
 import { RefreshCw, Plus, Settings2, AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
@@ -10,20 +10,43 @@ import type { AlertActionLog, AlertEvent, AlertRule, NotificationLog } from "@/l
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardTitle } from "@/components/ui/card"
 import { ListPanelHeader } from "@/components/ui/list-panel"
+import { TimeRangeFilter } from "@/components/ui/time-range-filter"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { serializeTimeRange, type TimeRangeSelection } from "@/lib/time-range"
 import { actionLabels, initialRuleForm, metricLabels, stateLabels } from "./rule-form"
 
 const date = (value?: string | null) => value ? new Date(value).toLocaleString("zh-CN", { hour12: false }) : "—"
 const errorText = (error: unknown) => error instanceof Error ? error.message : "操作失败"
 const selectClass = "h-8 rounded-md border border-input bg-background px-2 text-xs"
 const severityLabels: Record<string, string> = { info: "提示", warning: "警告", critical: "严重" }
+const alertEventRanges = [
+  { value: "all", label: "全部时间" },
+  { value: "24h", label: "最近 24 小时" },
+  { value: "7d", label: "最近 7 天" },
+  { value: "30d", label: "最近 30 天" },
+] as const
+type AlertEventRange = typeof alertEventRanges[number]["value"]
 const eventMetricLabel = (metric: string, target: string) => metric === "balance_low" && target === "relay_account" ? "旧版关联渠道账号余额" : metricLabels[metric as keyof typeof metricLabels] ?? "预警事件"
 
 export function AlertEventPanel({ onRefresh }: { onRefresh: () => void }) {
   const [state, setState] = useState("open"), [target, setTarget] = useState(""), [severity, setSeverity] = useState("")
   const [station, setStation] = useState(""), [offset, setOffset] = useState(0)
-  const [period, setPeriod] = useState(""), [from, setFrom] = useState("")
+  const [timeRange, setTimeRange] = useState<TimeRangeSelection<AlertEventRange>>("all")
   const [selected, setSelected] = useState<AlertEvent | null>(null), [busy, setBusy] = useState(false)
+  const eventTimeBounds = useMemo(() => {
+    if (typeof timeRange === "string") {
+      const hours: Record<Exclude<AlertEventRange, "all">, number> = { "24h": 24, "7d": 168, "30d": 720 }
+      if (timeRange === "all") return { from: undefined, to: undefined, invalid: false }
+      const end = new Date()
+      return { from: new Date(end.getTime() - hours[timeRange] * 3_600_000).toISOString(), to: end.toISOString(), invalid: false }
+    }
+    const query = serializeTimeRange(timeRange)
+    const start = query?.get("start")
+    const end = query?.get("end")
+    return start && end
+      ? { from: start, to: new Date(Date.parse(end) - 1).toISOString(), invalid: false }
+      : { from: undefined, to: undefined, invalid: true }
+  }, [timeRange])
   const [searchParams, setSearchParams] = useSearchParams(), eventID = searchParams.get("event")
   function closeDetail() {
     setSelected(null)
@@ -35,11 +58,11 @@ export function AlertEventPanel({ onRefresh }: { onRefresh: () => void }) {
     void apiFetch<{ event: AlertEvent }>(`/alerts/events/${eventID}`, { signal: controller.signal }).then((detail) => setSelected(detail.event)).catch((error) => { if (!controller.signal.aborted) toast.error(errorText(error)) })
     return () => controller.abort()
   }, [eventID])
-  const events = useAlertEvents(state, { target, severity, station, offset, from }), stations = useRelayStations(), channels = useChannels(false)
+  const events = useAlertEvents(state, { target, severity, station, offset, from: eventTimeBounds.from, to: eventTimeBounds.to, enabled: !eventTimeBounds.invalid }), stations = useRelayStations(), channels = useChannels(false)
   const targetText = (event: AlertEvent) => event.target_type === "channel"
     ? `渠道 ${channels.data?.find((item) => String(item.id) === event.target_external_id)?.name ?? `#${event.target_external_id}`}`
     : `${event.target_type === "relay_account" ? "账号" : "用户"} #${event.target_external_id} · ${stations.data?.find((item) => item.id === event.relay_station_id)?.name ?? `中转站 #${event.relay_station_id}`}`
-  useEffect(() => setOffset(0), [state, target, severity, station, from])
+  useEffect(() => setOffset(0), [state, target, severity, station, eventTimeBounds.from, eventTimeBounds.to, eventTimeBounds.invalid])
   async function update(event: AlertEvent, action: "ack" | "recover") {
     if (action === "recover" && !window.confirm("关闭此事件？此操作不会恢复远端调度或启用用户；后续异常仍会重新触发。")) return
     setBusy(true)
@@ -56,7 +79,7 @@ export function AlertEventPanel({ onRefresh }: { onRefresh: () => void }) {
       <select className={selectClass} aria-label="事件对象类型" value={target} onChange={(event) => setTarget(event.target.value)}><option value="">全部对象</option><option value="channel">渠道</option><option value="relay_account">中转站账号</option><option value="relay_user">中转站用户</option></select>
       <select className={selectClass} aria-label="事件级别" value={severity} onChange={(event) => setSeverity(event.target.value)}><option value="">全部级别</option>{Object.entries(severityLabels).map(([key, label]) => <option key={key} value={key}>{label}</option>)}</select>
       <select className={selectClass} aria-label="事件中转站" value={station} onChange={(event) => setStation(event.target.value)}><option value="">全部中转站</option>{stations.data?.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>
-      <select className={selectClass} aria-label="事件时间范围" value={period} onChange={(event) => { setPeriod(event.target.value); setFrom(event.target.value ? new Date(Date.now() - Number(event.target.value)*3600000).toISOString() : "") }}><option value="">全部时间</option><option value="24">最近 24 小时</option><option value="168">最近 7 天</option><option value="720">最近 30 天</option></select>
+      <TimeRangeFilter value={timeRange} options={alertEventRanges} onChange={setTimeRange} label="事件时间范围" />
     </div>
     <CardContent className="border-t border-border p-0">
       {events.error && <p role="alert" className="px-4 py-3 text-sm text-danger">加载事件失败：{events.error}</p>}
