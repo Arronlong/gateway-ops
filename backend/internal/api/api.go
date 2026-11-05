@@ -108,7 +108,7 @@ func Register(r *gin.Engine, d *Deps) {
 // /api/*、/healthz 都已被前面的具体路由占了，不会走到这里。
 // 安全起见仍然做一次前缀拦截，避免任何意外情况下"未鉴权读 index.html"压到 /api 上。
 func registerFrontend(r *gin.Engine, dist fs.FS, settings *storage.Settings) {
-	fileServer := http.FileServer(http.FS(dist))
+	serveFile := frontendFiles(dist)
 
 	r.NoRoute(func(c *gin.Context) {
 		path := c.Request.URL.Path
@@ -127,9 +127,13 @@ func registerFrontend(r *gin.Engine, dist fs.FS, settings *storage.Settings) {
 			clean = "index.html"
 		}
 		if _, err := fs.Stat(dist, clean); err != nil {
-			c.Request.URL.Path = "/"
+			if strings.HasPrefix(clean, "assets/") {
+				c.AbortWithStatus(http.StatusNotFound)
+				return
+			}
+			clean = "index.html"
 		}
-		fileServer.ServeHTTP(c.Writer, c.Request)
+		serveFile(c, clean)
 	})
 }
 

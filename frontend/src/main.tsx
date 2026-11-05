@@ -1,4 +1,4 @@
-import { StrictMode, useEffect } from 'react'
+import { lazy, StrictMode, Suspense, useEffect } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Route, Routes } from 'react-router-dom'
 import '@fontsource-variable/geist'
@@ -15,18 +15,18 @@ import { SettingsProvider } from '@/components/settings-provider'
 import { ProductBrandingProvider } from '@/components/product-branding'
 import { Toaster } from '@/components/ui/sonner'
 import { PageErrorBoundary } from '@/components/ui/page-error-boundary'
-import DashboardPage from '@/app/page'
-import ChannelsPage from '@/app/channels-page'
-import CaptchaPage from '@/app/captcha-page'
-import NotificationsPage from '@/app/notifications-page'
-import SystemSettingsPage from '@/app/system-settings-page'
-import RelayStationsPage from '@/app/relay-stations-page'
-import OperationsCostsPage from '@/app/operations-costs-page'
-import LocalPoolPage from '@/app/local-pool-page'
-import PelicanLibraryPage from '@/app/pelican-library-page'
-import PublicRelayMonitorPage from '@/app/public-relay-monitor-page'
-import PublicModelPricingPage from '@/app/public-model-pricing-page'
-import PublicServiceStatusPage from '@/app/public-service-status-page'
+const DashboardPage = lazy(() => import('@/app/page'))
+const ChannelsPage = lazy(() => import('@/app/channels-page'))
+const CaptchaPage = lazy(() => import('@/app/captcha-page'))
+const NotificationsPage = lazy(() => import('@/app/notifications-page'))
+const SystemSettingsPage = lazy(() => import('@/app/system-settings-page'))
+const RelayStationsPage = lazy(() => import('@/app/relay-stations-page'))
+const OperationsCostsPage = lazy(() => import('@/app/operations-costs-page'))
+const LocalPoolPage = lazy(() => import('@/app/local-pool-page'))
+const PelicanLibraryPage = lazy(() => import('@/app/pelican-library-page'))
+const PublicRelayMonitorPage = lazy(() => import('@/app/public-relay-monitor-page'))
+const PublicModelPricingPage = lazy(() => import('@/app/public-model-pricing-page'))
+const PublicServiceStatusPage = lazy(() => import('@/app/public-service-status-page'))
 import '@/app/globals.css'
 
 function ProtectedApplication() {
@@ -53,7 +53,7 @@ createRoot(document.getElementById('root')!).render(
     <ThemeProvider attribute="class" defaultTheme="light" enableSystem disableTransitionOnChange>
       <BrowserRouter useTransitions={false}>
         <ProductBrandingProvider>
-        <Routes>
+        <Suspense fallback={<p role="status" className="p-6 text-sm text-muted-foreground">{'\u6b63\u5728\u52a0\u8f7d\u9875\u9762\u2026'}</p>}><Routes>
           <Route path="public/relay-monitor" element={<PublicRelayMonitorPage />} />
           <Route path="public/relay-monitor/:stationID" element={<PublicRelayMonitorPage />} />
           <Route path="public/model-pricing/:stationID" element={<PublicModelPricingPage />} />
@@ -70,7 +70,7 @@ createRoot(document.getElementById('root')!).render(
             <Route path="operations/costs" element={<OperationsCostsPage />} />
             <Route path="operations/local-pool" element={<LocalPoolPage />} />
           </Route>
-        </Routes>
+        </Routes></Suspense>
         </ProductBrandingProvider>
       </BrowserRouter>
       <Toaster richColors closeButton position="top-right" />

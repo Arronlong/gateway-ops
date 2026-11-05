@@ -1,7 +1,7 @@
 "use client"
 
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react"
-import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
+import { createContext, lazy, Suspense, useCallback, useContext, useState, type ReactNode } from "react"
+const ChannelFormDialog = lazy(() => import("@/components/monitor/channel-form-dialog").then(module => ({default: module.ChannelFormDialog})))
 import type { Channel } from "@/lib/api-types"
 
 /**
@@ -31,14 +31,14 @@ export function AddChannelProvider({ children }: { children: ReactNode }) {
   return (
     <AddChannelContext.Provider value={{ openAdd, openEdit }}>
       {children}
-      <ChannelFormDialog
+      {open ? <Suspense fallback={null}><ChannelFormDialog
         open={open}
         onOpenChange={(v) => {
           setOpen(v)
           if (!v) setEditing(null)
         }}
         channel={editing}
-      />
+      /></Suspense> : null}
     </AddChannelContext.Provider>
   )
 }
