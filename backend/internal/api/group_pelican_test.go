@@ -17,7 +17,7 @@ func TestPublicGroupPelicanHasNoMutationRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	registerPublicRelayStations(router.Group(""), &Deps{})
-	for _, request := range [][2]string{{"POST", "/relay-stations/7/groups/20/pelican/run"}, {"PUT", "/relay-stations/7/groups/20/pelican"}, {"DELETE", "/relay-stations/7/groups/20/pelican/results/12"}} {
+	for _, request := range [][2]string{{"POST", "/relay-stations/7/groups/20/pelican/run"}, {"PUT", "/relay-stations/7/groups/20/pelican"}, {"DELETE", "/relay-stations/7/groups/20/pelican/results/12"}, {"PUT", "/relay-stations/7/groups/20/pelican/results/12/thumbnail"}} {
 		response := httptest.NewRecorder()
 		router.ServeHTTP(response, httptest.NewRequest(request[0], request[1], nil))
 		if response.Code != http.StatusNotFound {

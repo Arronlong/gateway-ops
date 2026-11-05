@@ -5,6 +5,26 @@ import { PelicanResourcePool } from "./pelican-resources.ts"
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0))
 
+test("thumbnail downloads have bounded concurrency while generation defaults to one", async () => {
+  const pool = new PelicanResourcePool<string>({maxBytes: 32, maxEntries: 8, size: value => value.length, maxConcurrent: 3})
+  let active = 0, peak = 0
+  const finishes: Array<() => void> = []
+  const leases = [0, 1, 2, 3, 4].map(index => pool.acquire(String(index), () => new Promise<string>(resolve => {
+    peak = Math.max(peak, ++active)
+    finishes.push(() => { active--; resolve("ok") })
+  })))
+  await turn()
+  assert.equal(active, 3)
+  finishes.splice(0).forEach(finish => finish())
+  await turn()
+  assert.equal(active, 2)
+  finishes.splice(0).forEach(finish => finish())
+  await Promise.all(leases.map(lease => lease.promise))
+  leases.forEach(lease => lease.release())
+  assert.equal(peak, 3)
+  assert.equal(active, 0)
+})
+
 test("缩略图串行生成，共享请求在最后一个使用者离开时取消", async () => {
   const pool = new PelicanResourcePool<string>({maxBytes: 8, maxEntries: 2, size: value => value.length})
   let active = 0, peak = 0, calls = 0

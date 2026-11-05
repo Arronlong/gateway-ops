@@ -12,9 +12,9 @@ export class PelicanResourcePool<T> {
   private queue: Job<T>[] = []
   private active = 0
   private bytes = 0
-  private options: {maxBytes: number; maxEntries: number; size: (value: T) => number; timeoutMs?: number}
+  private options: {maxBytes: number; maxEntries: number; size: (value: T) => number; timeoutMs?: number; maxConcurrent?: number}
 
-  constructor(options: {maxBytes: number; maxEntries: number; size: (value: T) => number; timeoutMs?: number}) {this.options = options}
+  constructor(options: {maxBytes: number; maxEntries: number; size: (value: T) => number; timeoutMs?: number; maxConcurrent?: number}) {this.options = options}
   get cachedBytes() {return this.bytes}
   get cachedEntries() {return this.cache.size}
 
@@ -63,7 +63,7 @@ export class PelicanResourcePool<T> {
   }
 
   private pump() {
-    if (this.active) return
+    if (this.active >= (this.options.maxConcurrent ?? 1)) return
     const job = this.queue.shift()
     if (!job) return
     this.active++

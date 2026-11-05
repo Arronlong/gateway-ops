@@ -30,6 +30,8 @@ func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp.GET("/pelican", func(c *gin.Context) { channelPelicanGallery(c, d) })
 	gp.POST("/:id/pelican/run", func(c *gin.Context) { startChannelPelican(c, d) })
 	gp.GET("/:id/pelican/results/:result_id", func(c *gin.Context) { channelPelicanResult(c, d) })
+	gp.GET("/:id/pelican/results/:result_id/thumbnail", func(c *gin.Context) { pelicanThumbnail(c, d, "channel", false) })
+	gp.PUT("/:id/pelican/results/:result_id/thumbnail", func(c *gin.Context) { pelicanThumbnail(c, d, "channel", false) })
 	gp.DELETE("/:id/pelican/results/:result_id", func(c *gin.Context) { deleteChannelPelicanResult(c, d) })
 	gp.GET("/model-catalog", func(c *gin.Context) { channelModelCatalog(c, d) })
 	gp.POST("/sync-all", func(c *gin.Context) { syncAllChannels(c, d) })

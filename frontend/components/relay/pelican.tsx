@@ -15,7 +15,8 @@ import { apiFetch } from "@/lib/api"
 import type { ChannelPelicanTarget, PelicanConfig, PelicanGallery, PelicanLibraryPage, PelicanResult, PelicanTestPlan, RelayAccountView } from "@/lib/api-types"
 import { hasConfiguredPelicanPlan, pelicanEfforts, pelicanEffortOptions, pelicanGroupLabels, pelicanRunOptions } from "@/lib/pelican"
 import { pelicanResultPath } from "@/lib/pelican-sources"
-import { observePelicanThumbnail, pelicanThumbnailActive, pelicanThumbnailPool, renderPelicanThumbnail, retainPelicanThumbnails, subscribePelicanActivity, suspendPelicanThumbnails } from "@/lib/pelican-thumbnails"
+import { observePelicanThumbnail, pelicanThumbnailActive, pelicanThumbnailPool, pelicanRenderPool, renderPelicanThumbnail, retainPelicanThumbnails, subscribePelicanActivity, suspendPelicanThumbnails } from "@/lib/pelican-thumbnails"
+import { loadPelicanThumbnail } from "@/lib/pelican-thumbnail-store"
 import { usePelicanGallery, useSystemSettings, type QueryState } from "@/lib/queries"
 import { PelicanArtwork } from "./pelican-artwork"
 
@@ -74,7 +75,7 @@ export function PelicanProvider({stationID,children,libraryQuery,galleryQuery,sc
    if(!accepted)return
    setDeletingID(result.id)
    await apiFetch(pelicanResultPath(result),{method:"DELETE"})
-   pelicanThumbnailPool.delete(`${result.relay_station_id}/${result.account_external_id}/${result.id}`)
+   pelicanThumbnailPool.delete(`${pelicanResultPath(result,readOnly)}?v=${result.finished_at}`)
    setRemovedIDs(current=>new Set(current).add(result.id))
    setSelected(current=>current?.id===result.id?null:current)
    toast.success("\u6d4b\u667a\u4f5c\u54c1\u5df2\u5220\u9664")
@@ -234,17 +235,23 @@ function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanR
   // 等滚动停稳后才入队，避免快速浏览时生成路过的作品。
   let release=()=>{}
   const timer=window.setTimeout(()=>{
-   const lease=pelicanThumbnailPool.acquire(`${result.relay_station_id}/${result.account_external_id}/${result.id}`,async signal=>{
+   const path=pelicanResultPath(result,context.readOnly),key=`${path}?v=${result.finished_at}`
+   const lease=pelicanThumbnailPool.acquire(key,signal=>loadPelicanThumbnail(path,result.finished_at,signal,async()=>{
     const value=await context.body(result,signal)
     signal.throwIfAborted()
-    if(!value.html)throw new Error("作品没有可预览的内容")
-    return renderPelicanThumbnail(value.html,signal)
-   })
+    if(!value.html)throw new Error("\u4f5c\u54c1\u6ca1\u6709\u53ef\u9884\u89c8\u7684\u5185\u5bb9")
+    signal.throwIfAborted()
+    const rendering=pelicanRenderPool.acquire(key,renderSignal=>renderPelicanThumbnail(value.html!,renderSignal))
+    const abort=()=>rendering.release()
+    signal.addEventListener("abort",abort,{once:true})
+    try {return {image:await rendering.promise,html:value.html}}
+    finally {signal.removeEventListener("abort",abort);rendering.release()}
+   },!context.readOnly))
    release=lease.release
    lease.promise.then(blob=>{if(!disposed){url=URL.createObjectURL(blob);setImage(url)}}).catch(error=>{if(!disposed)setError(error instanceof Error?error.message:"预览读取失败")})
   },120)
   return()=>{disposed=true;window.clearTimeout(timer);release();if(url)URL.revokeObjectURL(url)}
- },[visible,active,result.id,result.relay_station_id,result.account_external_id,result.status])
+ },[visible,active,result.id,result.channel_id,result.relay_station_id,result.account_external_id,result.group_external_id,result.finished_at,result.status,context.readOnly])
  return <div ref={ref} className={`relative ${grid?"w-full min-w-0":"w-56 shrink-0 snap-start"} overflow-hidden rounded-lg border border-border bg-card`}>
   {allowDelete&&result.status!=="running"?<PelicanDeleteButton result={result} compact/>:null}
   <div className="aspect-[4/3] overflow-hidden bg-muted/30">

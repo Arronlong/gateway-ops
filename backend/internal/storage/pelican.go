@@ -41,6 +41,7 @@ type PelicanConfig struct {
 func (PelicanConfig) TableName() string { return "relay_pelican_configs" }
 
 type PelicanResult struct {
+	Thumbnail               []byte    `gorm:"->" json:"-"`
 	GroupExternalID         int64     `gorm:"-" json:"group_external_id,omitempty"`
 	ChannelID               uint      `gorm:"->;not null;default:0;index:idx_channel_pelican_history,priority:1" json:"channel_id,omitempty"`
 	ID                      uint      `gorm:"primaryKey" json:"id"`

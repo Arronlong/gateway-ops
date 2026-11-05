@@ -23,6 +23,7 @@ type GroupPelicanConfig struct {
 func (GroupPelicanConfig) TableName() string { return "relay_group_pelican_configs" }
 
 type GroupPelicanResult struct {
+	Thumbnail               []byte    `gorm:"->" json:"-"`
 	ID                      uint      `gorm:"primaryKey" json:"id"`
 	RelayStationID          uint      `gorm:"not null;index:idx_group_pelican_history,priority:1" json:"relay_station_id"`
 	GroupExternalID         int64     `gorm:"not null;index:idx_group_pelican_history,priority:2" json:"group_external_id"`
