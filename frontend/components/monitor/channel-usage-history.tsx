@@ -90,7 +90,7 @@ export function ChannelUsageHistory({ channel, range, compact = false }: { chann
   if (channel.balance_mode === "manual") return null
 
   return <>
-    <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1", compact ? "mt-1" : "mt-3 rounded-md border border-border px-2.5 py-2")}>
+    <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1", compact ? "mt-1" : "ml-auto max-w-full")}>
       <Button variant="ghost" size="sm" className="h-7 max-w-full shrink-0 gap-1 px-1.5 text-[11px]" onClick={() => { setHistoryRange(range); setManualResult(null); setMessage(""); setFailed(false); setOpen(true) }}>
         <History className="size-3" />{"\u91cd\u65b0\u62c9\u53d6\u5386\u53f2"}
       </Button>

@@ -32,6 +32,7 @@ import { TableActionButton } from "@/components/ui/table-action-button"
 import { ListPanelHeader } from "@/components/ui/list-panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -1303,32 +1304,35 @@ actions={<>
                       {siteHost(c.site_url)}
                     </a>
                   </Row>
-				  {c.balance_mode !== "manual" ? <Row label="账号"><AccountPreview accounts={accounts} /></Row> : null}
-                  <Row label="管理">{c.balance_mode === "manual" ? "手动余额" : "自动读取"}</Row>
-                  {c.balance_mode !== "manual" ? <Row label="凭据">{c.credential_mode === "token" ? "Token" : "账号密码"}</Row> : null}
+                  <Row label="账号">{c.balance_mode !== "manual" ? <AccountPreview accounts={accounts} /> : "—"}</Row>
 				  <Row label="余额"><span className={cn("font-mono text-base font-bold tabular-nums", balanceTone({ ...c, last_balance: currentBalance }))}>{metrics.loading && c.balance_mode === "manual" ? "读取中…" : c.balance_mode === "auto" ? <AccountBalance accounts={accounts} total={currentBalance} /> : money(currentBalance)}</span></Row>
                   <Row label="区间余额消耗"><span className="font-mono font-bold tabular-nums text-warning" title={`${usageRangeLabel}余额下降累计，充值不计入`}>{metrics.loading && !metric ? "读取中…" : money(metric?.consumption_amount)}</span></Row>
                   <Row label="累计充值"><span className="font-mono tabular-nums">{metrics.loading && !metric ? "读取中…" : cny(metric?.cumulative_recharge_amount)}</span></Row>
                   <Row label="区间调用消耗"><span className="font-mono tabular-nums" title={metric ? `${usageRangeLabel} · 渠道自身 usage/log · ${metric.usage_request_count} 次请求` : metrics.error ?? ""}>{metrics.loading && !metric ? "读取中…" : charge(metric?.usage_cost_amount)}</span></Row>
-                  <Row label="阈值">{c.balance_threshold > 0 ? money(c.balance_threshold) : "未设置"}</Row>
                   <Row label="状态">
-                    <span className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium", meta.cls)}>
-                      {meta.label}
-                    </span>
+                    {c.last_error ? (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <button type="button" aria-label={"\u67e5\u770b\u7ba1\u7406\u91c7\u96c6\u5f02\u5e38"} className={cn("inline-flex cursor-pointer items-center rounded px-1.5 py-0.5 text-[10px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring", meta.cls)}>
+                            {meta.label}
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" aria-label={"\u7ba1\u7406\u91c7\u96c6\u5f02\u5e38"} className="max-w-[calc(100vw-2rem)] text-xs">
+                          <p className="font-medium">{"\u7ba1\u7406\u91c7\u96c6\u5f02\u5e38"}</p>
+                          <p className="mt-1 break-words whitespace-pre-wrap text-muted-foreground">{managementErrorText(c.last_error)}</p>
+                        </PopoverContent>
+                      </Popover>
+                    ) : (
+                      <span className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium", meta.cls)}>{meta.label}</span>
+                    )}
                   </Row>
-                  <Row label="渠道备注"><span title={c.remark || "未填写渠道备注"}>{c.remark || "未填写"}</span></Row>
                   <Row label="上次更新">{relativeTime(c.last_balance_at ?? c.updated_at)}</Row>
-                  {c.last_error ? (
-                    <Row label="管理采集异常" className="col-span-full">
-                      <p className="truncate text-[11px] font-medium text-danger" title={managementErrorText(c.last_error)}>
-                        {managementErrorText(c.last_error).length > 80 ? managementErrorText(c.last_error).slice(0, 80) + "…" : managementErrorText(c.last_error)}
-                      </p>
-                    </Row>
-                  ) : null}
                 </div>
 
-                <ChannelUsageHistory channel={c} range={usageRange} />
-                <RecentRequestMetrics samples={latencyByChannel.get(c.id) ?? []} loading={latencyTrends.loading} windowHours={uiSettings.recent_metrics_window_hours} sampleLimit={recentLatencyLimit} />
+                <div className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <RecentRequestMetrics samples={latencyByChannel.get(c.id) ?? []} loading={latencyTrends.loading} windowHours={uiSettings.recent_metrics_window_hours} sampleLimit={recentLatencyLimit} />
+                  <ChannelUsageHistory channel={c} range={usageRange} />
+                </div>
                 {channelSectionVisible(uiSettings, "recent") ? <LatencyStabilityLane
                   buckets={latencyBucketsByChannel.get(c.id) ?? []}
                   recentSamples={(latencyByChannel.get(c.id) ?? []).slice(0, recentLatencyLimit)}
