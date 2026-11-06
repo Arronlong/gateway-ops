@@ -17,7 +17,7 @@ async function main() {
       page.on('pageerror', error => errors.push(error.message))
       const defaults = vm.runInNewContext('(' + fs.readFileSync('frontend/lib/system-settings.ts', 'utf8').match(/export const defaultSystemSettings: SystemSettings = (\{[\s\S]*?\n\})/)[1] + ')', { defaultPelicanPrompt: 'test' })
       Object.assign(defaults, { pelican_page_enabled: false })
-      let settings = { channel_configured: true, channel_enabled: true, channel_interval_minutes: 30, channel_token_refresh_enabled: false, channel_token_refresh_interval_minutes: 30, channel_usage_integrity_enabled: true, channel_usage_integrity_range: '24h', channel_usage_integrity_time: '07:00', relay_rate_configured: true, relay_rate_enabled: false, relay_rate_interval_minutes: 1, relay_rate_interval_seconds: 10, relay_snapshot_configured: true, relay_snapshot_enabled: false, relay_snapshot_interval_minutes: 60, relay_snapshot_interval_seconds: 3600 }
+      let settings = { group_monitor_interval_seconds: 30, channel_configured: true, channel_enabled: true, channel_interval_minutes: 30, channel_token_refresh_enabled: false, channel_token_refresh_interval_minutes: 30, channel_usage_integrity_enabled: true, channel_usage_integrity_range: '24h', channel_usage_integrity_time: '07:00', relay_rate_configured: true, relay_rate_enabled: false, relay_rate_interval_minutes: 1, relay_rate_interval_seconds: 10, relay_snapshot_configured: true, relay_snapshot_enabled: false, relay_snapshot_interval_minutes: 60, relay_snapshot_interval_seconds: 3600 }
       let automaticCountRequests = 0, manualRuns = 0, lastSaved = null, manualHistory = null
       const account = { id: 2, username: 'fixture-account', is_primary: true, credential_mode: 'token', created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' }
       const channel = { id: 1, name: 'Fixture Channel', site_url: 'https://example.invalid', type: 'newapi', username: 'fixture-account', credential_mode: 'token', login_headers: [], login_params: [], balance_mode: 'auto', manual_balance: 0, turnstile_enabled: false, monitor_enabled: true, balance_threshold: 5, last_balance: 90, accounts: [account], created_at: account.created_at, updated_at: account.updated_at }
@@ -50,6 +50,10 @@ async function main() {
       const range = page.getByRole('combobox', { name: '\u5168\u6e20\u9053\u7528\u91cf\u6838\u5bf9\u8303\u56f4' })
       const clock = page.getByLabel('\u5168\u6e20\u9053\u7528\u91cf\u6838\u5bf9\u5317\u4eac\u65f6\u95f4')
       await range.waitFor()
+      const monitorFrequency = page.getByRole('combobox', { name: '\u5206\u7ec4\u76d1\u63a7\u8ba1\u7b97\u9891\u7387', exact: true })
+      assert.match(await monitorFrequency.innerText(), /30/)
+      await monitorFrequency.click()
+      await page.getByRole('option', { name: '\u6bcf 2 \u5206\u949f', exact: true }).click()
       assert.match(await range.innerText(), /24/)
       assert.equal(await clock.inputValue(), '07:00')
       const toggle = page.getByRole('switch', { name: '\u542f\u7528\u5168\u6e20\u9053\u7528\u91cf\u6838\u5bf9\u4e0e\u4fee\u590d' })
@@ -60,6 +64,7 @@ async function main() {
       await clock.fill('08:45')
       await page.getByRole('button', { name: '\u4fdd\u5b58\u4efb\u52a1\u8bbe\u7f6e', exact: true }).click()
       await page.waitForFunction(() => [...document.querySelectorAll('[data-sonner-toast]')].some(item => item.textContent.includes('\u540e\u53f0\u4efb\u52a1\u4e0e\u540c\u6b65\u8bbe\u7f6e\u5df2\u4fdd\u5b58')))
+      assert.equal(lastSaved.group_monitor_interval_seconds, 120)
       assert.equal(lastSaved.channel_usage_integrity_range, '7d')
       assert.equal(lastSaved.channel_usage_integrity_time, '08:45')
       await toggle.click()
@@ -69,6 +74,7 @@ async function main() {
       await page.getByRole('button', { name: '\u4fdd\u5b58\u4efb\u52a1\u8bbe\u7f6e', exact: true }).click()
       await page.waitForResponse(response => response.url().includes('/api/sync-settings') && response.request().method() === 'GET')
       assert.equal(lastSaved.channel_usage_integrity_enabled, false)
+      assert.equal(lastSaved.group_monitor_interval_seconds, 120)
       assert.equal(lastSaved.channel_usage_integrity_range, 'all')
       await page.getByRole('button', { name: '\u7acb\u5373\u6267\u884c', exact: true }).click()
       await page.waitForFunction(() => [...document.querySelectorAll('[data-sonner-toast]')].some(item => item.textContent.includes('\u5df2\u5f00\u59cb\u5168\u6e20\u9053\u7528\u91cf\u6838\u5bf9\u4e0e\u4fee\u590d')))

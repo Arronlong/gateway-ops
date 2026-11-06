@@ -27,6 +27,8 @@ const (
 // PublicGroupMonitor is deliberately a small, non-sensitive projection of the
 // relay station. It contains no users, accounts, API keys, IPs, or raw errors.
 type PublicGroupMonitor struct {
+	SyncStatus  string                    `json:"sync_status,omitempty"`
+	SyncError   string                    `json:"sync_error,omitempty"`
 	StationID   uint                      `json:"station_id"`
 	StationName string                    `json:"station_name"`
 	Range       string                    `json:"range"`
@@ -294,8 +296,21 @@ func fetchGroupMonitorUsagePages(ctx context.Context, client *Service, baseURL, 
 		return nil, err
 	}
 	items := append([]remoteUsage(nil), first.Items...)
-	if len(first.Items) < groupMonitorPageSize {
+	if len(first.Items) < groupMonitorPageSize && first.Total <= len(items) && first.Pages <= 1 {
 		return items, nil
+	}
+	if len(first.Items) < groupMonitorPageSize {
+		for page := 2; page <= groupMonitorMaxPages; page++ {
+			var response remoteUsagePage
+			if err := client.get(ctx, groupMonitorEndpointForPage(baseURL, groupID, monitorFetchUsage, since, until, page), apiKey, &response); err != nil {
+				return nil, err
+			}
+			items = append(items, response.Items...)
+			if len(response.Items) == 0 || (page >= response.Pages && response.Total <= len(items)) {
+				return items, nil
+			}
+		}
+		return nil, fmt.Errorf("group monitor usage exceeded pagination limit (%d pages)", groupMonitorMaxPages)
 	}
 	pageCount := max(1, min(groupMonitorPageCount(first.Total, first.Pages), groupMonitorMaxPages))
 	pages, err := fetchGroupMonitorUsagePagesConcurrent(ctx, client, baseURL, apiKey, groupID, since, until, 2, pageCount)
@@ -378,7 +393,7 @@ func fetchGroupMonitorErrorPages(ctx context.Context, client *Service, baseURL, 
 		return nil, err
 	}
 	items := append([]remoteRequestError(nil), first.Items...)
-	if len(first.Items) < groupMonitorPageSize {
+	if len(first.Items) < groupMonitorPageSize && first.Total <= len(items) && first.Pages <= 1 {
 		return items, nil
 	}
 	for page := 2; page <= groupMonitorMaxPages; page++ {
@@ -387,7 +402,7 @@ func fetchGroupMonitorErrorPages(ctx context.Context, client *Service, baseURL, 
 			return nil, err
 		}
 		items = append(items, response.Items...)
-		if len(response.Items) < groupMonitorPageSize {
+		if len(response.Items) == 0 || (len(response.Items) < groupMonitorPageSize && page >= response.Pages && response.Total <= len(items)) {
 			return items, nil
 		}
 	}

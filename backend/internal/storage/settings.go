@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	SettingGroupMonitorIntervalSeconds   = "sync.group_monitor.interval_seconds"
 	SettingChannelSyncConfigured         = "sync.channel.configured"
 	SettingChannelSyncEnabled            = "sync.channel.enabled"
 	SettingChannelSyncInterval           = "sync.channel.interval_minutes"
@@ -88,6 +89,7 @@ func (s *Settings) SyncSettings() (SyncSettings, error) {
 		return SyncSettings{}, tokenErr
 	}
 	settings := SyncSettings{
+		GroupMonitorIntervalSeconds:        30,
 		ChannelTokenRefreshEnabled:         tokenEnabled,
 		ChannelTokenRefreshIntervalMinutes: tokenInterval,
 		ChannelIntervalMinutes:             30,
@@ -226,10 +228,17 @@ func (s *Settings) SyncSettings() (SyncSettings, error) {
 	if _, err = readInt(SettingAlertBalanceInterval, &settings.AlertBalanceIntervalSeconds); err != nil {
 		return settings, err
 	}
-	return settings, nil
+	settings.GroupMonitorIntervalSeconds, err = s.GroupMonitorIntervalSeconds()
+	return settings, err
 }
 
 func (s *Settings) SaveSyncSettings(settings SyncSettings) error {
+	if settings.GroupMonitorIntervalSeconds == 0 {
+		settings.GroupMonitorIntervalSeconds = 30
+	}
+	if settings.GroupMonitorIntervalSeconds < 10 || settings.GroupMonitorIntervalSeconds > 3600 {
+		return fmt.Errorf("group monitor interval must be between 10 and 3600 seconds")
+	}
 	if settings.ChannelTokenRefreshIntervalMinutes < 1 {
 		settings.ChannelTokenRefreshIntervalMinutes = 30
 	}
@@ -274,6 +283,7 @@ func (s *Settings) SaveSyncSettings(settings SyncSettings) error {
 		settings.AlertBalanceIntervalSeconds = 300
 	}
 	values := map[string]string{
+		SettingGroupMonitorIntervalSeconds:  strconv.Itoa(settings.GroupMonitorIntervalSeconds),
 		SettingChannelTokenRefreshEnabled:   strconv.FormatBool(settings.ChannelTokenRefreshEnabled),
 		SettingChannelTokenRefreshInterval:  strconv.Itoa(settings.ChannelTokenRefreshIntervalMinutes),
 		SettingChannelSyncConfigured:        "true",
@@ -588,4 +598,20 @@ func validUsageIntegrityRange(value string) bool {
 	default:
 		return false
 	}
+}
+
+// GroupMonitorIntervalSeconds 旧配置保留默认 30 秒，读取不会改写其他同步开关。
+func (s *Settings) GroupMonitorIntervalSeconds() (int, error) {
+	raw, exists, err := s.Get(SettingGroupMonitorIntervalSeconds)
+	if err != nil {
+		return 0, err
+	}
+	if !exists {
+		return 30, nil
+	}
+	interval, err := strconv.Atoi(raw)
+	if err != nil || interval < 10 || interval > 3600 {
+		return 30, nil
+	}
+	return interval, nil
 }

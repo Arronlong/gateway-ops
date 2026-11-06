@@ -7,6 +7,7 @@ import (
 )
 
 type syncSettingsInput struct {
+	GroupMonitorIntervalSeconds        *int    `json:"group_monitor_interval_seconds" binding:"omitempty,min=10,max=3600"`
 	ChannelUsageIntegrityEnabled       *bool   `json:"channel_usage_integrity_enabled"`
 	ChannelUsageIntegrityRange         *string `json:"channel_usage_integrity_range"`
 	ChannelUsageIntegrityTime          *string `json:"channel_usage_integrity_time"`
@@ -46,6 +47,9 @@ func registerSyncSettings(g *gin.RouterGroup, d *Deps) {
 		if err != nil {
 			fail(c, http.StatusInternalServerError, err)
 			return
+		}
+		if in.GroupMonitorIntervalSeconds != nil {
+			settings.GroupMonitorIntervalSeconds = *in.GroupMonitorIntervalSeconds
 		}
 		settings.ChannelEnabled = in.ChannelEnabled
 		if in.ChannelUsageIntegrityEnabled != nil {

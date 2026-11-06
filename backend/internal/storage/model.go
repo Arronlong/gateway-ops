@@ -878,6 +878,7 @@ func (RelayAccountAdjustmentLog) TableName() string { return "relay_account_adju
 
 // SyncSettings 是管理界面的自动同步设置。
 type SyncSettings struct {
+	GroupMonitorIntervalSeconds        int    `json:"group_monitor_interval_seconds"`
 	ChannelTokenRefreshEnabled         bool   `json:"channel_token_refresh_enabled"`
 	ChannelTokenRefreshIntervalMinutes int    `json:"channel_token_refresh_interval_minutes"`
 	ChannelConfigured                  bool   `json:"channel_configured"`

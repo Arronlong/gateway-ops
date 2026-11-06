@@ -42,7 +42,7 @@ func TestPublicRelayGroupMonitorRejectsUnsupportedRangeBeforeLoadingStation(t *t
 	router.GET("/relay-stations/:id/group-monitor", func(c *gin.Context) {
 		publicRelayGroupMonitor(c, nil)
 	})
-	for _, rangeName := range []string{"all", "90d", "invalid"} {
+	for _, rangeName := range []string{"all", "90d", "invalid", "custom"} {
 		t.Run(rangeName, func(t *testing.T) {
 			response := httptest.NewRecorder()
 			router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/relay-stations/3/group-monitor?range="+rangeName, nil))

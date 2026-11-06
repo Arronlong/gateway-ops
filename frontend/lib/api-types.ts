@@ -1116,6 +1116,8 @@ export interface PublicGroupRecentMetrics {
 }
 
 export interface PublicGroupMonitorView {
+  sync_status?: "preparing" | "ready" | "stale"
+  sync_error?: string
 	station_id: number
 	station_name: string
 	range: "today" | "24h" | "7d" | "30d" | "custom"
@@ -1317,6 +1319,7 @@ export interface SystemSettings {
 }
 
 export interface SyncSettings {
+  group_monitor_interval_seconds: number
   channel_token_refresh_enabled: boolean
   channel_token_refresh_interval_minutes: number
   channel_configured: boolean

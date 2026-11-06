@@ -24,6 +24,7 @@ import { ProductIcon, useProductBranding } from "@/components/product-branding"
 
 const channelSyncIntervals = [5, 10, 15, 30, 60, 180, 360, 720, 1440]
 const relayRateSyncIntervals = [5, 10, 20, 30, 60, 300, 600, 1800, 3600, 18000, 43200, 86400]
+const groupMonitorIntervals = [10, 30, 60, 120, 300, 600, 1800, 3600]
 const relaySnapshotSyncIntervals = [5, 10, 30, 60, 120, 180, 300, 600, 900, 1800, 3600, 10800]
 const usageIntegrityRanges = [
   { value: "today", label: "今天" },
@@ -260,6 +261,7 @@ export default function SystemSettingsPage() {
       const saved = await apiFetch<SyncSettings>("/sync-settings", {
         method: "PUT",
         body: JSON.stringify({
+          group_monitor_interval_seconds: syncSettings.group_monitor_interval_seconds ?? 30,
           channel_enabled: syncSettings.channel_enabled,
           channel_interval_minutes: syncSettings.channel_interval_minutes,
           channel_usage_integrity_enabled: syncSettings.channel_usage_integrity_enabled,
@@ -403,6 +405,13 @@ export default function SystemSettingsPage() {
                    onCheckedChange={(value) => updateSyncSettings((current) => ({ ...current, relay_rate_enabled: value }))}
                    onValueChange={(value) => updateSyncSettings((current) => ({ ...current, relay_rate_interval_seconds: value }))}
                 />
+                <div className="flex min-h-16 items-center justify-between gap-5 py-3">
+                  <div className="min-w-0"><p className="text-sm font-medium text-foreground">分组监控计算频率</p><p className="mt-1 text-xs leading-5 text-muted-foreground">后台更新今天、24 小时、7 天和 30 天快照；页面每 30 秒读取一次。计算未结束时跳过下一次，避免重叠。</p></div>
+                  <Select value={String(syncSettings.group_monitor_interval_seconds ?? 30)} disabled={savingSync} onValueChange={(value) => updateSyncSettings((current) => ({ ...current, group_monitor_interval_seconds: Number(value) }))}>
+                    <SelectTrigger className="h-9 w-32 shrink-0 text-xs" aria-label="分组监控计算频率"><SelectValue /></SelectTrigger>
+                    <SelectContent>{groupMonitorIntervals.map((seconds) => <SelectItem key={seconds} value={String(seconds)}>{formatSeconds(seconds)}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
                 <SyncTaskRow
                   task="relay_snapshot_sync"
                 title="中转站快照同步"

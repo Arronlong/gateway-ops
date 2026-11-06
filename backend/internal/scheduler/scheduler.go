@@ -58,6 +58,8 @@ type Scheduler struct {
 	relaySyncMu              sync.Mutex
 	relayRateRunning         atomic.Bool
 	relaySnapshotRunning     atomic.Bool
+	groupMonitorRunning      atomic.Bool
+	groupMonitorID           cron.EntryID
 	alertRunning             atomic.Bool
 }
 
@@ -128,6 +130,9 @@ func (s *Scheduler) Start() error {
 			return err
 		}
 	}
+	if err := s.configureGroupMonitorJob(); err != nil {
+		return err
+	}
 	if err := s.configureUsageIntegrityJob(); err != nil {
 		return err
 	}
@@ -183,6 +188,9 @@ func (s *Scheduler) configureSyncJobs() error {
 
 	settings, err := s.settings.SyncSettings()
 	if err != nil {
+		return err
+	}
+	if err := s.configureGroupMonitorSchedule(settings.GroupMonitorIntervalSeconds); err != nil {
 		return err
 	}
 	if err := s.configureTokenRefreshJob(settings); err != nil {

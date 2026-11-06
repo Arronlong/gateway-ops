@@ -25,7 +25,7 @@ async function main() {
   const errors = []
   const requests = []
   const results = []
-  const output = path.resolve('outputs/time-range-ui')
+  const output = path.resolve(process.env.TIME_RANGE_OUTPUT || 'outputs/time-range-ui')
   fs.mkdirSync(output, { recursive: true })
   page.on('pageerror', error => errors.push(error.message))
   const source = fs.readFileSync('frontend/lib/system-settings.ts', 'utf8')
@@ -52,7 +52,7 @@ async function main() {
     else if (p === '/api/relay-stations/1') data = { station, groups: [], accounts: [], summary: { total_accounts: 0 }, adjustments: [], monitor_channels: [], sync_available: true, range, usage_complete: true, usage_failed_accounts: 0 }
     else if (p === '/api/relay-stations/1/usage') data = { range, accounts: [], complete: true, failed_accounts: 0 }
     else if (p === '/api/relay-stations/1/users') data = { range, users: [], items: [], total: 0, page: 1, page_size: 50, pages: 0, complete: true }
-    else if (p === '/api/public/relay-stations/1/group-monitor') data = { station_id: 1, station_name: station.name, range, updated_at: new Date().toISOString(), groups: [], summary: { total: 0, available: 0, degraded: 0, unavailable: 0, idle: 0, disabled: 0, unknown: 0 } }
+    else if (p === '/api/public/relay-stations/1/group-monitor') data = { station_id: 1, station_name: station.name, range, updated_at: new Date().toISOString(), sync_status: process.env.MONITOR_SYNC_STATUS || 'ready', groups: [], summary: { total: 0, available: 0, degraded: 0, unavailable: 0, idle: 0, disabled: 0, unknown: 0 } }
     else if (p.endsWith('/group-pelican') || p.endsWith('/pelican')) data = { page_enabled: false, configs: [], results: [] }
     else if (p === '/api/alerts/summary') data = { open_events: 0, enabled_rules: 0, enabled_channels: 0, actions_today: 0 }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data }) })
@@ -95,6 +95,8 @@ async function main() {
           await group.getByRole('button', { name, exact: true }).click()
           await pending
         }
+        if (process.env.MONITOR_SYNC_STATUS === 'preparing') await page.getByText('\u76d1\u63a7\u5386\u53f2\u6b63\u5728\u540e\u53f0\u51c6\u5907', { exact: true }).waitFor()
+        if (process.env.MONITOR_SYNC_STATUS === 'stale') await page.getByText('\u5f53\u524d\u663e\u793a\u6700\u8fd1\u4e00\u6b21\u540c\u6b65\u7ed3\u679c', { exact: true }).waitFor()
         await page.screenshot({ path: path.join(output, item.slug + '-' + width + '.png') })
         results.push({ page: item.slug, width, endpoint: item.endpoint, custom: false })
         continue
