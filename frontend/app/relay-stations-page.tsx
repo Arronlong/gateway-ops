@@ -134,7 +134,7 @@ export function relayPriorityRequiresOAuth(type: RelayStationType, priority: num
 }
 type SortDirection = "asc" | "desc"
 type GroupSortKey = "name" | "rate"
-type AccountSortKey = "score" | "cache_hit_rate" | "success_rate" | "tps_score" | "recent_call" | "last_used" | "priority" | "cost" | "usage" | "name"
+type AccountSortKey = "score" | "cache_hit_rate" | "tps_score" | "recent_call" | "last_used" | "priority" | "cost" | "usage" | "name"
 type SortState<K extends string> = { key: K; direction: SortDirection } | null
 type RelayDetailModule = "usage" | "users" | "groups" | "accounts"
 type AccountAdjustmentMode = "suggestion" | "downgrade"
@@ -162,7 +162,6 @@ const usageRanges: { value: RelayUsageRangePreset; label: string }[] = [
 const accountSortOptions: Array<{ value: AccountSortKey; label: string }> = [
   { value: "score", label: "综合评分" },
   { value: "cache_hit_rate", label: "缓存命中率" },
-  { value: "success_rate", label: "重试感知成功率" },
   { value: "tps_score", label: "TPS 评分" },
   { value: "recent_call", label: "最近调用" },
   { value: "last_used", label: "最近使用时间" },
@@ -1990,9 +1989,6 @@ export default function RelayStationsPage() {
           break
         case "cache_hit_rate":
           result = compareNumber(recentMetricsByAccount.get(a.external_id)?.cacheHitRate ?? null, recentMetricsByAccount.get(b.external_id)?.cacheHitRate ?? null)
-          break
-        case "success_rate":
-          result = compareNumber(recentMetricsByAccount.get(a.external_id)?.successRate ?? null, recentMetricsByAccount.get(b.external_id)?.successRate ?? null)
           break
         case "tps_score":
           result = compareNumber(recentMetricsByAccount.get(a.external_id)?.tpsScore ?? null, recentMetricsByAccount.get(b.external_id)?.tpsScore ?? null)

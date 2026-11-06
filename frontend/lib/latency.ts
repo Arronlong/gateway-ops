@@ -2,7 +2,7 @@ import type { LatencyBucket, LatencyBucketGranularity, RelayUsageRangePreset } f
 import type { TimeRangeSelection } from "@/lib/time-range"
 
 // @ts-expect-error Node 22 原生 TypeScript 测试需要显式扩展名。
-import { recentRequestAttemptOutcome, recentRequestMetrics, recentRequestWindow, type RecentRequestSample } from "./recent-request-metrics.ts"
+import { recentRequestMetrics, recentRequestWindow, type RecentRequestSample } from "./recent-request-metrics.ts"
 
 export type LatencyMetric = "first" | "duration"
 export type LatencyTone = "good" | "warn" | "bad"
@@ -67,13 +67,12 @@ function latencyPerformanceScore(value: number | null | undefined, metric: Laten
 
 export interface LatencyHealthScore {
   score: number | null
-  recentSuccess: number | null
   recentLatency: number | null
   stability: number | null
   cacheHit: number | null
   sampleCount: number
   sampleLimit: number
-  attemptCount: number
+  measuredCount: number
   windowHours: number
   missingMetrics: string[]
   lowConfidence: boolean
@@ -107,60 +106,48 @@ function latencyConsistency(values: number[]) {
   return 100 / (1 + deviation / mean)
 }
 
-function requestStability(attempts: Array<{ sample: HealthSample; outcome: boolean }>) {
-  if (attempts.length < 2) return null
-  const successful = attempts.filter(({outcome}) => outcome).map(({sample}) => sample)
-  const completed = attempts.filter(({sample}) => sample.in_progress !== true && sample.attempt_status !== "in_progress")
-  const consistency = average([
-    latencyConsistency(successful.map((sample) => sample.first_token_ms).filter(validLatency)),
-    latencyConsistency(successful.map((sample) => sample.duration_ms).filter(validLatency)),
+function requestStability(samples: readonly HealthSample[]) {
+  return average([
+    latencyConsistency(samples.map((sample) => sample.first_token_ms).filter(validLatency)),
+    latencyConsistency(samples.map((sample) => sample.duration_ms).filter(validLatency)),
   ].filter((value): value is number => value != null))
-  let run = 0, longestRun = 0
-  for (const {sample, outcome} of attempts) {
-    if (sample.in_progress === true || sample.attempt_status === "in_progress") {
-      run = 0
-      continue
-    }
-    run = outcome ? 0 : run + 1
-    longestRun = Math.max(longestRun, run)
-  }
-  if (consistency == null) return completed.length >= 2 && completed.every(({outcome}) => !outcome) ? 0 : null
-  const continuity = 1 - Math.max(0, longestRun - 1) / (attempts.length - 1)
-  return consistency * Math.max(0, continuity)
+}
+
+function healthMetricSample(sample: HealthSample) {
+  const requestType=sample.request_type?.trim().toLowerCase()??""
+  return sample.in_progress!==true && sample.attempt_status!=="in_progress"
+    && sample.is_auxiliary!==true && sample.is_probe!==true && sample.is_cyber!==true
+    && !/(?:^|[_-])(auxiliary|probe|cyber)(?:$|[_-])/.test(requestType)
 }
 
 export function latencyHealthScore(samples: readonly HealthSample[], options: { now?: number; windowHours?: number; sampleLimit?: number } = {}): LatencyHealthScore | null {
   const {now = Date.now(), windowHours = 1, sampleLimit = 60} = options
   const selected = recentRequestWindow(samples, now, windowHours, sampleLimit)
   if (selected.samples.length === 0) return null
-  const metrics = recentRequestMetrics(selected.samples, now, selected.windowHours, selected.sampleLimit)
-  const attempts = selected.samples.map((sample) => ({sample, outcome: recentRequestAttemptOutcome(sample)}))
-    .filter((attempt): attempt is {sample: HealthSample; outcome: boolean} => attempt.outcome != null)
-  const successful = attempts.filter(({outcome}) => outcome).map(({sample}) => sample)
-  const recentSuccess = metrics.successRate == null ? null : metrics.successRate * 100
-  const recentLatency = average(successful.map(sampleLatencyScore).filter((value): value is number => value != null))
-  const stability = requestStability(attempts)
+  const metricSamples = selected.samples.filter(healthMetricSample)
+  const metrics = recentRequestMetrics(metricSamples, now, selected.windowHours, selected.sampleLimit)
+  const measured = metricSamples.filter(sample => validLatency(sample.first_token_ms) || validLatency(sample.duration_ms))
+  const recentLatency = average(measured.map(sampleLatencyScore).filter((value): value is number => value != null))
+  const stability = requestStability(measured)
   const cacheHit = metrics.cacheHitRate == null ? null : metrics.cacheHitRate * 100
   const parts = [
-    { name: "成功率", value: recentSuccess },
     { name: "稳定性", value: stability },
     { name: "缓存命中", value: cacheHit },
     { name: "延迟", value: recentLatency },
   ]
   const missingMetrics = parts.filter(({value}) => value == null).map(({name}) => name)
-  const score = missingMetrics.length > 0 ? null : Math.round(parts.reduce((sum, {value}) => sum + value! * 0.25, 0))
+  const score = missingMetrics.length > 0 ? null : Math.round(parts.reduce((sum, {value}) => sum + value!, 0) / parts.length)
   return {
     score,
-    recentSuccess,
     recentLatency,
     stability,
     cacheHit,
     sampleCount: selected.samples.length,
     sampleLimit: selected.sampleLimit,
-    attemptCount: attempts.length,
+    measuredCount: measured.length,
     windowHours: selected.windowHours,
     missingMetrics,
-    lowConfidence: attempts.length < 10,
+    lowConfidence: measured.length < 10,
   }
 }
 
@@ -169,10 +156,10 @@ export function healthScoreDescription(score: LatencyHealthScore | null) {
   const value = (part: number | null) => part == null ? "未知" : part.toFixed(1)
   const result = score.score == null ? `数据不足：${score.missingMetrics.join("、")}` : `综合评分 ${score.score}`
   const confidence = score.lowConfidence ? " · 少于 10 次，低置信度" : ""
-  return `${result} · ${score.windowHours}h 最近 ${score.sampleCount}/${score.sampleLimit} 次（有效尝试 ${score.attemptCount} 次）${confidence}
-成功率 ${value(score.recentSuccess)} · 稳定性 ${value(score.stability)} · 缓存命中 ${value(score.cacheHit)} · 延迟 ${value(score.recentLatency)}
-四项各占 25%，缺项不重新分配权重。成功率和缓存与环形指标同口径；稳定性仅评估相对延迟波动与连续失败。
-波动分 = 100 ÷ (1 + 标准差/均值)；连续失败系数 = 1 - max(0, 最长连败-1) ÷ (尝试次数-1)。稳定性 = 波动分 × 连续失败系数；延迟仅评估成功请求。`
+  return `${result} · ${score.windowHours}h \u6700\u8fd1 ${score.sampleCount}/${score.sampleLimit} \u6b21\uff08\u6709\u6548\u8017\u65f6 ${score.measuredCount} \u6b21\uff09${confidence}
+\u7a33\u5b9a\u6027 ${value(score.stability)} · \u7f13\u5b58\u547d\u4e2d ${value(score.cacheHit)} · \u5ef6\u8fdf ${value(score.recentLatency)}
+\u4e09\u9879\u5404\u5360 1/3\uff0c\u7f3a\u9879\u4e0d\u91cd\u65b0\u5206\u914d\u6743\u91cd\u3002\u7f13\u5b58\u4f7f\u7528 Token \u52a0\u6743\u6bd4\u4f8b\uff1b\u7a33\u5b9a\u6027\u548c\u5ef6\u8fdf\u76f4\u63a5\u4f7f\u7528\u5b9e\u6d4b\u8017\u65f6\u3002
+\u7a33\u5b9a\u6027 = 100 \u00f7 (1 + \u6807\u51c6\u5dee/\u5747\u503c)\uff0c\u5206\u522b\u8ba1\u7b97\u9996\u5b57\u548c\u603b\u8017\u65f6\u540e\u53d6\u5e73\u5747\u3002`
 }
 
 export function formatLatency(value: number | null | undefined) {
