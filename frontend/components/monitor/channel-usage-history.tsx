@@ -4,11 +4,10 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { TimeRangeFilter } from "@/components/ui/time-range-filter"
-import { useChannelUsageIntegrity } from "@/lib/queries"
 import { useTriggerRefresh } from "@/lib/refresh-context"
 import { refetchUsageHistoryStream } from "@/lib/sync-stream"
 import { serializeTimeRange, type TimeRangeSelection } from "@/lib/time-range"
-import { usageIntegrityLabel, usageIntegritySummary, usageIntegritySnapshot, usageIntegrityPause, usageIntegrityProgress, type UsageIntegrity } from "@/lib/usage-integrity"
+import { usageIntegritySnapshot, usageIntegrityPause, usageIntegrityProgress, type UsageIntegrity } from "@/lib/usage-integrity"
 import { UsageIntegrityReport } from "@/components/monitor/usage-integrity-report"
 import type { Channel, RelayUsageRangePreset } from "@/lib/api-types"
 import { cn } from "@/lib/utils"
@@ -32,26 +31,18 @@ export function ChannelUsageHistory({ channel, range, compact = false }: { chann
   const [clock,setClock]=useState(Date.now())
   const activeRequest = useRef(false)
   const requestQuery = serializeTimeRange(historyRange)?.toString() ?? null
-  const query = useChannelUsageIntegrity(channel.id, range, channel.balance_mode !== "manual" && !open)
   const refresh = useTriggerRefresh()
-  const checking=query.refreshing && !running
-  const data = open ? manualResult : query.data
+  const data = manualResult
   const retryAt=data?.phase==="paused" && data.retry_at ? new Date(data.retry_at).getTime() : 0
   useEffect(()=>{
-    if(!running && !checking && !retryAt)return
+    if(!running && !retryAt)return
     setClock(Date.now())
     const timer=setInterval(()=>setClock(Date.now()),1000)
     return()=>clearInterval(timer)
-  },[running,checking,query.startedAt,retryAt])
-  const elapsed=Math.max(0,Math.floor((clock-(running?manualStartedAt:query.startedAt))/1000))
+  },[running,retryAt])
+  const elapsed=Math.max(0,Math.floor((clock-manualStartedAt)/1000))
   const paused=usageIntegrityPause(data,clock)
-  const label = usageIntegrityLabel(data, query.loading || running)
-  const auditSummary=usageIntegritySummary(data)
-  const checkError=data?.error || (!open ? query.error : null) || (data?.status==="unavailable" && !running ? data.accounts.map(account=>account.error).filter(Boolean).join("\uff1b") || "\u4e0a\u6e38\u6682\u4e0d\u652f\u6301\u53ef\u9760\u6761\u6570\u6838\u5bf9" : "")
-  const checkingProgress=checking ? <p role="status" className="flex w-full min-w-0 items-start gap-1 break-words text-[11px] text-muted-foreground"><Loader2 className="mt-0.5 size-3 shrink-0 animate-spin"/><span className="min-w-0 break-words">{query.progress || "\u6b63\u5728\u6838\u5bf9\u603b\u6570\u2026"}{` \u00b7 \u5df2\u7528\u65f6 ${elapsed} \u79d2`}</span></p> : null
-  const checkedStart = data?.since.startsWith("0001-") ? "\u5168\u90e8\u5386\u53f2" : data ? new Date(data.since).toLocaleString() : ""
-  const checkedEnd = data ? new Date(Math.max(new Date(data.since).getTime(), new Date(data.until).getTime() - 1)).toLocaleString() : ""
-  const details = data ? `${checkedStart} - ${checkedEnd}\n\u6838\u5bf9\u65f6\u95f4\uff1a${new Date(data.checked_at).toLocaleString()}\n\u4ec5\u6838\u5bf9\u8c03\u7528\u6761\u6570\uff0c\u4e0a\u6e38\u6e05\u7406\u65e5\u5fd7\u4e5f\u53ef\u80fd\u4ea7\u751f\u5dee\u5f02\u3002` : query.error ?? label
+  const checkError=manualResult?.error || ""
 
   const refetchHistory = useCallback(async () => {
     if (!requestQuery || activeRequest.current) return
@@ -100,11 +91,9 @@ export function ChannelUsageHistory({ channel, range, compact = false }: { chann
 
   return <>
     <div className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1", compact ? "mt-1" : "mt-3 rounded-md border border-border px-2.5 py-2")}>
-      <span role="status" title={details} className={cn("min-w-0 break-words text-[11px]", data?.status === "mismatch" ? "text-warning" : data?.status === "matched" ? "text-success" : "text-muted-foreground")}>{label}</span>
       <Button variant="ghost" size="sm" className="h-7 max-w-full shrink-0 gap-1 px-1.5 text-[11px]" onClick={() => { setHistoryRange(range); setManualResult(null); setMessage(""); setFailed(false); setOpen(true) }}>
         <History className="size-3" />{"\u91cd\u65b0\u62c9\u53d6\u5386\u53f2"}
       </Button>
-      {checkingProgress}
       {checkError || paused ? <p role={paused ? "status" : "alert"} className={cn("w-full break-words text-[11px]",paused ? "text-warning" : "text-danger")}>{paused || checkError}</p> : null}
     </div>
     <Dialog open={open} onOpenChange={next => { if (!running) setOpen(next) }}>
@@ -125,11 +114,9 @@ export function ChannelUsageHistory({ channel, range, compact = false }: { chann
         {data || running ? <UsageIntegrityReport result={data} loading={running} /> : null}
         <section className="min-w-0 rounded-md border border-border p-3 text-xs" aria-label={"\u5904\u7406\u8fdb\u5ea6"}>
           <h3 className="mb-2 font-medium">{"3. \u5904\u7406\u8fdb\u5ea6"}</h3>
-          {checkingProgress}
           {message && !failed && !paused ? <p role="status" className="flex items-start gap-1 break-words text-muted-foreground">{running ? <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin"/> : null}<span className="min-w-0 break-words">{message}{running ? ` \u00b7 \u5df2\u7528\u65f6 ${elapsed} \u79d2` : ""}</span></p> : null}
           {paused ? <p role="status" className="break-words text-warning">{paused}{manualResult?.retry_status===429 ? "\uff1b\u4fdd\u6301\u5f39\u7a97\u6253\u5f00\u5c06\u81ea\u52a8\u7ee7\u7eed" : ""}</p> : checkError || failed ? <p role="alert" className="break-words text-danger">{"\u5904\u7406\u672a\u5b8c\u6210\uff1a"}{failed ? message : checkError}</p> : null}
-          {auditSummary ? <p className="mt-1 break-words text-[11px] text-muted-foreground">{auditSummary}</p> : null}
-          {!checking && !running && !message && !checkError ? <p className="text-muted-foreground">{!data ? "\u8bf7\u9009\u62e9\u65f6\u95f4\u8303\u56f4\uff0c\u70b9\u51fb\u201c\u5f00\u59cb\u6838\u5bf9\u5e76\u8865\u9f50\u201d\u540e\u6267\u884c\u3002" : data.status==="mismatch" ? "\u6838\u5bf9\u5b8c\u6210\uff0c\u5dee\u5f02\u5c1a\u672a\u4fee\u590d\u3002" : "\u65e0\u9700\u4fee\u590d\u3002"}</p> : null}
+          {!running && !message && !checkError ? <p className="text-muted-foreground">{!data ? "\u8bf7\u9009\u62e9\u65f6\u95f4\u8303\u56f4\uff0c\u70b9\u51fb\u201c\u5f00\u59cb\u6838\u5bf9\u5e76\u8865\u9f50\u201d\u540e\u6267\u884c\u3002" : data.status==="mismatch" ? "\u6838\u5bf9\u5b8c\u6210\uff0c\u5dee\u5f02\u5c1a\u672a\u4fee\u590d\u3002" : "\u65e0\u9700\u4fee\u590d\u3002"}</p> : null}
         </section>
         <DialogFooter>
           <Button variant="outline" disabled={running} onClick={() => setOpen(false)}>{"\u5173\u95ed"}</Button>

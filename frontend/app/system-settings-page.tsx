@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
 import { useLocation } from "react-router-dom"
-import { Clock3, Eye, LayoutList, Save, Settings2, ShieldCheck, WalletCards } from "lucide-react"
+import { Clock3, Play, Eye, LayoutList, Save, Settings2, ShieldCheck, WalletCards } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -25,6 +25,12 @@ import { ProductIcon, useProductBranding } from "@/components/product-branding"
 const channelSyncIntervals = [5, 10, 15, 30, 60, 180, 360, 720, 1440]
 const relayRateSyncIntervals = [5, 10, 20, 30, 60, 300, 600, 1800, 3600, 18000, 43200, 86400]
 const relaySnapshotSyncIntervals = [5, 10, 30, 60, 120, 180, 300, 600, 900, 1800, 3600, 10800]
+const usageIntegrityRanges = [
+  { value: "today", label: "今天" },
+  { value: "24h", label: "24 小时" },
+  { value: "7d", label: "7 天" },
+  { value: "all", label: "All" },
+] as const
 
 function formatMinutes(value: number) {
   if (value < 60) return `每 ${value} 分钟`
@@ -159,6 +165,7 @@ export default function SystemSettingsPage() {
   const [iframeAllowlistDraft, setIframeAllowlistDraft] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const [savingSync, setSavingSync] = useState(false)
+  const [runningUsageIntegrity, setRunningUsageIntegrity] = useState(false)
 
   useEffect(() => {
     const data = query.data
@@ -230,6 +237,20 @@ export default function SystemSettingsPage() {
     }
   }
 
+  async function runAllChannelUsageIntegrity() {
+    if (runningUsageIntegrity) return
+    setRunningUsageIntegrity(true)
+    try {
+      await apiFetch<{ accepted: boolean }>("/tasks/channel_usage_integrity/run", { method: "POST" })
+      toast.success("已开始全渠道用量核对与修复")
+      refreshAll()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "启动全渠道核对失败")
+    } finally {
+      setRunningUsageIntegrity(false)
+    }
+  }
+
   async function saveSyncSettings() {
     if (!syncSettings) return
     const tokenInterval=syncSettings.channel_token_refresh_interval_minutes??30
@@ -241,6 +262,9 @@ export default function SystemSettingsPage() {
         body: JSON.stringify({
           channel_enabled: syncSettings.channel_enabled,
           channel_interval_minutes: syncSettings.channel_interval_minutes,
+          channel_usage_integrity_enabled: syncSettings.channel_usage_integrity_enabled,
+          channel_usage_integrity_range: syncSettings.channel_usage_integrity_range,
+          channel_usage_integrity_time: syncSettings.channel_usage_integrity_time,
           channel_token_refresh_enabled: syncSettings.channel_token_refresh_enabled,
           channel_token_refresh_interval_minutes: syncSettings.channel_token_refresh_interval_minutes,
           relay_rate_enabled: syncSettings.relay_rate_enabled,
@@ -336,6 +360,29 @@ export default function SystemSettingsPage() {
               onCheckedChange={value=>updateSyncSettings(current=>({...current,channel_token_refresh_enabled:value}))}
               onValueChange={value=>updateSyncSettings(current=>({...current,channel_token_refresh_interval_minutes:value}))}
             />
+          </div>
+
+          <div className="border-t border-border py-3">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-sm font-medium text-foreground">全渠道用量核对与修复</p>
+                  <TaskHistoryButton task="channel_usage_integrity" title="全渠道用量核对与修复" />
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">每天按北京时间执行，逐个核对并自动修复全部渠道；手动余额渠道会跳过。立即执行使用已保存的范围设置。</p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={syncSettings.channel_usage_integrity_range} disabled={savingSync} onValueChange={(value) => updateSyncSettings((current) => ({ ...current, channel_usage_integrity_range: value as SyncSettings["channel_usage_integrity_range"] }))}>
+                  <SelectTrigger className="h-9 w-32 text-xs" aria-label="全渠道用量核对范围"><SelectValue /></SelectTrigger>
+                  <SelectContent>{usageIntegrityRanges.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
+                </Select>
+                <Input type="time" value={syncSettings.channel_usage_integrity_time} disabled={savingSync || !syncSettings.channel_usage_integrity_enabled} className="h-9 w-32 text-xs" aria-label="全渠道用量核对北京时间" onChange={(event) => updateSyncSettings((current) => ({ ...current, channel_usage_integrity_time: event.target.value }))} />
+                <Button type="button" variant="outline" size="sm" disabled={runningUsageIntegrity || savingSync} onClick={() => void runAllChannelUsageIntegrity()}>
+                  <Play className="size-3.5" />{runningUsageIntegrity ? "正在启动" : "立即执行"}
+                </Button>
+                <Switch checked={syncSettings.channel_usage_integrity_enabled} disabled={savingSync} onCheckedChange={(value) => updateSyncSettings((current) => ({ ...current, channel_usage_integrity_enabled: value }))} aria-label="启用全渠道用量核对与修复" />
+              </div>
+            </div>
           </div>
 
           <div className="border-t border-border py-3">

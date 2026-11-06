@@ -19,39 +19,46 @@ import (
 )
 
 type Scheduler struct {
-	tokenRefreshID       cron.EntryID
-	tokenRefreshRunning  atomic.Bool
-	cfg                  config.SchedulerConfig
-	log                  *slog.Logger
-	cron                 *cron.Cron
-	monitor              *monitor.Service
-	monLogs              *storage.MonitorLogs
-	rates                *storage.Rates
-	notifies             *storage.Notifications
-	settings             *storage.Settings
-	relay                *relay.Service
-	pelicanCtx           context.Context
-	pelicanCancel        context.CancelFunc
-	alerts               *alert.Service
-	legacyBalanceID      cron.EntryID
-	legacyRateID         cron.EntryID
-	channelSyncID        cron.EntryID
-	relayRateSyncID      cron.EntryID
-	relaySnapshotSyncID  cron.EntryID
-	alertEvaluationID    cron.EntryID
-	alertRateSyncID      cron.EntryID
-	alertUsageSyncID     cron.EntryID
-	alertBalanceSyncID   cron.EntryID
-	dailyBalanceID       cron.EntryID
-	retryTaskRunsWG      sync.WaitGroup
-	pendingTaskRunsMu    sync.Mutex
-	pendingTaskRuns      map[uint]pendingTaskRun
-	jobsMu               sync.Mutex
-	channelSyncMu        sync.Mutex
-	relaySyncMu          sync.Mutex
-	relayRateRunning     atomic.Bool
-	relaySnapshotRunning atomic.Bool
-	alertRunning         atomic.Bool
+	tokenRefreshID           cron.EntryID
+	tokenRefreshRunning      atomic.Bool
+	cfg                      config.SchedulerConfig
+	log                      *slog.Logger
+	cron                     *cron.Cron
+	monitor                  *monitor.Service
+	monLogs                  *storage.MonitorLogs
+	rates                    *storage.Rates
+	notifies                 *storage.Notifications
+	settings                 *storage.Settings
+	relay                    *relay.Service
+	pelicanCtx               context.Context
+	pelicanCancel            context.CancelFunc
+	alerts                   *alert.Service
+	legacyBalanceID          cron.EntryID
+	legacyRateID             cron.EntryID
+	channelSyncID            cron.EntryID
+	relayRateSyncID          cron.EntryID
+	relaySnapshotSyncID      cron.EntryID
+	alertEvaluationID        cron.EntryID
+	alertRateSyncID          cron.EntryID
+	alertUsageSyncID         cron.EntryID
+	alertBalanceSyncID       cron.EntryID
+	dailyBalanceID           cron.EntryID
+	usageIntegrityCron       *cron.Cron
+	usageIntegrityScheduleMu sync.Mutex
+	usageIntegrityID         cron.EntryID
+	usageIntegrityRunning    atomic.Bool
+	usageIntegrityStopping   atomic.Bool
+	usageIntegrityMu         sync.Mutex
+	usageIntegrityWG         sync.WaitGroup
+	retryTaskRunsWG          sync.WaitGroup
+	pendingTaskRunsMu        sync.Mutex
+	pendingTaskRuns          map[uint]pendingTaskRun
+	jobsMu                   sync.Mutex
+	channelSyncMu            sync.Mutex
+	relaySyncMu              sync.Mutex
+	relayRateRunning         atomic.Bool
+	relaySnapshotRunning     atomic.Bool
+	alertRunning             atomic.Bool
 }
 
 func New(
@@ -67,19 +74,20 @@ func New(
 ) *Scheduler {
 	pelicanCtx, pelicanCancel := context.WithCancel(context.Background())
 	return &Scheduler{
-		cfg:             cfg,
-		log:             log,
-		cron:            cron.New(cron.WithSeconds()),
-		monitor:         m,
-		monLogs:         monLogs,
-		rates:           rates,
-		notifies:        notifies,
-		settings:        settings,
-		relay:           relaySvc,
-		pelicanCtx:      pelicanCtx,
-		pelicanCancel:   pelicanCancel,
-		alerts:          alertSvc,
-		pendingTaskRuns: make(map[uint]pendingTaskRun),
+		cfg:                cfg,
+		log:                log,
+		cron:               cron.New(cron.WithSeconds()),
+		usageIntegrityCron: cron.New(cron.WithSeconds(), cron.WithLocation(mustLoadUsageIntegrityLocation())),
+		monitor:            m,
+		monLogs:            monLogs,
+		rates:              rates,
+		notifies:           notifies,
+		settings:           settings,
+		relay:              relaySvc,
+		pelicanCtx:         pelicanCtx,
+		pelicanCancel:      pelicanCancel,
+		alerts:             alertSvc,
+		pendingTaskRuns:    make(map[uint]pendingTaskRun),
 	}
 }
 
@@ -120,7 +128,11 @@ func (s *Scheduler) Start() error {
 			return err
 		}
 	}
+	if err := s.configureUsageIntegrityJob(); err != nil {
+		return err
+	}
 	s.cron.Start()
+	s.usageIntegrityCron.Start()
 	s.retryTaskRunsWG.Add(1)
 	go func() { defer s.retryTaskRunsWG.Done(); s.retryTaskRuns() }()
 	if settings, settingsErr := s.settings.SyncSettings(); settingsErr == nil && settings.ChannelConfigured && settings.ChannelEnabled {
@@ -159,7 +171,10 @@ func (s *Scheduler) UpdateSyncSettings(settings storage.SyncSettings) error {
 	if err := s.settings.SaveSyncSettings(settings); err != nil {
 		return err
 	}
-	return s.configureSyncJobs()
+	if err := s.configureSyncJobs(); err != nil {
+		return err
+	}
+	return s.configureUsageIntegrityJob()
 }
 
 func (s *Scheduler) configureSyncJobs() error {
@@ -248,12 +263,19 @@ func (s *Scheduler) configureSyncJobs() error {
 }
 
 func (s *Scheduler) Stop() {
+	s.usageIntegrityMu.Lock()
+	s.usageIntegrityStopping.Store(true)
+	s.usageIntegrityMu.Unlock()
 	if s.pelicanCancel != nil {
 		s.pelicanCancel()
 	}
 	if s.cron != nil {
 		<-s.cron.Stop().Done()
 	}
+	if s.usageIntegrityCron != nil {
+		<-s.usageIntegrityCron.Stop().Done()
+	}
+	s.usageIntegrityWG.Wait()
 	s.retryTaskRunsWG.Wait()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

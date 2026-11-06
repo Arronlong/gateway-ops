@@ -10,15 +10,16 @@ import (
 )
 
 var TaskNames = map[string]string{
-	"channel_token_refresh": "\u6e20\u9053 Token \u5237\u65b0",
-	"channel_sync":          "\u6e20\u9053\u4f59\u989d\u4e0e\u500d\u7387\u540c\u6b65",
-	"relay_rate_sync":       "API Key \u500d\u7387\u63a2\u6d4b",
-	"relay_snapshot_sync":   "\u4e2d\u8f6c\u7ad9\u5feb\u7167\u540c\u6b65",
-	"daily_balances":        "\u6bcf\u65e5\u4f59\u989d\u5feb\u7167",
-	"retention":             "\u5386\u53f2\u6570\u636e\u6e05\u7406",
-	"pelican":               "\u9e48\u9e55\u5b9a\u65f6\u8c03\u5ea6\u68c0\u67e5",
-	"legacy_balance":        "\u6e20\u9053\u4f59\u989d\u626b\u63cf\uff08\u517c\u5bb9\uff09",
-	"legacy_rates":          "\u6e20\u9053\u500d\u7387\u626b\u63cf\uff08\u517c\u5bb9\uff09",
+	"channel_token_refresh":   "\u6e20\u9053 Token \u5237\u65b0",
+	"channel_sync":            "\u6e20\u9053\u4f59\u989d\u4e0e\u500d\u7387\u540c\u6b65",
+	"channel_usage_integrity": "全渠道用量核对与修复",
+	"relay_rate_sync":         "API Key \u500d\u7387\u63a2\u6d4b",
+	"relay_snapshot_sync":     "\u4e2d\u8f6c\u7ad9\u5feb\u7167\u540c\u6b65",
+	"daily_balances":          "\u6bcf\u65e5\u4f59\u989d\u5feb\u7167",
+	"retention":               "\u5386\u53f2\u6570\u636e\u6e05\u7406",
+	"pelican":                 "\u9e48\u9e55\u5b9a\u65f6\u8c03\u5ea6\u68c0\u67e5",
+	"legacy_balance":          "\u6e20\u9053\u4f59\u989d\u626b\u63cf\uff08\u517c\u5bb9\uff09",
+	"legacy_rates":            "\u6e20\u9053\u500d\u7387\u626b\u63cf\uff08\u517c\u5bb9\uff09",
 }
 
 func (s *Scheduler) track(root context.Context, task string, timeout time.Duration, fn func(context.Context) error) {

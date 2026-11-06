@@ -50,3 +50,23 @@ func TestTaskRunDetailIsScopedAndIncludesLogs(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestManualRunRouteIsLimitedToChannelUsageIntegrity(t *testing.T) {
+	router := gin.New()
+	registerTaskRuns(router.Group(""), &Deps{})
+	cases := []struct {
+		path string
+		want int
+	}{
+		{path: "/tasks/unknown/run", want: http.StatusNotFound},
+		{path: "/tasks/channel_sync/run", want: http.StatusMethodNotAllowed},
+		{path: "/tasks/channel_usage_integrity/run", want: http.StatusConflict},
+	}
+	for _, tc := range cases {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(http.MethodPost, tc.path, nil))
+		if response.Code != tc.want {
+			t.Fatalf("%s status=%d, want %d: %s", tc.path, response.Code, tc.want, response.Body.String())
+		}
+	}
+}

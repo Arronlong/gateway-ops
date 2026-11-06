@@ -877,24 +877,27 @@ func (RelayAccountAdjustmentLog) TableName() string { return "relay_account_adju
 
 // SyncSettings 是管理界面的自动同步设置。
 type SyncSettings struct {
-	ChannelTokenRefreshEnabled         bool `json:"channel_token_refresh_enabled"`
-	ChannelTokenRefreshIntervalMinutes int  `json:"channel_token_refresh_interval_minutes"`
-	ChannelConfigured                  bool `json:"channel_configured"`
-	ChannelEnabled                     bool `json:"channel_enabled"`
-	ChannelIntervalMinutes             int  `json:"channel_interval_minutes"`
-	RelayRateConfigured                bool `json:"relay_rate_configured"`
-	RelayRateEnabled                   bool `json:"relay_rate_enabled"`
-	RelayRateIntervalMinutes           int  `json:"relay_rate_interval_minutes"`
-	RelayRateIntervalSeconds           int  `json:"relay_rate_interval_seconds"`
-	RelaySnapshotConfigured            bool `json:"relay_snapshot_configured"`
-	RelaySnapshotEnabled               bool `json:"relay_snapshot_enabled"`
-	RelaySnapshotIntervalMinutes       int  `json:"relay_snapshot_interval_minutes"`
-	RelaySnapshotIntervalSeconds       int  `json:"relay_snapshot_interval_seconds"`
-	AlertsEnabled                      bool `json:"alerts_enabled"`
-	AlertEvaluationIntervalSeconds     int  `json:"alert_evaluation_interval_seconds"`
-	AlertRateIntervalSeconds           int  `json:"alert_rate_interval_seconds"`
-	AlertUsageIntervalSeconds          int  `json:"alert_usage_interval_seconds"`
-	AlertBalanceIntervalSeconds        int  `json:"alert_balance_interval_seconds"`
+	ChannelTokenRefreshEnabled         bool   `json:"channel_token_refresh_enabled"`
+	ChannelTokenRefreshIntervalMinutes int    `json:"channel_token_refresh_interval_minutes"`
+	ChannelConfigured                  bool   `json:"channel_configured"`
+	ChannelEnabled                     bool   `json:"channel_enabled"`
+	ChannelIntervalMinutes             int    `json:"channel_interval_minutes"`
+	RelayRateConfigured                bool   `json:"relay_rate_configured"`
+	RelayRateEnabled                   bool   `json:"relay_rate_enabled"`
+	RelayRateIntervalMinutes           int    `json:"relay_rate_interval_minutes"`
+	RelayRateIntervalSeconds           int    `json:"relay_rate_interval_seconds"`
+	RelaySnapshotConfigured            bool   `json:"relay_snapshot_configured"`
+	RelaySnapshotEnabled               bool   `json:"relay_snapshot_enabled"`
+	RelaySnapshotIntervalMinutes       int    `json:"relay_snapshot_interval_minutes"`
+	RelaySnapshotIntervalSeconds       int    `json:"relay_snapshot_interval_seconds"`
+	AlertsEnabled                      bool   `json:"alerts_enabled"`
+	AlertEvaluationIntervalSeconds     int    `json:"alert_evaluation_interval_seconds"`
+	AlertRateIntervalSeconds           int    `json:"alert_rate_interval_seconds"`
+	AlertUsageIntervalSeconds          int    `json:"alert_usage_interval_seconds"`
+	AlertBalanceIntervalSeconds        int    `json:"alert_balance_interval_seconds"`
+	ChannelUsageIntegrityEnabled       bool   `json:"channel_usage_integrity_enabled"`
+	ChannelUsageIntegrityRange         string `json:"channel_usage_integrity_range"`
+	ChannelUsageIntegrityTime          string `json:"channel_usage_integrity_time"`
 }
 
 const (

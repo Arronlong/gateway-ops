@@ -14,6 +14,9 @@ const (
 	SettingChannelSyncConfigured         = "sync.channel.configured"
 	SettingChannelSyncEnabled            = "sync.channel.enabled"
 	SettingChannelSyncInterval           = "sync.channel.interval_minutes"
+	SettingChannelUsageIntegrityEnabled  = "sync.channel.usage_integrity.enabled"
+	SettingChannelUsageIntegrityRange    = "sync.channel.usage_integrity.range"
+	SettingChannelUsageIntegrityTime     = "sync.channel.usage_integrity.time"
 	SettingRelayRateConfigured           = "sync.relay.rate.configured"
 	SettingRelayRateEnabled              = "sync.relay.rate.enabled"
 	SettingRelayRateInterval             = "sync.relay.rate.interval_minutes"
@@ -88,6 +91,9 @@ func (s *Settings) SyncSettings() (SyncSettings, error) {
 		ChannelTokenRefreshEnabled:         tokenEnabled,
 		ChannelTokenRefreshIntervalMinutes: tokenInterval,
 		ChannelIntervalMinutes:             30,
+		ChannelUsageIntegrityEnabled:       true,
+		ChannelUsageIntegrityRange:         "24h",
+		ChannelUsageIntegrityTime:          "07:00",
 		RelayRateIntervalMinutes:           1,
 		RelayRateIntervalSeconds:           10,
 		RelaySnapshotIntervalMinutes:       60,
@@ -134,6 +140,19 @@ func (s *Settings) SyncSettings() (SyncSettings, error) {
 	}
 	if _, err = readInt(SettingChannelSyncInterval, &settings.ChannelIntervalMinutes); err != nil {
 		return settings, err
+	}
+	if err = readBool(SettingChannelUsageIntegrityEnabled, &settings.ChannelUsageIntegrityEnabled); err != nil {
+		return settings, err
+	}
+	if value, found, readErr := s.Get(SettingChannelUsageIntegrityRange); readErr != nil {
+		return settings, readErr
+	} else if found {
+		settings.ChannelUsageIntegrityRange = value
+	}
+	if value, found, readErr := s.Get(SettingChannelUsageIntegrityTime); readErr != nil {
+		return settings, readErr
+	} else if found {
+		settings.ChannelUsageIntegrityTime = value
 	}
 	legacyRelayInterval := 60
 	legacyRelayIntervalConfigured, err := readInt(settingLegacyRelaySyncInterval, &legacyRelayInterval)
@@ -217,6 +236,12 @@ func (s *Settings) SaveSyncSettings(settings SyncSettings) error {
 	if settings.ChannelIntervalMinutes < 1 {
 		settings.ChannelIntervalMinutes = 30
 	}
+	if !validUsageIntegrityRange(settings.ChannelUsageIntegrityRange) {
+		return fmt.Errorf("invalid channel usage integrity range %q", settings.ChannelUsageIntegrityRange)
+	}
+	if _, err := time.Parse("15:04", settings.ChannelUsageIntegrityTime); err != nil || len(settings.ChannelUsageIntegrityTime) != 5 {
+		return fmt.Errorf("invalid channel usage integrity time %q", settings.ChannelUsageIntegrityTime)
+	}
 	if settings.RelayRateIntervalSeconds < 5 {
 		if settings.RelayRateIntervalMinutes > 0 {
 			settings.RelayRateIntervalSeconds = settings.RelayRateIntervalMinutes * 60
@@ -254,6 +279,9 @@ func (s *Settings) SaveSyncSettings(settings SyncSettings) error {
 		SettingChannelSyncConfigured:        "true",
 		SettingChannelSyncEnabled:           strconv.FormatBool(settings.ChannelEnabled),
 		SettingChannelSyncInterval:          strconv.Itoa(settings.ChannelIntervalMinutes),
+		SettingChannelUsageIntegrityEnabled: strconv.FormatBool(settings.ChannelUsageIntegrityEnabled),
+		SettingChannelUsageIntegrityRange:   settings.ChannelUsageIntegrityRange,
+		SettingChannelUsageIntegrityTime:    settings.ChannelUsageIntegrityTime,
 		SettingRelayRateConfigured:          "true",
 		SettingRelayRateEnabled:             strconv.FormatBool(settings.RelayRateEnabled),
 		SettingRelayRateInterval:            strconv.Itoa(settings.RelayRateIntervalMinutes),
@@ -551,4 +579,13 @@ func (s *Settings) SaveUISettings(settings UISettings) error {
 		}
 		return groupQuery.Updates(map[string]any{"cron_expression": settings.PelicanCronExpression, "next_run_at": next}).Error
 	})
+}
+
+func validUsageIntegrityRange(value string) bool {
+	switch value {
+	case "today", "24h", "7d", "all":
+		return true
+	default:
+		return false
+	}
 }

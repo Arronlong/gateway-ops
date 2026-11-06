@@ -20,6 +20,20 @@ func registerTaskRuns(g *gin.RouterGroup, d *Deps) {
 		}
 		return true
 	}
+	g.POST("/tasks/:task/run", func(c *gin.Context) {
+		if !validTask(c) {
+			return
+		}
+		if c.Param("task") != "channel_usage_integrity" {
+			c.JSON(http.StatusMethodNotAllowed, gin.H{"error": "\u8be5\u4efb\u52a1\u6682\u4e0d\u652f\u6301\u624b\u52a8\u6267\u884c"})
+			return
+		}
+		if d.Scheduler == nil || !d.Scheduler.RunChannelUsageIntegrity() {
+			c.JSON(http.StatusConflict, gin.H{"error": "\u5168\u6e20\u9053\u7528\u91cf\u6838\u5bf9\u4efb\u52a1\u6b63\u5728\u6267\u884c\u6216\u6682\u4e0d\u53ef\u7528\uff0c\u8bf7\u67e5\u770b\u6267\u884c\u8bb0\u5f55"})
+			return
+		}
+		c.JSON(http.StatusAccepted, gin.H{"data": gin.H{"accepted": true}})
+	})
 	g.GET("/tasks/:task/runs", func(c *gin.Context) {
 		if !validTask(c) {
 			return

@@ -7,21 +7,24 @@ import (
 )
 
 type syncSettingsInput struct {
-	ChannelTokenRefreshEnabled         *bool `json:"channel_token_refresh_enabled"`
-	ChannelTokenRefreshIntervalMinutes *int  `json:"channel_token_refresh_interval_minutes" binding:"omitempty,min=1"`
-	ChannelEnabled                     bool  `json:"channel_enabled"`
-	ChannelIntervalMinutes             int   `json:"channel_interval_minutes"`
-	RelayRateEnabled                   bool  `json:"relay_rate_enabled"`
-	RelayRateIntervalMinutes           int   `json:"relay_rate_interval_minutes"`
-	RelayRateIntervalSeconds           int   `json:"relay_rate_interval_seconds"`
-	RelaySnapshotEnabled               bool  `json:"relay_snapshot_enabled"`
-	RelaySnapshotIntervalMinutes       int   `json:"relay_snapshot_interval_minutes"`
-	RelaySnapshotIntervalSeconds       int   `json:"relay_snapshot_interval_seconds"`
-	AlertsEnabled                      *bool `json:"alerts_enabled"`
-	AlertEvaluationIntervalSeconds     *int  `json:"alert_evaluation_interval_seconds"`
-	AlertRateIntervalSeconds           *int  `json:"alert_rate_interval_seconds"`
-	AlertUsageIntervalSeconds          *int  `json:"alert_usage_interval_seconds"`
-	AlertBalanceIntervalSeconds        *int  `json:"alert_balance_interval_seconds"`
+	ChannelUsageIntegrityEnabled       *bool   `json:"channel_usage_integrity_enabled"`
+	ChannelUsageIntegrityRange         *string `json:"channel_usage_integrity_range"`
+	ChannelUsageIntegrityTime          *string `json:"channel_usage_integrity_time"`
+	ChannelTokenRefreshEnabled         *bool   `json:"channel_token_refresh_enabled"`
+	ChannelTokenRefreshIntervalMinutes *int    `json:"channel_token_refresh_interval_minutes" binding:"omitempty,min=1"`
+	ChannelEnabled                     bool    `json:"channel_enabled"`
+	ChannelIntervalMinutes             int     `json:"channel_interval_minutes"`
+	RelayRateEnabled                   bool    `json:"relay_rate_enabled"`
+	RelayRateIntervalMinutes           int     `json:"relay_rate_interval_minutes"`
+	RelayRateIntervalSeconds           int     `json:"relay_rate_interval_seconds"`
+	RelaySnapshotEnabled               bool    `json:"relay_snapshot_enabled"`
+	RelaySnapshotIntervalMinutes       int     `json:"relay_snapshot_interval_minutes"`
+	RelaySnapshotIntervalSeconds       int     `json:"relay_snapshot_interval_seconds"`
+	AlertsEnabled                      *bool   `json:"alerts_enabled"`
+	AlertEvaluationIntervalSeconds     *int    `json:"alert_evaluation_interval_seconds"`
+	AlertRateIntervalSeconds           *int    `json:"alert_rate_interval_seconds"`
+	AlertUsageIntervalSeconds          *int    `json:"alert_usage_interval_seconds"`
+	AlertBalanceIntervalSeconds        *int    `json:"alert_balance_interval_seconds"`
 }
 
 func registerSyncSettings(g *gin.RouterGroup, d *Deps) {
@@ -45,6 +48,15 @@ func registerSyncSettings(g *gin.RouterGroup, d *Deps) {
 			return
 		}
 		settings.ChannelEnabled = in.ChannelEnabled
+		if in.ChannelUsageIntegrityEnabled != nil {
+			settings.ChannelUsageIntegrityEnabled = *in.ChannelUsageIntegrityEnabled
+		}
+		if in.ChannelUsageIntegrityRange != nil {
+			settings.ChannelUsageIntegrityRange = *in.ChannelUsageIntegrityRange
+		}
+		if in.ChannelUsageIntegrityTime != nil {
+			settings.ChannelUsageIntegrityTime = *in.ChannelUsageIntegrityTime
+		}
 		settings.ChannelIntervalMinutes = in.ChannelIntervalMinutes
 		settings.RelayRateEnabled = in.RelayRateEnabled
 		settings.RelayRateIntervalMinutes = in.RelayRateIntervalMinutes

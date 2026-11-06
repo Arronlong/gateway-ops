@@ -1315,6 +1315,9 @@ export interface SyncSettings {
   channel_configured: boolean
   channel_enabled: boolean
   channel_interval_minutes: number
+  channel_usage_integrity_enabled: boolean
+  channel_usage_integrity_range: "today" | "24h" | "7d" | "all"
+  channel_usage_integrity_time: string
   relay_rate_configured: boolean
   relay_rate_enabled: boolean
   relay_rate_interval_minutes: number
