@@ -3,12 +3,14 @@ package newapi
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-resty/resty/v2"
@@ -21,7 +23,8 @@ func init() {
 
 // Client NewAPI connector 实现。
 type Client struct {
-	http *resty.Client
+	http          *resty.Client
+	usageMetadata sync.Map
 }
 
 func New() *Client {
@@ -58,6 +61,11 @@ func (c *Client) GetTurnstileSiteKey(ctx context.Context, ch *connector.Channel)
 }
 
 func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.AuthSession, error) {
+	release, err := connector.BeginUsageRequest(ctx, ch.SiteURL)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	site := strings.TrimRight(ch.SiteURL, "/")
 	vars := map[string]string{"username": ch.Username, "password": ch.Password, "turnstile_token": ch.TurnstileToken}
 	req := c.http.R().
@@ -73,6 +81,7 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 		return nil, fmt.Errorf("newapi login http: %w", err)
 	}
 	if resp.IsError() {
+		connector.ObserveUsageResponse(ctx, ch.SiteURL, resp.StatusCode(), resp.Header().Get("Retry-After"))
 		return nil, fmt.Errorf("newapi login: %w", connector.HTTPStatusError(resp.StatusCode(), resp.Body()))
 	}
 	var wrapped newapiResp
@@ -190,18 +199,9 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 		pageSize = 100
 	}
 	site := strings.TrimRight(ch.SiteURL, "/")
-	statusBody, err := c.getJSON(ctx, ch, site+"/api/status", nil)
+	quotaPerUnit, err := c.usageQuotaPerUnit(ctx, ch)
 	if err != nil {
-		return nil, fmt.Errorf("newapi usage status: %w", err)
-	}
-	var status struct {
-		QuotaPerUnit float64 `json:"quota_per_unit"`
-	}
-	if err := json.Unmarshal(statusBody, &status); err != nil {
-		return nil, fmt.Errorf("newapi usage status decode: %w", err)
-	}
-	if status.QuotaPerUnit <= 0 {
-		status.QuotaPerUnit = 500000
+		return nil, err
 	}
 
 	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session)).
@@ -209,16 +209,22 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 		SetQueryParam("page_size", strconv.Itoa(pageSize)).
 		SetQueryParam("type", "0")
 	if !query.Since.IsZero() {
-		req.SetQueryParam("start_timestamp", strconv.FormatInt(query.Since.Unix(), 10))
+		req.SetQueryParam("start_timestamp", strconv.FormatInt(usageStartTimestamp(query.Since), 10))
 	}
 	if !query.Until.IsZero() {
-		req.SetQueryParam("end_timestamp", strconv.FormatInt(query.Until.Unix(), 10))
+		req.SetQueryParam("end_timestamp", strconv.FormatInt(query.Until.Add(-time.Nanosecond).Unix(), 10))
 	}
+	release, err := connector.BeginUsageRequest(ctx, ch.SiteURL)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	resp, err := req.Get(site + "/api/log/self")
 	if err != nil {
 		return nil, fmt.Errorf("newapi usage http: %w", err)
 	}
 	if resp.IsError() {
+		connector.ObserveUsageResponse(ctx, ch.SiteURL, resp.StatusCode(), resp.Header().Get("Retry-After"))
 		return nil, fmt.Errorf("newapi usage: %w", connector.HTTPStatusError(resp.StatusCode(), resp.Body()))
 	}
 	var wrapped newapiResp
@@ -229,32 +235,35 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 		return nil, fmt.Errorf("newapi usage: %s", wrapped.Message)
 	}
 	var data struct {
-		Page     int `json:"page"`
-		PageSize int `json:"page_size"`
-		Total    int `json:"total"`
-		Items    []struct {
-			ID               int    `json:"id"`
-			Type             int    `json:"type"`
-			CreatedAt        int64  `json:"created_at"`
-			ModelName        string `json:"model_name"`
-			Quota            int64  `json:"quota"`
-			PromptTokens     int64  `json:"prompt_tokens"`
-			CompletionTokens int64  `json:"completion_tokens"`
-			UseTime          int64  `json:"use_time"`
-			RequestID        string `json:"request_id"`
-			Other            string `json:"other"`
-		} `json:"items"`
+		Page     int        `json:"page"`
+		PageSize int        `json:"page_size"`
+		Total    *int       `json:"total"`
+		Items    []usageLog `json:"items"`
 	}
 	if err := json.Unmarshal(wrapped.Data, &data); err != nil {
 		return nil, fmt.Errorf("newapi usage data decode: %w", err)
 	}
-	pages := 1
-	if data.PageSize > 0 && data.Total > 0 {
-		pages = (data.Total + data.PageSize - 1) / data.PageSize
+	if data.Page <= 0 {
+		data.Page = page
 	}
-	out := &connector.UsagePage{RawCount: len(data.Items), Total: int64(data.Total), Page: data.Page, PageSize: data.PageSize, Pages: pages}
+	totalKnown := data.Total != nil && (data.PageSize > 0 || len(data.Items) == 0)
+	if data.PageSize <= 0 {
+		data.PageSize = pageSize
+		if len(data.Items) > 0 && len(data.Items) < data.PageSize {
+			data.PageSize = len(data.Items)
+		}
+	}
+	pages, total := 1, 0
+	if data.Total != nil {
+		total = *data.Total
+	}
+	if total > 0 {
+		pages = (total + data.PageSize - 1) / data.PageSize
+	}
+	out := &connector.UsagePage{TotalKnown: totalKnown, RawCount: len(data.Items), Total: int64(total), Page: data.Page, PageSize: data.PageSize, Pages: pages}
 	out.Records = make([]connector.UsageRecord, 0, len(data.Items))
 	for _, item := range data.Items {
+		out.RawTimes = append(out.RawTimes, time.Unix(item.CreatedAt, 0))
 		if (item.Type != 0 && item.Type != 2 && item.Type != 5) || (item.Type == 0 && strings.TrimSpace(item.ModelName) == "") {
 			continue
 		}
@@ -262,14 +271,57 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 		cacheRead, cacheCreation, cacheKnown := cacheTokensFromOther(item.Other)
 		firstTokenMS := firstTokenMSFromOther(item.Other)
 		out.Records = append(out.Records, connector.UsageRecord{
-			RemoteID: strconv.Itoa(item.ID), RequestID: item.RequestID, CreatedAt: time.Unix(item.CreatedAt, 0),
-			Model: item.ModelName, FirstTokenMS: firstTokenMS, DurationMS: &durationMS, SuccessKnown: item.Type == 2 || item.Type == 5, Success: item.Type != 5,
+			RemoteID: usageIdentity(item), RequestID: item.RequestID, CreatedAt: time.Unix(item.CreatedAt, 0),
+			PageIdentity: usagePageIdentity(item),
+			Model:        item.ModelName, FirstTokenMS: firstTokenMS, DurationMS: &durationMS, SuccessKnown: item.Type == 2 || item.Type == 5, Success: item.Type != 5,
 			CacheKnown: cacheKnown, CacheReadTokens: cacheRead, CacheCreationTokens: cacheCreation,
 			InputTokens: item.PromptTokens, OutputTokens: item.CompletionTokens,
-			ActualCost: float64(item.Quota) / status.QuotaPerUnit, TotalCost: float64(item.Quota) / status.QuotaPerUnit,
+			ActualCost: float64(item.Quota) / quotaPerUnit, TotalCost: float64(item.Quota) / quotaPerUnit,
 		})
 	}
 	return out, nil
+}
+
+// NewAPI 日志 id 可能被上游截断或重新编号，不参与跨查询的持久化标识。
+type usageLog struct {
+	RowID             *int64 `json:"id,omitempty"`
+	Type              int    `json:"type"`
+	CreatedAt         int64  `json:"created_at"`
+	ModelName         string `json:"model_name"`
+	Quota             int64  `json:"quota"`
+	PromptTokens      int64  `json:"prompt_tokens"`
+	CompletionTokens  int64  `json:"completion_tokens"`
+	UseTime           int64  `json:"use_time"`
+	RequestID         string `json:"request_id"`
+	UpstreamRequestID string `json:"upstream_request_id"`
+	TokenID           int64  `json:"token_id"`
+	TokenName         string `json:"token_name"`
+	Group             string `json:"group"`
+	Content           string `json:"content"`
+	IsStream          bool   `json:"is_stream"`
+	Other             string `json:"other"`
+}
+
+func usageIdentity(item usageLog) string {
+	item.RowID = nil
+	var metadata any
+	decoder := json.NewDecoder(strings.NewReader(item.Other))
+	decoder.UseNumber()
+	if err := decoder.Decode(&metadata); err == nil {
+		if canonical, err := json.Marshal(metadata); err == nil {
+			item.Other = string(canonical)
+		}
+	}
+	data, _ := json.Marshal(item)
+	return fmt.Sprintf("newapi:v2:%x", sha256.Sum256(data))
+}
+
+func usagePageIdentity(item usageLog) string {
+	identity := usageIdentity(item)
+	if item.RowID != nil {
+		return fmt.Sprintf("%s:row:%d", identity, *item.RowID)
+	}
+	return identity
 }
 
 func firstTokenMSFromOther(other string) *int64 {
@@ -324,12 +376,18 @@ func requestHeaders(ch *connector.Channel, session *connector.AuthSession) map[s
 }
 
 func (c *Client) getJSON(ctx context.Context, ch *connector.Channel, url string, session *connector.AuthSession) ([]byte, error) {
+	release, err := connector.BeginUsageRequest(ctx, ch.SiteURL)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session))
 	resp, err := req.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	if resp.IsError() {
+		connector.ObserveUsageResponse(ctx, ch.SiteURL, resp.StatusCode(), resp.Header().Get("Retry-After"))
 		return nil, connector.HTTPStatusError(resp.StatusCode(), resp.Body())
 	}
 	var wrapped newapiResp

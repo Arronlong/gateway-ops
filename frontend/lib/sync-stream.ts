@@ -10,6 +10,7 @@ export type ProgressStage =
   | "login"
   | "balance"
   | "rates"
+  | "usage"
   | "done"
   | "error"
 
@@ -102,6 +103,10 @@ function flushBlock(block: string, onEvent: (ev: ProgressEvent) => void) {
 /** 触发 /api/channels/:id/sync（余额 + 倍率）。 */
 export function syncChannelStream(channelID: number, options: SyncOptions) {
   return streamSSE(`/api/channels/${channelID}/sync`, options)
+}
+
+export function refetchUsageHistoryStream(channelID: number, query: URLSearchParams, options: SyncOptions): Promise<void> {
+  return streamSSE(`/api/channels/${channelID}/usage-history?${query}`, options)
 }
 
 /** 触发 /api/channels/:id/test-login（仅登录验证，session 落库以便后续 sync 复用）。 */

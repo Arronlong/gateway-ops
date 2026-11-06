@@ -38,6 +38,8 @@ func registerChannels(g *gin.RouterGroup, d *Deps) {
 	gp.POST("", func(c *gin.Context) { createChannel(c, d) })
 	gp.GET("/:id", func(c *gin.Context) { getChannel(c, d) })
 	gp.GET("/:id/latency-samples", func(c *gin.Context) { channelLatencySamples(c, d) })
+	gp.GET("/:id/usage-integrity", func(c *gin.Context) { channelUsageIntegrity(c, d) })
+	gp.POST("/:id/usage-history", func(c *gin.Context) { refetchChannelUsageHistory(c, d) })
 	gp.PUT("/:id", func(c *gin.Context) { updateChannel(c, d) })
 	gp.DELETE("/:id", func(c *gin.Context) { deleteChannel(c, d) })
 	gp.POST("/:id/enable", func(c *gin.Context) { toggleChannel(c, d, true) })

@@ -108,6 +108,7 @@ type UsageQuery struct {
 }
 
 type UsageRecord struct {
+	PageIdentity        string
 	CacheKnown          bool
 	RemoteID            string
 	RequestID           string
@@ -126,12 +127,14 @@ type UsageRecord struct {
 }
 
 type UsagePage struct {
-	RawCount int
-	Records  []UsageRecord
-	Total    int64
-	Page     int
-	PageSize int
-	Pages    int
+	RawTimes   []time.Time
+	TotalKnown bool
+	RawCount   int
+	Records    []UsageRecord
+	Total      int64
+	Page       int
+	PageSize   int
+	Pages      int
 }
 
 // UsageReader is optional. A connector implements it only when the upstream
@@ -139,6 +142,15 @@ type UsagePage struct {
 // capability rather than relay-station accounting data.
 type UsageReader interface {
 	ListUsage(ctx context.Context, channel *Channel, session *AuthSession, query UsageQuery) (*UsagePage, error)
+}
+
+// UsageCounter 只统计同一时间区间的调用，不包含充值和管理日志。
+type UsageCounter interface {
+	CountUsage(ctx context.Context, channel *Channel, session *AuthSession, query UsageQuery) (int64, error)
+}
+
+type UsageHistoryOriginReader interface {
+	UsageHistoryOrigin(ctx context.Context, channel *Channel, session *AuthSession) (time.Time, error)
 }
 
 // Connector 上游连接器统一接口。

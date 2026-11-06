@@ -65,6 +65,7 @@ import type { Channel, ChannelAccount, ChannelType, ChannelUsageSample, LatencyB
 import type { TimeRangeSelection } from "@/lib/time-range"
 import { timeRangeLabel } from "@/lib/time-range"
 import { ChannelFormDialog } from "@/components/monitor/channel-form-dialog"
+import { ChannelUsageHistory } from "@/components/monitor/channel-usage-history"
 import { ChannelPelicanPanel } from "@/components/monitor/channel-pelican-panel"
 import { linkedStationsByChannel as buildLinkedStationsByChannel, relayAccountComparisonKey, relayComparisonsByChannel } from "@/lib/channel-relay-association"
 import { RateChangeDot, RateTooltipBody } from "@/components/monitor/rate-change"
@@ -619,6 +620,7 @@ function emptySyncState(): ChannelSyncState {
 }
 
 const stageLabel: Record<ProgressEvent["stage"], string> = {
+  usage: "\u7528\u91cf",
   captcha: "打码",
   session: "会话",
   login: "登录",
@@ -634,6 +636,7 @@ const stageOrder: Record<ProgressEvent["stage"], number> = {
   login: 3,
   balance: 4,
   rates: 5,
+  usage: 6,
   done: 9,
   error: 9,
 }
@@ -1324,6 +1327,7 @@ actions={<>
                   ) : null}
                 </div>
 
+                <ChannelUsageHistory channel={c} range={usageRange} />
                 <RecentRequestMetrics samples={latencyByChannel.get(c.id) ?? []} loading={latencyTrends.loading} windowHours={uiSettings.recent_metrics_window_hours} sampleLimit={recentLatencyLimit} />
                 {channelSectionVisible(uiSettings, "recent") ? <LatencyStabilityLane
                   buckets={latencyBucketsByChannel.get(c.id) ?? []}
@@ -1476,6 +1480,7 @@ actions={<>
                   {accounts.length > 1 ? <span className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:text-cyan-400">多账号</span> : null}
                 </div>
                 <a href={c.site_url} target="_blank" rel="noreferrer" className="mt-1 truncate text-[11px] text-muted-foreground hover:text-brand" title={c.site_url}>{siteHost(c.site_url)}</a>
+                <ChannelUsageHistory channel={c} range={usageRange} compact />
                 {c.last_error ? <p className="mt-1 truncate text-[10px] font-medium text-danger" title={managementErrorText(c.last_error)}>{managementErrorText(c.last_error)}</p> : null}
               </div>
 

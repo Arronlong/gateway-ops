@@ -60,3 +60,26 @@ func TestRefreshTokenPostsRefreshCredentialAndParsesResponse(t *testing.T) {
 		t.Fatalf("unexpected expiry %s", session.ExpiresAt)
 	}
 }
+
+func TestListUsageTreatsNonemptyPageWithoutSizeMetadataAsFull(t *testing.T) {
+	items := make([]map[string]any, 100)
+	for i := range items {
+		items[i] = map[string]any{"id": i + 1, "created_at": "2026-10-24T12:00:00Z"}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/usage" {
+			t.Fatalf("path = %s, want /api/v1/usage", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"code": 0, "data": map[string]any{"items": items, "page": 1, "total": 250}})
+	}))
+	defer server.Close()
+
+	page, err := New().ListUsage(context.Background(), &connector.Channel{SiteURL: server.URL}, &connector.AuthSession{AccessToken: "test"}, connector.UsageQuery{Page: 1, PageSize: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.PageSize != 100 || page.Pages != 3 || page.RawCount != 100 {
+		t.Fatalf("page metadata = size:%d pages:%d raw:%d, want size:100 pages:3 raw:100", page.PageSize, page.Pages, page.RawCount)
+	}
+}

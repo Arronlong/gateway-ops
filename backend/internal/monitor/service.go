@@ -19,6 +19,9 @@ import (
 	"github.com/guliansheng/gateway-ops/internal/tasklog"
 )
 
+const channelUsageBackfillVersion = 3
+const channelUsageBackfillWindow = 30 * 24 * time.Hour
+
 // Service 监控扫描服务。
 type Service struct {
 	channels     *storage.Channels
@@ -28,6 +31,9 @@ type Service struct {
 	channelSvc   *channel.Service
 	dispatcher   *notify.Dispatcher
 	manualMu     sync.Mutex
+	usageSyncMu  sync.Map
+	usageAudit   usageAuditCache
+	usageLimiter *connector.UsageLimiter
 	log          *slog.Logger
 }
 
@@ -54,6 +60,7 @@ func NewService(
 		channelSvc:   channelSvc,
 		dispatcher:   dispatcher,
 		log:          log,
+		usageLimiter: connector.NewUsageLimiterWithBudget(2*time.Second, 3*time.Minute, 60, 180*time.Second),
 	}
 }
 
@@ -128,101 +135,48 @@ func (s *Service) SyncAll(ctx context.Context, includeDisabled bool) SyncAllResu
 // RefreshUsage synchronizes request history from the monitored channel's own
 // user usage/log API. Relay station data is intentionally not involved.
 func (s *Service) RefreshUsage(ctx context.Context, c *storage.Channel) error {
-	if c.BalanceMode == storage.BalanceModeManual || s.channelUsage == nil {
-		return nil
-	}
-	accounts, err := s.channels.ListAccounts(c.ID)
-	if err != nil {
-		return err
-	}
-	if len(accounts) == 0 {
-		return nil
-	}
-	now := time.Now().UTC()
-	var failures []error
-	for _, account := range accounts {
-		target := s.channelSvc.AccountChannel(c, account)
-		resolved, conn, session, err := s.prepare(ctx, target)
-		if err != nil {
-			failures = append(failures, fmt.Errorf("%s: %w", account.Username, err))
-			continue
-		}
-		reader, ok := conn.(connector.UsageReader)
-		if !ok {
-			continue
-		}
-		state, stateErr := s.channelUsage.SyncState(c.ID, account.ID)
-		if stateErr != nil {
-			failures = append(failures, fmt.Errorf("%s usage state: %w", account.Username, stateErr))
-			continue
-		}
-		since := now.Add(-30 * 24 * time.Hour)
-		if state.BackfilledAt != nil {
-			if state.ForwardSyncedAt != nil {
-				since = state.ForwardSyncedAt.Add(-10 * time.Minute)
-			} else if latest, latestErr := s.channelUsage.LatestOccurredAt(c.ID, account.ID); latestErr == nil && latest != nil {
-				since = latest.Add(-10 * time.Minute)
-			}
-		}
+	return s.refreshChannelUsage(ctx, c)
+}
 
-		const requestedPageSize = 1000
-		completed := false
-		for page := 1; page <= 1000; page++ {
-			result, readErr := reader.ListUsage(ctx, resolved, session, connector.UsageQuery{Since: since, Until: now, Page: page, PageSize: requestedPageSize})
-			if readErr != nil {
-				failures = append(failures, fmt.Errorf("%s usage: %w", account.Username, readErr))
-				break
-			}
-			events := make([]storage.ChannelUsageEvent, 0, len(result.Records))
-			for _, record := range result.Records {
-				if record.RemoteID == "" || record.CreatedAt.IsZero() {
-					continue
-				}
-				events = append(events, storage.ChannelUsageEvent{
-					CacheKnown: record.CacheKnown, ChannelID: c.ID, ChannelAccountID: account.ID, Source: string(c.Type), RemoteUsageID: record.RemoteID,
-					RequestID: record.RequestID, Model: record.Model, FirstTokenMS: record.FirstTokenMS, DurationMS: record.DurationMS,
-					SuccessKnown: record.SuccessKnown, Success: record.Success, InputTokens: record.InputTokens, OutputTokens: record.OutputTokens,
-					CacheReadTokens: record.CacheReadTokens, CacheCreationTokens: record.CacheCreationTokens,
-					ActualCost: record.ActualCost, TotalCost: record.TotalCost, OccurredAt: record.CreatedAt.UTC(), SyncedAt: now,
-				})
-			}
-			if err := s.channelUsage.Upsert(events); err != nil {
-				failures = append(failures, fmt.Errorf("%s usage save: %w", account.Username, err))
-				break
-			}
-			effectivePageSize := result.PageSize
-			if effectivePageSize <= 0 {
-				effectivePageSize = requestedPageSize
-			}
-			rawCount := result.RawCount
-			if rawCount == 0 {
-				rawCount = len(result.Records)
-			}
-			if result.Pages <= page || rawCount < effectivePageSize {
-				completed = true
-				break
-			}
-			if ctx.Err() != nil {
-				break
-			}
-		}
-		if completed {
-			syncedAt := now
-			state.ForwardSyncedAt = &syncedAt
-			if state.BackfilledAt == nil {
-				backfilledAt := now
-				state.BackfilledAt = &backfilledAt
-			}
-			if err := s.channelUsage.SaveSyncState(state); err != nil {
-				failures = append(failures, fmt.Errorf("%s usage state save: %w", account.Username, err))
-			}
-		}
+func (s *Service) RefetchUsageHistory(ctx context.Context, c *storage.Channel, since, until time.Time) error {
+	_, err := s.RefetchUsageHistoryWithReport(ctx, c, since, until)
+	return err
+}
+
+func channelUsageSyncStart(now time.Time, state *storage.ChannelUsageSyncState, latest *time.Time) time.Time {
+	since := now.Add(-10 * time.Minute)
+	if state != nil && state.ForwardSyncedAt != nil {
+		since = state.ForwardSyncedAt.Add(-10 * time.Minute)
+	} else if latest != nil {
+		since = latest.Add(-10 * time.Minute)
 	}
-	return errors.Join(failures...)
+	if minimum := now.Add(-24 * time.Hour); since.Before(minimum) {
+		since = minimum
+	}
+	return since
+}
+
+func usagePageComplete(result *connector.UsagePage, requestedPageSize int) bool {
+	if result == nil {
+		return false
+	}
+	pageSize := result.PageSize
+	if pageSize <= 0 {
+		pageSize = requestedPageSize
+	}
+	rawCount := result.RawCount
+	if rawCount == 0 {
+		rawCount = len(result.Records)
+	}
+	if pageSize <= 0 {
+		return rawCount == 0
+	}
+	return rawCount < pageSize
 }
 
 // RefreshBalance 单个渠道余额刷新，可被 API 手动触发。
 func (s *Service) RefreshBalance(ctx context.Context, c *storage.Channel) error {
+	ctx = connector.WithUsageLimiter(ctx, s.usageLimiter)
 	if c.BalanceMode == storage.BalanceModeManual {
 		return s.refreshManualBalance(ctx, c)
 	}
@@ -427,6 +381,7 @@ func (s *Service) notifyManualBalanceLow(ctx context.Context, c *storage.Channel
 
 // RefreshRates 单个渠道倍率刷新，可被 API 手动触发。
 func (s *Service) RefreshRates(ctx context.Context, c *storage.Channel) error {
+	ctx = connector.WithUsageLimiter(ctx, s.usageLimiter)
 	if c.BalanceMode == storage.BalanceModeManual {
 		progress.OK(ctx, progress.StageRates, "手动余额渠道不读取分组", map[string]any{"manual": true})
 		return nil

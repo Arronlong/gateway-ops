@@ -142,6 +142,7 @@ func AutoMigrate(db *gorm.DB) error {
 		&RelayAccount{},
 		&ChannelUsageEvent{},
 		&ChannelUsageSyncState{},
+		&ChannelUsageHistorySeen{},
 		&RelayUsageEvent{},
 		&RelayUsageSyncState{},
 		&PelicanConfig{},

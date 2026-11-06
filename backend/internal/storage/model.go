@@ -715,14 +715,32 @@ type ChannelUsageEvent struct {
 func (ChannelUsageEvent) TableName() string { return "channel_usage_events" }
 
 type ChannelUsageSyncState struct {
-	ChannelID        uint       `gorm:"primaryKey" json:"channel_id"`
-	ChannelAccountID uint       `gorm:"primaryKey" json:"channel_account_id"`
-	ForwardSyncedAt  *time.Time `json:"forward_synced_at,omitempty"`
-	BackfilledAt     *time.Time `json:"backfilled_at,omitempty"`
-	UpdatedAt        time.Time  `gorm:"not null" json:"updated_at"`
+	HistoryScan           string     `gorm:"type:text;not null;default:''" json:"-"`
+	HistoryAvailableSince *time.Time `json:"history_available_since,omitempty"`
+	HistoryVerifiedUntil  *time.Time `json:"history_verified_until,omitempty"`
+	HistoryResume         string     `gorm:"type:text;not null;default:''" json:"-"`
+	ChannelID             uint       `gorm:"primaryKey" json:"channel_id"`
+	ChannelAccountID      uint       `gorm:"primaryKey" json:"channel_account_id"`
+	BackfillVersion       int        `gorm:"not null;default:0" json:"-"`
+	ForwardSyncedAt       *time.Time `json:"forward_synced_at,omitempty"`
+	BackfilledAt          *time.Time `json:"backfilled_at,omitempty"`
+	HistoryCheckedAt      *time.Time `json:"history_checked_at,omitempty"`
+	HistoryAuditBefore    *time.Time `json:"history_audit_before,omitempty"`
+	HistoryAuditRemaining *int64     `json:"-"`
+	UpdatedAt             time.Time  `gorm:"not null" json:"updated_at"`
 }
 
 func (ChannelUsageSyncState) TableName() string { return "channel_usage_sync_states" }
+
+type ChannelUsageHistorySeen struct {
+	PageIdentity  string `gorm:"size:256;not null;default:'';index:idx_usage_history_page,priority:2"`
+	RunID         string `gorm:"size:64;primaryKey;index:idx_usage_history_page,priority:1;index:idx_usage_history_identity,priority:1"`
+	RemoteUsageID string `gorm:"size:256;primaryKey"`
+	Identity      string `gorm:"size:256;not null;index:idx_usage_history_identity,priority:2"`
+	Occurrence    int    `gorm:"not null"`
+}
+
+func (ChannelUsageHistorySeen) TableName() string { return "channel_usage_history_seen" }
 
 type ChannelUsageSample struct {
 	CacheKnown          bool      `json:"cache_known"`

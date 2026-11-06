@@ -8,6 +8,7 @@ import { scheduleQueryUpdate } from "@/lib/query-transition"
 import { normalizeRecentMetricsLimit } from "@/lib/recent-request-metrics"
 import { latencyBucketQuery } from "@/lib/latency"
 import { serializeTimeRange, type TimeRangeSelection } from "@/lib/time-range"
+import {useUsageIntegrityQuery} from "@/lib/use-usage-integrity"
 import { normalizeChannelPelicanGallery } from "@/lib/pelican-library"
 import { useRefreshTick } from "@/lib/refresh-context"
 import type {
@@ -267,6 +268,11 @@ export function useChannelSummary(range: TimeRangeSelection<RelayUsageRangePrese
 export function useChannelMetrics(range: TimeRangeSelection<RelayUsageRangePreset> = "today") {
   const query = serializeTimeRange(range)
   return useApi<ChannelMetric[]>(query ? `/channels/metrics?${query}` : null)
+}
+
+export function useChannelUsageIntegrity(channelID: number, range: TimeRangeSelection<RelayUsageRangePreset>, enabled = true) {
+  const query = serializeTimeRange(range)
+  return useUsageIntegrityQuery(enabled && query ? `/channels/${channelID}/usage-integrity?${query}` : null)
 }
 
 export function useChannelLatencyTrends(limit = 60, enabled = true) {

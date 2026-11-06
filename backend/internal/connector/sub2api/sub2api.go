@@ -57,6 +57,11 @@ func (c *Client) GetTurnstileSiteKey(ctx context.Context, ch *connector.Channel)
 }
 
 func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.AuthSession, error) {
+	release, err := connector.BeginUsageRequest(ctx, ch.SiteURL)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	site := strings.TrimRight(ch.SiteURL, "/")
 	vars := map[string]string{"username": ch.Username, "password": ch.Password, "turnstile_token": ch.TurnstileToken}
 	body := connector.ExpandRequestKV(ch.LoginParams, vars)
@@ -70,6 +75,7 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 		return nil, fmt.Errorf("sub2api login http: %w", err)
 	}
 	if resp.IsError() {
+		connector.ObserveUsageResponse(ctx, ch.SiteURL, resp.StatusCode(), resp.Header().Get("Retry-After"))
 		return nil, fmt.Errorf("sub2api login: %w", connector.HTTPStatusError(resp.StatusCode(), resp.Body()))
 	}
 	var wrapped sub2Resp
@@ -108,6 +114,11 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 }
 
 func (c *Client) RefreshToken(ctx context.Context, ch *connector.Channel, refreshToken string) (*connector.AuthSession, error) {
+	release, err := connector.BeginUsageRequest(ctx, ch.SiteURL)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	site := strings.TrimRight(ch.SiteURL, "/")
 	resp, err := c.http.R().
 		SetContext(ctx).
@@ -119,6 +130,7 @@ func (c *Client) RefreshToken(ctx context.Context, ch *connector.Channel, refres
 		return nil, fmt.Errorf("sub2api refresh http: %w", err)
 	}
 	if resp.IsError() {
+		connector.ObserveUsageResponse(ctx, ch.SiteURL, resp.StatusCode(), resp.Header().Get("Retry-After"))
 		return nil, fmt.Errorf("sub2api refresh: %w", connector.HTTPStatusError(resp.StatusCode(), resp.Body()))
 	}
 	var wrapped sub2Resp
@@ -212,6 +224,11 @@ func (c *Client) GetRates(ctx context.Context, ch *connector.Channel, session *c
 }
 
 func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *connector.AuthSession, query connector.UsageQuery) (*connector.UsagePage, error) {
+	release, err := connector.BeginUsageRequest(ctx, ch.SiteURL)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	if session == nil || session.AccessToken == "" {
 		return nil, errors.New("missing sub2api access_token")
 	}
@@ -244,6 +261,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 		return nil, fmt.Errorf("sub2api usage http: %w", err)
 	}
 	if resp.IsError() {
+		connector.ObserveUsageResponse(ctx, ch.SiteURL, resp.StatusCode(), resp.Header().Get("Retry-After"))
 		return nil, fmt.Errorf("sub2api usage: %w", connector.HTTPStatusError(resp.StatusCode(), resp.Body()))
 	}
 	var wrapped sub2Resp
@@ -268,15 +286,30 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 			FirstTokenMS        *int64  `json:"first_token_ms"`
 			CreatedAt           string  `json:"created_at"`
 		} `json:"items"`
-		Total    int64 `json:"total"`
-		Page     int   `json:"page"`
-		PageSize int   `json:"page_size"`
-		Pages    int   `json:"pages"`
+		Total    *int64 `json:"total"`
+		Page     int    `json:"page"`
+		PageSize int    `json:"page_size"`
+		Pages    int    `json:"pages"`
 	}
 	if err := json.Unmarshal(wrapped.Data, &data); err != nil {
 		return nil, fmt.Errorf("sub2api usage data decode: %w", err)
 	}
-	out := &connector.UsagePage{Total: data.Total, Page: data.Page, PageSize: data.PageSize, Pages: data.Pages}
+	if data.Page <= 0 {
+		data.Page = page
+	}
+	totalKnown := data.Total != nil && (data.PageSize > 0 || len(data.Items) == 0)
+	if data.PageSize <= 0 {
+		data.PageSize = len(data.Items)
+	}
+	pages := data.Pages
+	var total int64
+	if data.Total != nil {
+		total = *data.Total
+	}
+	if pages <= 0 && total > 0 && data.PageSize > 0 {
+		pages = int((total + int64(data.PageSize) - 1) / int64(data.PageSize))
+	}
+	out := &connector.UsagePage{TotalKnown: totalKnown, RawCount: len(data.Items), Total: total, Page: data.Page, PageSize: data.PageSize, Pages: pages}
 	out.Records = make([]connector.UsageRecord, 0, len(data.Items))
 	for _, item := range data.Items {
 		createdAt, err := time.Parse(time.RFC3339, item.CreatedAt)
@@ -290,6 +323,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 			CacheKnown: item.CacheReadTokens != nil, CacheReadTokens: cacheTokenValue(item.CacheReadTokens), CacheCreationTokens: item.CacheCreationTokens,
 			ActualCost: item.ActualCost, TotalCost: item.TotalCost,
 		})
+		out.RawTimes = append(out.RawTimes, createdAt)
 	}
 	return out, nil
 }
@@ -316,12 +350,18 @@ func requestHeaders(ch *connector.Channel, session *connector.AuthSession) map[s
 }
 
 func (c *Client) getJSON(ctx context.Context, ch *connector.Channel, url string, session *connector.AuthSession) ([]byte, error) {
+	release, err := connector.BeginUsageRequest(ctx, ch.SiteURL)
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session))
 	resp, err := req.Get(url)
 	if err != nil {
 		return nil, err
 	}
 	if resp.IsError() {
+		connector.ObserveUsageResponse(ctx, ch.SiteURL, resp.StatusCode(), resp.Header().Get("Retry-After"))
 		return nil, connector.HTTPStatusError(resp.StatusCode(), resp.Body())
 	}
 	var wrapped sub2Resp

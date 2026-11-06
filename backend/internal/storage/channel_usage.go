@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -60,12 +61,99 @@ func (r *ChannelUsage) Upsert(events []ChannelUsageEvent) error {
 	}).CreateInBatches(events, 200).Error
 }
 
+// CompleteBackfill 在同一事务内提交完整历史和回补进度。
+func (r *ChannelUsage) CompleteBackfill(state *ChannelUsageSyncState, source string, since, until time.Time, events []ChannelUsageEvent) error {
+	return r.completeUsageWindow(state, source, since, until, events, false)
+}
+
+func (r *ChannelUsage) ReplaceHistory(state *ChannelUsageSyncState, source string, since, until time.Time, events []ChannelUsageEvent) error {
+	return r.completeUsageWindow(state, source, since, until, events, true)
+}
+
+func (r *ChannelUsage) completeUsageWindow(state *ChannelUsageSyncState, source string, since, until time.Time, events []ChannelUsageEvent, replace bool) error {
+	if state == nil || source == "" || !since.Before(until) {
+		return fmt.Errorf("invalid channel usage backfill window")
+	}
+	for _, event := range events {
+		if event.ChannelID != state.ChannelID || event.ChannelAccountID != state.ChannelAccountID || event.Source != source || event.OccurredAt.Before(since) || !event.OccurredAt.Before(until) {
+			return fmt.Errorf("channel usage backfill event is outside its account or window")
+		}
+	}
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if (replace || source == string(ChannelTypeNewAPI)) && len(events) > 0 {
+			// 上游可能已清理旧日志，保留早于本次实际取得范围的历史。
+			coveredSince := until
+			for _, event := range events {
+				if event.OccurredAt.Before(coveredSince) {
+					coveredSince = event.OccurredAt
+				}
+			}
+			query := tx.Where("channel_id = ? AND channel_account_id = ? AND source = ? AND occurred_at >= ? AND occurred_at < ?", state.ChannelID, state.ChannelAccountID, source, coveredSince, until)
+			if replace {
+				query = tx.Where("channel_id = ? AND channel_account_id = ? AND source = ? AND occurred_at >= ? AND occurred_at < ?", state.ChannelID, state.ChannelAccountID, source, since, until)
+			}
+			if !replace {
+				query = query.Where("remote_usage_id NOT LIKE ?", "newapi:v2:%")
+			}
+			if err := query.Delete(&ChannelUsageEvent{}).Error; err != nil {
+				return err
+			}
+		}
+		repository := NewChannelUsage(tx)
+		if err := repository.Upsert(events); err != nil {
+			return err
+		}
+		return repository.SaveSyncState(state)
+	})
+}
+
+func (r *ChannelUsage) CountWindow(channelID, accountID uint, source string, since, until time.Time) (int64, error) {
+	query := r.db.Model(&ChannelUsageEvent{}).Where("channel_id = ? AND source = ? AND occurred_at < ?", channelID, source, until)
+	if accountID != 0 {
+		query = query.Where("channel_account_id = ?", accountID)
+	}
+	if !since.IsZero() {
+		query = query.Where("occurred_at >= ?", since)
+	}
+	var count int64
+	err := query.Count(&count).Error
+	return count, err
+}
+
+func (r *ChannelUsage) UsageIdentityCounts(channelID, accountID uint, source string, since, until time.Time) (map[string]int, error) {
+	var events []ChannelUsageEvent
+	query := r.db.Where("channel_id = ? AND channel_account_id = ? AND source = ? AND occurred_at < ?", channelID, accountID, source, until)
+	if !since.IsZero() {
+		query = query.Where("occurred_at >= ?", since)
+	}
+	if err := query.Select("remote_usage_id").Find(&events).Error; err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(events))
+	for _, event := range events {
+		counts[event.RemoteUsageID]++
+	}
+	return counts, nil
+}
+
 func (r *ChannelUsage) LatestOccurredAt(channelID, channelAccountID uint) (*time.Time, error) {
 	var latest *time.Time
 	err := r.db.Model(&ChannelUsageEvent{}).
 		Where("channel_id = ? AND channel_account_id = ?", channelID, channelAccountID).
 		Select("MAX(occurred_at)").Scan(&latest).Error
 	return latest, err
+}
+
+func (r *ChannelUsage) EarliestOccurredAt(channelID, accountID uint, source string) (*time.Time, error) {
+	var first ChannelUsageEvent
+	err := r.db.Select("occurred_at").Where("channel_id = ? AND channel_account_id = ? AND source = ?", channelID, accountID, source).Order("occurred_at ASC").Take(&first).Error
+	if err == gorm.ErrRecordNotFound {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &first.OccurredAt, nil
 }
 
 func (r *ChannelUsage) SyncState(channelID, channelAccountID uint) (*ChannelUsageSyncState, error) {
