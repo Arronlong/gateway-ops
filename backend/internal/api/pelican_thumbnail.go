@@ -7,12 +7,33 @@ import (
 	"fmt"
 	"image/jpeg"
 	"io"
+	"log/slog"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/guliansheng/gateway-ops/internal/storage"
+	"gorm.io/gorm"
 )
+
+var errPelicanThumbnailLookup = errors.New("thumbnail storage lookup failed")
+
+func pelicanThumbnailLookupError(err error) error {
+	if err == nil || errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	return fmt.Errorf("%w: %w", errPelicanThumbnailLookup, err)
+}
+
+func pelicanThumbnailStorageFailure(c *gin.Context, d *Deps, operation string, err error) {
+	log := d.Log
+	if log == nil {
+		log = slog.Default()
+	}
+	log.Error("pelican thumbnail storage failed", "operation", operation, "path", c.Request.URL.Path, "error", err)
+	c.Header("Cache-Control", "no-store")
+	fail(c, http.StatusInternalServerError, fmt.Errorf("thumbnail storage %s failed; check server logs", operation))
+}
 
 func optimizePelicanThumbnail(data []byte) ([]byte, error) {
 	config, err := jpeg.DecodeConfig(bytes.NewReader(data))
@@ -60,12 +81,12 @@ func pelicanThumbnailRef(c *gin.Context, d *Deps, scope string, public bool) (st
 	}
 	if public {
 		if err := d.RelayStations.PublicPelicanGroup(ref.StationID, ref.GroupID); err != nil {
-			return ref, err
+			return ref, pelicanThumbnailLookupError(err)
 		}
 		if d.Settings != nil {
 			enabled, err := pelicanPublicPageEnabled(d)
 			if err != nil {
-				return ref, err
+				return ref, pelicanThumbnailLookupError(err)
 			}
 			if !enabled {
 				return ref, errors.New("pelican page is hidden")
@@ -73,6 +94,7 @@ func pelicanThumbnailRef(c *gin.Context, d *Deps, scope string, public bool) (st
 		}
 	} else if ref.StationID > 0 {
 		_, err = d.RelayStations.FindByID(ref.StationID)
+		err = pelicanThumbnailLookupError(err)
 	}
 	return ref, err
 }
@@ -80,7 +102,11 @@ func pelicanThumbnailRef(c *gin.Context, d *Deps, scope string, public bool) (st
 func pelicanThumbnail(c *gin.Context, d *Deps, scope string, public bool) {
 	ref, err := pelicanThumbnailRef(c, d, scope, public)
 	if err != nil {
-		fail(c, http.StatusNotFound, errors.New("artwork not found"))
+		if errors.Is(err, errPelicanThumbnailLookup) {
+			pelicanThumbnailStorageFailure(c, d, "lookup", err)
+		} else {
+			fail(c, http.StatusNotFound, errors.New("artwork not found"))
+		}
 		return
 	}
 	if c.Request.Method == http.MethodPut {
@@ -104,7 +130,11 @@ func pelicanThumbnail(c *gin.Context, d *Deps, scope string, public bool) {
 		}
 		html, err := d.RelayStations.PelicanThumbnailSource(ref)
 		if err != nil {
-			fail(c, 404, errors.New("artwork not found"))
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				fail(c, 404, errors.New("artwork not found"))
+			} else {
+				pelicanThumbnailStorageFailure(c, d, "source", err)
+			}
 			return
 		}
 		if fmt.Sprintf("%x", sha256.Sum256([]byte(html))) != c.GetHeader("X-Pelican-Source-SHA256") {
@@ -112,7 +142,11 @@ func pelicanThumbnail(c *gin.Context, d *Deps, scope string, public bool) {
 			return
 		}
 		if err := d.RelayStations.SavePelicanThumbnail(ref, html, data); err != nil {
-			fail(c, http.StatusConflict, err)
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				fail(c, http.StatusConflict, errors.New("artwork changed; regenerate its thumbnail"))
+			} else {
+				pelicanThumbnailStorageFailure(c, d, "write", err)
+			}
 			return
 		}
 		c.Status(http.StatusNoContent)
@@ -121,7 +155,11 @@ func pelicanThumbnail(c *gin.Context, d *Deps, scope string, public bool) {
 	data, err := d.RelayStations.PelicanThumbnail(ref)
 	if err != nil {
 		c.Header("Cache-Control", "no-store")
-		fail(c, 404, errors.New("thumbnail not found"))
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			fail(c, 404, errors.New("thumbnail not found"))
+		} else {
+			pelicanThumbnailStorageFailure(c, d, "read", err)
+		}
 		return
 	}
 	etag := fmt.Sprintf("\"%x\"", sha256.Sum256(data))

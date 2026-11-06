@@ -15,7 +15,7 @@ import { apiFetch } from "@/lib/api"
 import type { ChannelPelicanTarget, PelicanConfig, PelicanGallery, PelicanLibraryPage, PelicanResult, PelicanTestPlan, RelayAccountView } from "@/lib/api-types"
 import { hasConfiguredPelicanPlan, pelicanEfforts, pelicanEffortOptions, pelicanGroupLabels, pelicanRunOptions } from "@/lib/pelican"
 import { pelicanResultPath } from "@/lib/pelican-sources"
-import { observePelicanThumbnail, pelicanThumbnailActive, pelicanThumbnailPool, pelicanRenderPool, renderPelicanThumbnail, retainPelicanThumbnails, subscribePelicanActivity, suspendPelicanThumbnails } from "@/lib/pelican-thumbnails"
+import { observePelicanThumbnail, pelicanThumbnailActive, pelicanThumbnailPool, pelicanRenderPool, renderPelicanThumbnail, retainPelicanThumbnails, subscribePelicanActivity, suspendPelicanThumbnails, verifyPelicanThumbnail } from "@/lib/pelican-thumbnails"
 import { loadPelicanThumbnail } from "@/lib/pelican-thumbnail-store"
 import { usePelicanGallery, useSystemSettings, type QueryState } from "@/lib/queries"
 import { PelicanArtwork } from "./pelican-artwork"
@@ -225,18 +225,20 @@ export function PelicanResultsStrip({limit,allowDelete=false,grid=limit===3}:{li
 function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanResult;grid?:boolean;allowDelete?:boolean}){
  const context=usePelican(),ref=useRef<HTMLDivElement>(null),[visible,setVisible]=useState(false)
  const active=useSyncExternalStore(subscribePelicanActivity,pelicanThumbnailActive)
- const [image,setImage]=useState(""),[error,setError]=useState("")
+ const [image,setImage]=useState(""),[error,setError]=useState(""),[saveError,setSaveError]=useState("")
  const groupLabels=pelicanGroupLabels(result)
  useEffect(()=>{const target=ref.current;if(target)return observePelicanThumbnail(target,setVisible)},[])
  useEffect(()=>{
-  setImage("");setError("")
+  setImage("");setError("");setSaveError("")
   if(!visible||!active||result.status!=="success")return
   let disposed=false,url=""
   // 等滚动停稳后才入队，避免快速浏览时生成路过的作品。
   let release=()=>{}
   const timer=window.setTimeout(()=>{
    const path=pelicanResultPath(result,context.readOnly),key=`${path}?v=${result.finished_at}`
-   const lease=pelicanThumbnailPool.acquire(key,signal=>loadPelicanThumbnail(path,result.finished_at,signal,async()=>{
+   const lease=pelicanThumbnailPool.acquire(key,async signal=>{
+    let saveError=""
+    const image=await loadPelicanThumbnail(path,result.finished_at,signal,async()=>{
     const value=await context.body(result,signal)
     signal.throwIfAborted()
     if(!value.html)throw new Error("\u4f5c\u54c1\u6ca1\u6709\u53ef\u9884\u89c8\u7684\u5185\u5bb9")
@@ -246,9 +248,11 @@ function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanR
     signal.addEventListener("abort",abort,{once:true})
     try {return {image:await rendering.promise,html:value.html}}
     finally {signal.removeEventListener("abort",abort);rendering.release()}
-   },!context.readOnly))
+    },!context.readOnly,verifyPelicanThumbnail,error=>{saveError=error.message})
+    return {image,saveError}
+   })
    release=lease.release
-   lease.promise.then(blob=>{if(!disposed){url=URL.createObjectURL(blob);setImage(url)}}).catch(error=>{if(!disposed)setError(error instanceof Error?error.message:"预览读取失败")})
+   lease.promise.then(value=>{if(!disposed){url=URL.createObjectURL(value.image);setImage(url);setSaveError(value.saveError)}}).catch(error=>{if(!disposed)setError(error instanceof Error?error.message:"预览读取失败")})
   },120)
   return()=>{disposed=true;window.clearTimeout(timer);release();if(url)URL.revokeObjectURL(url)}
  },[visible,active,result.id,result.channel_id,result.relay_station_id,result.account_external_id,result.group_external_id,result.finished_at,result.status,context.readOnly])
@@ -260,6 +264,7 @@ function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanR
   </div>
   <div className="space-y-1 p-2 text-[10px]">
    <p className="truncate font-mono text-xs" title={result.model}>{result.model}</p>
+   {saveError?<p role="status" className="line-clamp-2 text-warning" title={saveError}>{"\u9884\u89c8\u5df2\u751f\u6210\uff0c\u672a\u4fdd\u5b58\uff1a"}{saveError}</p>:null}
    <p className="flex flex-wrap justify-between gap-x-1 text-muted-foreground"><span>{timeLabel(result.finished_at)}</span><span className="whitespace-nowrap">{result.status==="running"?"等待完成":`${(result.duration_ms/1000).toFixed(1)} 秒`}</span></p>
    <p className={result.status==="running"?"text-muted-foreground":result.status==="success"?"text-teal-600":"text-danger"}>{result.status==="running"?"生成中…":result.status==="success"?`思考强度 ${pelicanEfforts[result.reasoning_effort]??result.reasoning_effort}`:"生成失败·点击查看"}</p>
    {context.showKeyGroup?<p data-pelican-key-group className="relative z-[1] flex min-w-0 items-center justify-between gap-2 text-muted-foreground" onClick={()=>context.open(result)}>

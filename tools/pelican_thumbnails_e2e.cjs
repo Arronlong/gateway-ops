@@ -19,7 +19,8 @@ async function main() {
   const built = process.env.PELICAN_TEST_BUILT === '1'
   const output = path.resolve(built ? 'outputs/pelican-thumbnails-built' : 'outputs/pelican-thumbnails')
   fs.mkdirSync(output, { recursive:true })
-  for (const run of ['first', 'new-browser', 'mobile']) {
+  for (const run of ['first', 'new-browser', 'mobile', 'save-failure']) {
+    if (run === 'save-failure') saved.delete(1)
     const context = await browser.newContext({ viewport:{width:run==='mobile'?390:1440,height:1100}, locale:'zh-CN' })
     const page = await context.newPage(), errors = []
     const scripts = []
@@ -31,18 +32,21 @@ async function main() {
     let bodyRequests = 0, uploads = 0, thumbnailRequests = 0
     page.on('pageerror', error => errors.push(error.message))
     await page.addInitScript(() => {
+      if (window.top === window) localStorage.setItem('uh_token', 'local-thumbnail-test')
       window.__thumbnailStats = {images:[], peakRenderers:0}
       document.addEventListener('load', event => {if (event.target instanceof HTMLImageElement && event.target.src.startsWith('blob:')) window.__thumbnailStats.images.push({at:performance.now(),width:event.target.naturalWidth,height:event.target.naturalHeight})}, true)
       new MutationObserver(() => {window.__thumbnailStats.peakRenderers = Math.max(window.__thumbnailStats.peakRenderers,document.querySelectorAll('iframe[data-pelican-renderer]').length)}).observe(document,{subtree:true,childList:true})
     })
     await page.route('**/api/**', async route => {
       const url = new URL(route.request().url()), p = url.pathname
+      if (p.startsWith('/api/channels/') || p.startsWith('/api/relay-stations/') || p === '/api/auth/me') assert.equal(route.request().headers().authorization, 'Bearer local-thumbnail-test', 'private thumbnail requests must include the login token')
       const match = p.match(/\/pelican\/results\/(\d+)(\/thumbnail)?$/)
       if (match) {
         const id = Number(match[1])
         if (match[2]) {
           if (route.request().method() === 'PUT') {
             uploads++
+            if (run === 'save-failure') return route.fulfill({ status:503, contentType:'application/json', body:JSON.stringify({error:'temporary storage failure'}) })
             const data = route.request().postDataBuffer()
             assert.ok(data.length>0 && data.length<=96*1024)
             assert.equal(data.readUInt16BE(0),0xffd8)
@@ -58,7 +62,7 @@ async function main() {
       }
       if (route.request().method()!=='GET') throw new Error('Unexpected mutation '+p)
       let data = []
-      if (p==='/api/auth/me') data={auth_disabled:true,username:'test'}
+      if (p==='/api/auth/me') data={username:'test'}
       else if(p==='/api/system-settings') data=defaults
       else if(p==='/api/sync-settings') data={channel_enabled:false}
       else if(p.endsWith('/branding')) data={name:'GatewayOps'}
@@ -74,7 +78,18 @@ async function main() {
     assert.ok(stats.images.every(image=>image.width===448 && image.height===336))
     assert.ok(stats.peakRenderers<=1)
     if (run==='first') {assert.equal(bodyRequests,4);assert.equal(uploads,4);assert.equal(saved.size,4)}
+    else if (run === 'save-failure') {
+      assert.equal(bodyRequests,1,'retry must reuse the generated JPEG without loading artwork HTML again')
+      assert.equal(uploads,2,'transient save failures must retry once')
+      await page.getByText('\u9884\u89c8\u5df2\u751f\u6210\uff0c\u672a\u4fdd\u5b58\uff1a', {exact:false}).waitFor()
+    }
     else {assert.equal(bodyRequests,0);assert.equal(uploads,0);assert.equal(stats.peakRenderers,0)}
+    if (run === 'new-browser') {
+      await page.reload()
+      await page.waitForFunction(() => document.querySelectorAll('img[src^="blob:"]').length >= 4, null, {timeout:15000})
+      assert.equal(bodyRequests,0,'refresh must read saved thumbnails without loading artwork HTML')
+      assert.equal(uploads,0,'refresh must not upload thumbnails again')
+    }
     await page.screenshot({path:path.join(output,run+'.png')})
     const beforePreview=bodyRequests
     await page.getByRole('button',{name:'\u67e5\u770b\u6d4b\u667a\u4f5c\u54c1 1',exact:true}).click()

@@ -97,19 +97,25 @@ export function fitPelicanArtwork(artwork: {width:number;height:number},containe
 // 控制脚本先于模型脚本安装，共享 CSS、SMIL、rAF 和定时器的播放时钟。
 const playbackBridge = String.raw`(() => {
  const channel=__CHANNEL__;
- const nativeRAF=window.requestAnimationFrame.bind(window), nativeCancel=window.cancelAnimationFrame.bind(window), nativeNow=performance.now.bind(performance), nativeTimeout=window.setTimeout.bind(window);
+ const nativeRAF=window.requestAnimationFrame.bind(window), nativeCancel=window.cancelAnimationFrame.bind(window), nativeNow=performance.now.bind(performance), nativeTimeout=window.setTimeout.bind(window), nativeClearTimeout=window.clearTimeout?.bind(window);
  const epoch=Date.now(), frames=new Map(), timers=new Map();
  let id=1, virtual=0, previous=nativeNow(), playing=true, speed=1, scheduled=0;
- function schedule(){if(playing&&!scheduled){previous=nativeNow();scheduled=nativeRAF(tick)}}
+ function queueTick(){return __THUMBNAIL__?nativeTimeout(()=>tick(nativeNow()),16):nativeRAF(tick)}
+ function cancelTick(){if(__THUMBNAIL__)nativeClearTimeout(scheduled);else nativeCancel(scheduled);scheduled=0}
+ function schedule(){if(playing&&!scheduled){previous=nativeNow();scheduled=queueTick()}}
  window.requestAnimationFrame=callback=>{const key=id++;frames.set(key,callback);return key};
  window.cancelAnimationFrame=key=>frames.delete(key);
  window.setTimeout=(callback,delay=0,...args)=>{const key=id++;timers.set(key,{callback,args,due:virtual+Math.max(0,Number(delay)||0),repeat:0});return key};
  window.setInterval=(callback,delay=0,...args)=>{const key=id++;const repeat=Math.max(1,Number(delay)||1);timers.set(key,{callback,args,due:virtual+repeat,repeat});return key};
  window.clearTimeout=window.clearInterval=key=>timers.delete(key);
  try{Object.defineProperty(performance,'now',{value:()=>virtual});Date.now=()=>epoch+virtual}catch{}
- const smil=new Map();
+ const smil=new Map(),cssClocks=new Map();
  function synchronize(){
   for(const animation of document.getAnimations()){
+   if(__THUMBNAIL__){
+    if(!cssClocks.has(animation))cssClocks.set(animation,{start:virtual,time:Number(animation.currentTime)||0});
+    animation.pause();continue;
+   }
    if(animation.playbackRate!==speed)animation.updatePlaybackRate(speed);
    if(playing&&animation.playState==='paused')animation.play();
    if(!playing&&animation.playState==='running')animation.pause();
@@ -121,27 +127,31 @@ const playbackBridge = String.raw`(() => {
  window.addEventListener('animationstart',synchronize,true);
  new MutationObserver(synchronize).observe(document,{childList:true,subtree:true});
  window.addEventListener('message',event=>{
+  if(__THUMBNAIL__&&event.source===parent&&event.data?.type==='pelican-thumbnail-retry'&&event.data.channel===channel){
+   playing=true;synchronize();schedule();nativeTimeout(snapshot,900);return;
+  }
   if(event.source!==parent||event.data?.type!=='pelican-control'||event.data.channel!==channel)return;
   if(typeof event.data.playing==='boolean')playing=event.data.playing;
   if(Number.isFinite(event.data.speed))speed=Math.max(.25,Math.min(4,event.data.speed));
-  if(!playing&&scheduled){nativeCancel(scheduled);scheduled=0}
+  if(!playing&&scheduled)cancelTick();
   synchronize();schedule();
  });
  function tick(real){
   scheduled=0;
-  const delta=Math.min(100,Math.max(0,real-previous));previous=real;
+  const delta=Math.min(__THUMBNAIL__?1000:100,Math.max(0,real-previous));previous=real;
   if(playing){
    virtual+=delta*speed;
    const batch=Array.from(frames);frames.clear();for(const [key,callback]of batch){try{callback(virtual)}catch(error){console.error(error)}}
    for(const [key,timer]of timers){if(timer.due>virtual)continue;if(timer.repeat)timer.due=virtual+timer.repeat;else timers.delete(key);try{if(typeof timer.callback==='function')timer.callback(...timer.args)}catch(error){console.error(error)}}
    for(const [svg,clock]of smil){if(!svg.isConnected){smil.delete(svg);continue}try{svg.setCurrentTime(clock.time+(virtual-clock.start)/1000)}catch{}}
+   for(const [animation,clock]of cssClocks){try{animation.currentTime=clock.time+virtual-clock.start}catch{}}
   }
-  if(playing)scheduled=nativeRAF(tick);
+  if(playing)scheduled=queueTick();
  }
  schedule();
  function snapshot(){
   try{
-   playing=false;if(scheduled){nativeCancel(scheduled);scheduled=0}synchronize();
+   playing=false;if(scheduled)cancelTick();synchronize();
    const clone=document.documentElement.cloneNode(true);
    const originals=[document.documentElement,...document.documentElement.querySelectorAll("*")];
    const copies=[clone,...clone.querySelectorAll("*")];
@@ -180,12 +190,18 @@ const playbackBridge = String.raw`(() => {
    parent.postMessage({type:"pelican-thumbnail",channel,svg:new XMLSerializer().serializeToString(svg)},"*");
   }catch(error){parent.postMessage({type:"pelican-thumbnail",channel,error:String(error)},"*")}
  }
- if(__THUMBNAIL__)window.addEventListener("DOMContentLoaded",()=>nativeTimeout(snapshot,180),{once:true});
+ if(__THUMBNAIL__)window.addEventListener("DOMContentLoaded",()=>{
+  const started=nativeNow();let resourcesReady=false;
+  const images=[...document.images].map(image=>image.complete?Promise.resolve():new Promise(resolve=>{image.addEventListener('load',resolve,{once:true});image.addEventListener('error',resolve,{once:true})}));
+  Promise.allSettled([document.fonts.ready,...images]).then(()=>{resourcesReady=true});
+  function wait(){if((resourcesReady&&virtual>=1200)||nativeNow()-started>=3500)snapshot();else nativeTimeout(wait,80)}
+  wait();
+ },{once:true});
  window.addEventListener('DOMContentLoaded',()=>{synchronize();parent.postMessage({type:'pelican-ready',channel},'*')});
 })();`
 
 export function createPelicanDocument(html: string, channel: string, options: {thumbnail?:boolean} = {}) {
- const bridge=playbackBridge.replace("__CHANNEL__",JSON.stringify(channel).replace(/</g,()=>String.fromCharCode(92)+"u003c")).replace("__THUMBNAIL__",String(Boolean(options.thumbnail))).replace("__VIEWPORT__",JSON.stringify(pelicanViewport(html)))
+ const bridge=playbackBridge.replace("__CHANNEL__",JSON.stringify(channel).replace(/</g,()=>String.fromCharCode(92)+"u003c")).replaceAll("__THUMBNAIL__",String(Boolean(options.thumbnail))).replace("__VIEWPORT__",JSON.stringify(pelicanViewport(html)))
  const csp="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; media-src data: blob:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'"
  const previewStyle=options.thumbnail?"<style>html,body{overflow:hidden!important;scrollbar-width:none!important}*{scrollbar-width:none!important}*::-webkit-scrollbar{display:none!important}</style>":""
  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>html,body{margin:0;min-height:100%}svg{max-width:100%}</style><script>${bridge}</script></head><body>${html.replace(/<!doctype[^>]*>/ig,"")}${previewStyle}</body></html>`
