@@ -283,7 +283,7 @@ export default function PublicRelayMonitorPage() {
       </header>
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-        <TimeRangeFilter value={range} options={publicRelayMonitorRanges} onChange={(value) => { requestIDRef.current++; setData(null); setLoading(true); setRefreshing(false); setError(null); setRange(value) }} label="分组监控时间范围" buttonClassName="h-8" />
+        <TimeRangeFilter value={range} options={publicRelayMonitorRanges} onChange={(value) => { requestIDRef.current++; setData(null); setLoading(true); setRefreshing(false); setError(null); setRange(value) }} label="分组监控时间范围" buttonClassName="h-8" allowCustom={false} />
         <p className="text-[11px] text-muted-foreground">每个分组展示所选时间范围内最近 60 次调用</p>
       </div>
 

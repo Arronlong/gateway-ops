@@ -339,7 +339,7 @@ export interface DashboardSummary {
   recent_relay_adjustments: RelayAdjustmentView[]
 }
 
-export type DashboardRange = "today" | "24h" | "7d" | "30d" | "custom"
+export type DashboardRange = "today" | "24h" | "7d" | "30d" | "all" | "custom"
 export type DashboardRangePreset = Exclude<DashboardRange, "custom">
 export type RelayUsageRange = DashboardRange | "all"
 export type RelayUsageRangePreset = Exclude<RelayUsageRange, "custom">

@@ -67,30 +67,118 @@ async function main() {
     { slug: 'monitor', path: '/public/relay-monitor/1', label: text.monitor, endpoint: '/api/public/relay-stations/1/group-monitor' },
     { slug: 'alerts', path: '/alerts', label: text.alerts, endpoint: '/api/alerts/events', alert: true },
   ]
-  for (const width of [1440, 390]) {
+  for (const width of (process.env.TIME_RANGE_WIDTHS || '1440,1536,768,390').split(',').map(Number)) {
     await page.setViewportSize({ width, height: 1100 })
-    for (const item of cases) {
+    for (const item of cases.filter(item => !process.env.TIME_RANGE_CASE || item.slug === process.env.TIME_RANGE_CASE)) {
       await page.goto('http://localhost:3010' + item.path)
       const group = page.getByRole('group', { name: item.label, exact: true })
-      await group.getByRole('button', { name: text.custom, exact: true }).click()
-      const start = page.locator('input[id="' + item.label + '-start"]')
-      const end = page.locator('input[id="' + item.label + '-end"]')
+      await group.waitFor({ state: 'visible' })
+      if (item.slug === 'dashboard') {
+        const all = group.getByRole('button', { name: 'All', exact: true })
+        assert.equal(await all.count(), 1, 'homepage must expose All')
+        const endpoints = ['/api/dashboard/summary', '/api/dashboard/balance-trend', '/api/operations/summary']
+        const pending = endpoints.map(endpoint => page.waitForResponse(response => {
+          const url = new URL(response.url())
+          return url.pathname === endpoint && url.searchParams.get('range') === 'all'
+        }))
+        await all.click()
+        await Promise.all(pending)
+        assert.equal(await page.getByTitle('All', { exact: true }).count(), 1, 'homepage All must label the balance chart consistently')
+      }
+      if (item.slug === 'monitor') {
+        assert.equal(await group.getByRole('button', { name: text.custom, exact: true }).count(), 0, 'group monitoring must not expose custom dates')
+        for (const [name, preset] of [['7 \u5929', '7d'], ['30 \u5929', '30d']]) {
+          const pending = page.waitForResponse(response => {
+            const url = new URL(response.url())
+            return url.pathname === item.endpoint && url.searchParams.get('range') === preset
+          })
+          await group.getByRole('button', { name, exact: true }).click()
+          await pending
+        }
+        await page.screenshot({ path: path.join(output, item.slug + '-' + width + '.png') })
+        results.push({ page: item.slug, width, endpoint: item.endpoint, custom: false })
+        continue
+      }
+      if (item.slug === 'pool') {
+        await page.evaluate(async () => { await document.fonts.ready })
+        const layout = await group.evaluate(element => {
+          const header = element.closest('[data-slot="card-header"]')
+          const heading = header.querySelector('[data-slot="list-panel-heading"]')
+          const toolbar = header.querySelector('[data-slot="list-panel-toolbar"]')
+          const secondary = header.querySelector('[data-slot="list-panel-secondary-toolbar"]')
+          return { client: element.clientWidth, scroll: element.scrollWidth, heading: heading.getBoundingClientRect().width, basis: getComputedStyle(heading).flexBasis, header: header.getBoundingClientRect().width, toolbar: toolbar.getBoundingClientRect().width, children: [...secondary.children].map(child => ({ tag: child.tagName, width: Math.round(child.getBoundingClientRect().width), flex: getComputedStyle(child).flex, text: child.textContent.slice(0, 20) })) }
+        })
+        if (width >= 1280 && layout.scroll > layout.client + 1) await page.screenshot({ path: path.join(output, 'pool-overflow-' + width + '.png') })
+        if (width >= 1280) assert.ok(layout.scroll <= layout.client + 1, 'local pool time presets must not scroll at desktop width ' + width + ': ' + JSON.stringify(layout))
+        const all = group.getByRole('button', { name: 'All', exact: true })
+        assert.equal(await all.count(), 1, 'local pool must expose the All preset')
+        const allResponse = page.waitForResponse(response => {
+          const url = new URL(response.url())
+          return url.pathname === item.endpoint && url.searchParams.get('range') === 'all'
+        })
+        await all.click()
+        await allResponse
+        assert.equal(await all.getAttribute('aria-pressed'), 'true')
+      }
+      const trigger = group.getByRole('button', { name: text.custom, exact: true })
+
+      const beforeHeight = (await group.boundingBox()).height
+      const customRequests = () => requests.filter(url => url.pathname === item.endpoint && (item.alert ? url.searchParams.has('from') : url.searchParams.get('range') === 'custom'))
+      const beforeOpen = customRequests().length
+      await trigger.click()
+      const dialog = page.getByRole('dialog', { name: item.label + text.custom + '\u533a\u95f4', exact: true })
+      assert.equal(await dialog.count(), 1, item.slug + ' custom editor must be a popover dialog')
+      await page.waitForTimeout(80)
+      assert.equal(customRequests().length, beforeOpen, item.slug + ' opening the editor must not change the applied query')
+      assert.equal(await dialog.getByRole('button', { name: '\u5e94\u7528', exact: true }).count(), 0)
+      const start = dialog.getByLabel(text.start, { exact: true })
+      const end = dialog.getByLabel(text.end, { exact: true })
       assert.match(await end.inputValue(), /T23:59$/)
+      await start.fill('')
+      assert.equal(await start.getAttribute('aria-invalid'), 'true')
+      assert.equal(await group.getByRole('button', { pressed: true }).count(), 1, item.slug + ' incomplete drafts must preserve the applied preset')
+      assert.equal(await trigger.getAttribute('aria-pressed'), 'false')
+      assert.equal(customRequests().length, beforeOpen)
       await start.fill('2026-10-22T00:00')
       const requestCount = requests.length
+      const expectedEnd = item.alert ? '2026-10-24T15:59:59.999Z' : '2026-10-24T16:00:00.000Z'
+      const response = page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return url.pathname === item.endpoint && url.searchParams.get(item.alert ? 'to' : 'end') === expectedEnd
+      }, { timeout: 3000 })
       await end.fill('2026-10-24T23:59')
-      await page.waitForFunction(() => document.querySelectorAll('input[type="datetime-local"]').length >= 2)
-      await page.waitForTimeout(300)
-      const requested = requests.slice(requestCount).find(url => url.pathname === item.endpoint && (item.alert ? url.searchParams.get('to') === '2026-10-24T15:59:59.999Z' : url.searchParams.get('end') === '2026-10-24T16:00:00.000Z'))
-      assert.ok(requested, item.slug + ' did not request custom bounds: ' + requests.slice(requestCount).map(url => url.pathname + url.search).join(', '))
+      await response
+      const requested = requests.slice(requestCount).find(url => url.pathname === item.endpoint && url.searchParams.get(item.alert ? 'to' : 'end') === expectedEnd)
+      assert.ok(requested, item.slug + ' did not automatically request custom bounds: ' + requests.slice(requestCount).map(url => url.pathname + url.search).join(', '))
       assert.equal(requested.searchParams.get(item.alert ? 'from' : 'start'), '2026-10-21T16:00:00.000Z')
+      assert.equal(await trigger.getAttribute('aria-pressed'), 'true')
+      const beforeInvalid = customRequests().length
+      await end.fill('2026-10-20T23:59')
+      await page.waitForTimeout(80)
+      assert.equal(await end.getAttribute('aria-invalid'), 'true')
+      assert.equal(customRequests().length, beforeInvalid, item.slug + ' invalid drafts must not query')
+      assert.equal(await trigger.getAttribute('aria-pressed'), 'true', item.slug + ' invalid drafts must preserve the last applied custom range')
+      assert.ok(await dialog.getByRole('alert').isVisible())
+      await end.fill('2026-10-25T23:59')
+      await page.waitForTimeout(150)
+      assert.ok(customRequests().some(url => url.searchParams.get(item.alert ? 'to' : 'end') === (item.alert ? '2026-10-25T15:59:59.999Z' : '2026-10-25T16:00:00.000Z')), item.slug + ' correcting the end date must automatically query again')
+      await page.keyboard.press('Escape')
+      await dialog.waitFor({ state: 'detached' })
+      assert.equal(await dialog.count(), 0)
+      await trigger.click()
+      assert.equal(await start.inputValue(), '2026-10-22T00:00')
+      assert.equal(await end.inputValue(), '2026-10-25T23:59')
       const bounds = await group.boundingBox()
       assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width + 1, item.slug + ' buttons overflow at ' + width)
-      for (const input of [start, end]) {
-        const box = await input.boundingBox()
-        assert.ok(box.x >= 0 && box.x + box.width <= width + 1, item.slug + ' date inputs overflow at ' + width)
+      assert.ok(Math.abs(bounds.height - beforeHeight) <= 1, item.slug + ' opening custom dates must not expand the toolbar')
+      const positions = await group.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().top))
+      assert.ok(Math.max(...positions) - Math.min(...positions) <= 1, item.slug + ' preset buttons must remain on one row at ' + width)
+      for (const element of [dialog, start, end]) {
+        const box = await element.boundingBox()
+        assert.ok(box.x >= 0 && box.x + box.width <= width + 1, item.slug + ' date editor overflows at ' + width)
       }
-      await group.scrollIntoViewIfNeeded()
+      await dialog.evaluate(async element => { await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished.catch(() => {}))) })
+      await page.evaluate(async () => { await document.fonts.ready })
       await page.screenshot({ path: path.join(output, item.slug + '-' + width + '.png') })
       results.push({ page: item.slug, width, endpoint: requested.pathname, bounds: requested.search })
     }

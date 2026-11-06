@@ -93,7 +93,7 @@ export function BalanceOverview({ range = "today" }: { range?: TimeRangeSelectio
   }, [tooltipPinned])
 
   const isHourlyRange = typeof range === "string" ? range === "today" || range === "24h" : new Date(range.end).getTime() + 60_000 - new Date(range.start).getTime() <= 86_400_000
-  const rangeTitle = timeRangeLabel(range, [{ value: "today", label: "今天" }, { value: "24h", label: "24 小时" }, { value: "7d", label: "7 天" }, { value: "30d", label: "30 天" }])
+  const rangeTitle = timeRangeLabel(range, [{ value: "all", label: "All" }, { value: "today", label: "今天" }, { value: "24h", label: "24 小时" }, { value: "7d", label: "7 天" }, { value: "30d", label: "30 天" }])
   const data = (trend.data ?? []).map((p) => ({
     day: isHourlyRange ? formatHour(p.day) : formatDay(p.day),
     balance: p.balance,

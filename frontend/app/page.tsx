@@ -18,6 +18,7 @@ const ranges: { value: DashboardRangePreset; label: string }[] = [
   { value: "24h", label: "24 小时" },
   { value: "7d", label: "7 天" },
   { value: "30d", label: "30 天" },
+  { value: "all", label: "All" },
 ]
 
 function RelayRiskOverview({ range }: { range: TimeRangeSelection<DashboardRangePreset> }) {

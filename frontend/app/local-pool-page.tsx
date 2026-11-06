@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { apiFetch } from "@/lib/api"
-import type { DashboardRangePreset, RelayAccountView } from "@/lib/api-types"
+import type { RelayUsageRangePreset, RelayAccountView } from "@/lib/api-types"
 import type { TimeRangeSelection } from "@/lib/time-range"
 import { TimeRangeFilter } from "@/components/ui/time-range-filter"
 import { useRelayOverview, useRelayStations, useRelayUsage } from "@/lib/queries"
@@ -23,8 +23,8 @@ type ViewMode = "aggregate" | "accounts"
 type AccountSortKey = "expires_at" | "name"
 type SortDirection = "asc" | "desc"
 
-const ranges: { value: DashboardRangePreset; label: string }[] = [
-  { value: "today", label: "今天" }, { value: "24h", label: "24 小时" }, { value: "7d", label: "7 天" }, { value: "30d", label: "30 天" },
+const ranges: { value: RelayUsageRangePreset; label: string }[] = [
+  { value: "today", label: "今天" }, { value: "24h", label: "24 小时" }, { value: "7d", label: "7 天" }, { value: "30d", label: "30 天" }, { value: "all", label: "All" },
 ]
 
 function money(value: number) { return `¥${value.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` }
@@ -52,7 +52,7 @@ function statusName(account: RelayAccountView) {
 export default function LocalPoolPage() {
   const stations = useRelayStations()
   const [stationID, setStationID] = useState<number | null>(null)
-  const [range, setRange] = useState<TimeRangeSelection<DashboardRangePreset>>("today")
+  const [range, setRange] = useState<TimeRangeSelection<RelayUsageRangePreset>>("today")
   const [view, setView] = useState<ViewMode>("aggregate")
   const [plan, setPlan] = useState("all")
   const [platform, setPlatform] = useState("all")
@@ -149,9 +149,9 @@ export default function LocalPoolPage() {
           secondaryPlacement="inline"
           actionsPlacement="secondary"
           title={<CardTitle className="flex items-center gap-2 text-sm"><Boxes className="size-4 text-brand" />OAuth 号池统计</CardTitle>}
-          description={<p className="mt-1 truncate text-xs text-muted-foreground">账号类型优先读取中转站元数据，缺失时根据账号名称和分组识别 Team、K12、Pro、Plus 等。</p>}
+          description={<p className="mt-1 truncate text-xs text-muted-foreground">按类型汇总账号与用量</p>}
 actions={<>
-<TimeRangeFilter value={range} options={ranges} onChange={setRange} label="本地号池统计时间范围"/>
+<TimeRangeFilter value={range} options={ranges} onChange={setRange} label="本地号池统计时间范围" className="shrink-0"/>
 <Button variant="outline" size="sm" className="h-11 sm:h-9 gap-1.5" disabled={!stationID || busy} onClick={() => { void overview.refetch(); void usage.refetch() }}><RefreshCw className={cn("size-3.5", busy && "animate-spin")} />刷新</Button>
 </>}
           secondary={<>
