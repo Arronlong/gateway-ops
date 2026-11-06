@@ -26,7 +26,7 @@ func (c *Client) CountUsage(ctx context.Context, ch *connector.Channel, session 
 		if err != nil {
 			return 0, err
 		}
-		req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session)).SetQueryParam("p", "1").SetQueryParam("page_size", "1").SetQueryParam("type", strconv.Itoa(kind))
+		req := c.http.R().SetContext(ch.RequestContext(ctx)).SetHeaders(requestHeaders(ch, session)).SetQueryParam("p", "1").SetQueryParam("page_size", "1").SetQueryParam("type", strconv.Itoa(kind))
 		if !query.Since.IsZero() {
 			req.SetQueryParam("start_timestamp", strconv.FormatInt(usageStartTimestamp(query.Since), 10))
 		}

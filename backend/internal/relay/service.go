@@ -49,6 +49,7 @@ type Service struct {
 	stations           *storage.RelayStations
 	cipher             *crypto.Cipher
 	channels           *storage.Channels
+	proxies            *storage.Proxies
 	rates              *storage.Rates
 	settings           *storage.Settings
 	client             *http.Client
@@ -78,6 +79,7 @@ func NewService(stations *storage.RelayStations, cipher *crypto.Cipher, deps ...
 	var channels *storage.Channels
 	var rates *storage.Rates
 	var settings *storage.Settings
+	var proxies *storage.Proxies
 	if len(deps) > 0 {
 		channels, _ = deps[0].(*storage.Channels)
 	}
@@ -87,10 +89,14 @@ func NewService(stations *storage.RelayStations, cipher *crypto.Cipher, deps ...
 	if len(deps) > 2 {
 		settings, _ = deps[2].(*storage.Settings)
 	}
+	if len(deps) > 3 {
+		proxies, _ = deps[3].(*storage.Proxies)
+	}
 	return &Service{
 		stations:           stations,
 		cipher:             cipher,
 		channels:           channels,
+		proxies:            proxies,
 		rates:              rates,
 		settings:           settings,
 		client:             &http.Client{Timeout: requestTimeout},

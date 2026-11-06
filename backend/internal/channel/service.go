@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/guliansheng/gateway-ops/internal/captcha"
 	"github.com/guliansheng/gateway-ops/internal/connector"
 	"github.com/guliansheng/gateway-ops/internal/crypto"
+	"github.com/guliansheng/gateway-ops/internal/networkproxy"
 	"github.com/guliansheng/gateway-ops/internal/progress"
 	"github.com/guliansheng/gateway-ops/internal/storage"
 	"gorm.io/gorm"
@@ -37,6 +39,7 @@ func tokenRefreshLock(key uint) *sync.Mutex {
 // Service 渠道领域服务。
 type Service struct {
 	Channels     *storage.Channels
+	Proxies      *storage.Proxies
 	AuthSessions *storage.AuthSessions
 	Captchas     *storage.Captchas
 	MonitorLogs  *storage.MonitorLogs
@@ -47,6 +50,8 @@ type Service struct {
 // display name. Channel names remain unique because the UI and notifications
 // use them as the human-readable identifier for an upstream.
 var ErrNameConflict = errors.New("渠道名称已被其他渠道占用")
+
+var ErrInvalidProxy = errors.New("所选代理不存在或不可用，请重新选择")
 
 func NewService(
 	channels *storage.Channels,
@@ -94,6 +99,7 @@ type CreateInput struct {
 	Name               string
 	Type               storage.ChannelType
 	SiteURL            string
+	ProxyID            *uint
 	Username           string
 	Password           string
 	CredentialMode     storage.CredentialMode
@@ -125,6 +131,10 @@ type AdditionalAccountInput struct {
 }
 
 func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
+	proxyID := normalizedProxyID(in.ProxyID)
+	if _, err := s.ResolveProxyURL(proxyID); err != nil {
+		return nil, err
+	}
 	name := strings.TrimSpace(in.Name)
 	if name == "" {
 		return nil, errors.New("渠道名称不能为空")
@@ -182,6 +192,7 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 		Name:             name,
 		Type:             in.Type,
 		SiteURL:          in.SiteURL,
+		ProxyID:          proxyID,
 		Username:         in.Username,
 		PasswordCipher:   enc,
 		PelicanKeyCipher: pelicanKeyCipher,
@@ -226,6 +237,7 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 type UpdateInput struct {
 	Name               *string
 	SiteURL            *string
+	ProxyID            *uint
 	Username           *string
 	Password           *string
 	CredentialMode     *storage.CredentialMode
@@ -247,6 +259,13 @@ func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
 	c, err := s.Channels.FindByID(id)
 	if err != nil {
 		return nil, err
+	}
+	if in.ProxyID != nil {
+		proxyID := normalizedProxyID(in.ProxyID)
+		if _, err := s.ResolveProxyURL(proxyID); err != nil {
+			return nil, err
+		}
+		c.ProxyID = proxyID
 	}
 	if err := applyPelicanAPIKey(s.Cipher, c, in.PelicanAPIKey); err != nil {
 		return nil, err
@@ -672,6 +691,10 @@ func (s *Service) Delete(id uint) error {
 // token 模式下 connector.Channel.Password 留空——connector 永远不会读到它。
 func (s *Service) Resolve(ctx context.Context, c *storage.Channel) (*connector.Channel, error) {
 	_ = ctx
+	proxyURL, err := s.ResolveProxyURL(c.ProxyID)
+	if err != nil {
+		return nil, err
+	}
 	raw, err := s.Cipher.Decrypt(c.PasswordCipher)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt credential: %w", err)
@@ -685,6 +708,7 @@ func (s *Service) Resolve(ctx context.Context, c *storage.Channel) (*connector.C
 		Name:             c.Name,
 		Type:             connector.ChannelType(c.Type),
 		SiteURL:          c.SiteURL,
+		ProxyURL:         proxyURL,
 		Username:         c.Username,
 		LoginHeaders:     toConnectorRequestKV(headers),
 		LoginParams:      toConnectorRequestKV(params),
@@ -697,6 +721,35 @@ func (s *Service) Resolve(ctx context.Context, c *storage.Channel) (*connector.C
 		resolved.Password = raw
 	}
 	return resolved, nil
+}
+
+func normalizedProxyID(id *uint) *uint {
+	if id == nil || *id == 0 {
+		return nil
+	}
+	return id
+}
+
+func (s *Service) ResolveProxyURL(id *uint) (*url.URL, error) {
+	if id == nil || *id == 0 {
+		return nil, nil
+	}
+	if s.Proxies == nil {
+		return nil, ErrInvalidProxy
+	}
+	item, err := s.Proxies.FindByID(*id)
+	if err != nil {
+		return nil, ErrInvalidProxy
+	}
+	raw, err := s.Cipher.Decrypt(item.URLCipher)
+	if err != nil {
+		return nil, ErrInvalidProxy
+	}
+	u, err := networkproxy.Parse(raw)
+	if err != nil {
+		return nil, ErrInvalidProxy
+	}
+	return u, nil
 }
 
 // AccountChannel projects an additional account onto the connector's existing

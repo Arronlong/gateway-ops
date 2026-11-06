@@ -29,6 +29,7 @@ type Deps struct {
 	Cipher         *crypto.Cipher
 	Auth           *auth.Service
 	Channels       *storage.Channels
+	Proxies        *storage.Proxies
 	ChannelUsage   *storage.ChannelUsage
 	Sessions       *storage.AuthSessions
 	Captchas       *storage.Captchas
@@ -81,6 +82,7 @@ func Register(r *gin.Engine, d *Deps) {
 
 		registerAuth(api, d)
 		registerChannels(api, d)
+		registerProxies(api, d)
 		registerCaptchas(api, d)
 		registerNotifications(api, d)
 		registerAlerts(api, d)

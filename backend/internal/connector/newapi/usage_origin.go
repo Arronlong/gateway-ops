@@ -33,7 +33,7 @@ func (c *Client) UsageHistoryOrigin(ctx context.Context, ch *connector.Channel, 
 		return time.Time{}, err
 	}
 	defer release()
-	resp, err := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session)).SetQueryParam("p", "1").SetQueryParam("page_size", "100").Get(strings.TrimRight(ch.SiteURL, "/") + "/api/token/")
+	resp, err := c.http.R().SetContext(ch.RequestContext(ctx)).SetHeaders(requestHeaders(ch, session)).SetQueryParam("p", "1").SetQueryParam("page_size", "100").Get(strings.TrimRight(ch.SiteURL, "/") + "/api/token/")
 	if err != nil {
 		return time.Time{}, err
 	}

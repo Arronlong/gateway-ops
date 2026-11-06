@@ -13,6 +13,12 @@ export interface RequestKV {
   value: string
 }
 
+export interface ProxyConfig {
+  id: number
+  display_url: string
+  created_at: string
+}
+
 export type NotificationChannelType =
   | "telegram"
   | "webhook"
@@ -44,6 +50,7 @@ export interface Channel {
   name: string
   type: ChannelType
   site_url: string
+  proxy_id?: number | null
   username: string
   credential_mode: CredentialMode
 	pelican_key_configured: boolean

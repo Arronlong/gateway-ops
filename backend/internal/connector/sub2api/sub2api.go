@@ -13,6 +13,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/guliansheng/gateway-ops/internal/connector"
+	"github.com/guliansheng/gateway-ops/internal/networkproxy"
 )
 
 func init() {
@@ -25,6 +26,7 @@ type Client struct {
 
 func New() *Client {
 	c := resty.New().
+		SetTransport(networkproxy.NewTransport()).
 		SetTimeout(30*time.Second).
 		SetHeader("User-Agent", "GatewayOps/0.1").
 		SetHeader("Accept", "application/json")
@@ -67,7 +69,7 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 	body := connector.ExpandRequestKV(ch.LoginParams, vars)
 
 	resp, err := c.http.R().
-		SetContext(ctx).
+		SetContext(ch.RequestContext(ctx)).
 		SetHeaders(requestHeaders(ch, nil)).
 		SetBody(body).
 		Post(site + "/api/v1/auth/login")
@@ -121,7 +123,7 @@ func (c *Client) RefreshToken(ctx context.Context, ch *connector.Channel, refres
 	defer release()
 	site := strings.TrimRight(ch.SiteURL, "/")
 	resp, err := c.http.R().
-		SetContext(ctx).
+		SetContext(ch.RequestContext(ctx)).
 		SetHeader("Content-Type", "application/json").
 		SetHeaders(requestHeaders(ch, nil)).
 		SetBody(map[string]string{"refresh_token": refreshToken}).
@@ -240,7 +242,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 	if pageSize <= 0 || pageSize > 1000 {
 		pageSize = 100
 	}
-	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session)).
+	req := c.http.R().SetContext(ch.RequestContext(ctx)).SetHeaders(requestHeaders(ch, session)).
 		SetQueryParam("page", strconv.Itoa(page)).
 		SetQueryParam("page_size", strconv.Itoa(pageSize)).
 		SetQueryParam("sort_by", "created_at").
@@ -355,7 +357,7 @@ func (c *Client) getJSON(ctx context.Context, ch *connector.Channel, url string,
 		return nil, err
 	}
 	defer release()
-	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session))
+	req := c.http.R().SetContext(ch.RequestContext(ctx)).SetHeaders(requestHeaders(ch, session))
 	resp, err := req.Get(url)
 	if err != nil {
 		return nil, err

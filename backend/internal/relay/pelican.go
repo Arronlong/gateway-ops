@@ -164,35 +164,53 @@ func (s *Service) generatePelican(ctx context.Context, station storage.RelayStat
 }
 
 func (s *Service) pelicanChannelKey(station storage.RelayStation, accountID int64, channelID uint) (string, error) {
+	key, _, err := s.resolvePelicanChannelKey(station, accountID, channelID)
+	return key, err
+}
+
+func (s *Service) resolvePelicanChannelKey(station storage.RelayStation, accountID int64, channelID uint) (string, uint, error) {
 	if channelID != 0 {
 		key, err := s.stations.ChannelPelicanKeyForAccount(station.ID, accountID, channelID)
 		if err != nil {
-			return "", errors.New("当前监控渠道未关联到所选中转站账号")
+			return "", 0, errors.New("当前监控渠道未关联到所选中转站账号")
 		}
 		if key.Ciphertext == "" {
-			return "", nil
+			return "", channelID, nil
 		}
-		return s.cipher.Decrypt(key.Ciphertext)
+		value, err := s.cipher.Decrypt(key.Ciphertext)
+		return value, channelID, err
 	}
 	keys, err := s.stations.ChannelPelicanKeysForAccount(station.ID, accountID)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	var selected string
+	var sourceID uint
+	var proxyID uint
 	for _, item := range keys {
 		if item.Ciphertext == "" {
 			continue
 		}
 		value, decryptErr := s.cipher.Decrypt(item.Ciphertext)
 		if decryptErr != nil {
-			return "", decryptErr
+			return "", 0, decryptErr
 		}
 		if selected != "" && selected != value {
-			return "", errors.New("该 NewAPI 账号关联了多个不同的测智 API Key，请从对应渠道发起测智")
+			return "", 0, errors.New("该 NewAPI 账号关联了多个不同的测智 API Key，请从对应渠道发起测智")
+		}
+		var itemProxyID uint
+		if item.ProxyID != nil {
+			itemProxyID = *item.ProxyID
+		}
+		if selected != "" && proxyID != itemProxyID {
+			return "", 0, errors.New("关联渠道使用不同代理，请从对应渠道发起测智")
+		}
+		if value != "" && sourceID == 0 {
+			sourceID, proxyID = item.ChannelID, itemProxyID
 		}
 		selected = value
 	}
-	return selected, nil
+	return selected, sourceID, nil
 }
 func (s *Service) StartChannelPelican(ctx context.Context, channelID uint, requested ...storage.PelicanTestPlan) error {
 	_ = ctx
@@ -465,7 +483,7 @@ func (s *Service) runPelicanBatchReady(parent context.Context, config storage.Pe
 		}
 		return
 	}
-	manualKey, manualKeyErr := s.pelicanChannelKey(*station, config.AccountExternalID, config.ChannelID)
+	manualKey, sourceChannelID, manualKeyErr := s.resolvePelicanChannelKey(*station, config.AccountExternalID, config.ChannelID)
 	saved.Store(true)
 	var keyInfoOnce sync.Once
 	var keyInfo pelicanKeyGroup
@@ -476,6 +494,7 @@ func (s *Service) runPelicanBatchReady(parent context.Context, config storage.Pe
 			defer calls.Done()
 			var runErr error
 			planConfig := config
+			planConfig.ChannelID = sourceChannelID
 			planConfig.Model, planConfig.Prompt, planConfig.ReasoningEffort, planConfig.ParallelCount = plan.Model, plan.Prompt, plan.ReasoningEffort, 1
 			result.Status = "success"
 			var target *pelicanTarget

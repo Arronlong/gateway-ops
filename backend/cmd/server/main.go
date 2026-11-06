@@ -93,6 +93,7 @@ func main() {
 	}
 
 	channels := storage.NewChannels(db)
+	proxies := storage.NewProxies(db)
 	channelUsage := storage.NewChannelUsage(db)
 	authSessions := storage.NewAuthSessions(db)
 	captchas := storage.NewCaptchas(db)
@@ -109,13 +110,14 @@ func main() {
 	alertRules := storage.NewAlerts(db)
 
 	channelSvc := channel.NewService(channels, authSessions, captchas, monLogs, cipher)
+	channelSvc.Proxies = proxies
 	dispatcher := notify.NewDispatcher(notifies, cipher, log, notify.Policy{
 		BatchRateChanges:   cfg.Notifications.BatchRateChanges,
 		MinChangePct:       cfg.Notifications.MinChangePct,
 		BalanceLowCooldown: time.Duration(cfg.Notifications.BalanceLowCooldownMinutes) * time.Minute,
 		SendMaxAttempts:    cfg.Notifications.SendMaxAttempts,
 	})
-	relaySvc := relay.NewService(relayStations, cipher, channels, rates, settings)
+	relaySvc := relay.NewService(relayStations, cipher, channels, rates, settings, proxies)
 	monitorSvc := monitor.NewService(channels, rates, monLogs, channelUsage, channelSvc, dispatcher, log)
 	alertCollector := alert.NewCollector(alertRules, relayStations, channels, alert.CollectorSources{ChannelUsage: channelUsage, Rates: rates, Users: relaySvc})
 	alertSvc := alert.NewService(alertRules, alertCollector, relaySvc, dispatcher, log)
@@ -149,6 +151,7 @@ func main() {
 		Cipher:        cipher,
 		Auth:          authSvc,
 		Channels:      channels,
+		Proxies:       proxies,
 		ChannelUsage:  channelUsage,
 		Sessions:      authSessions,
 		Captchas:      captchas,

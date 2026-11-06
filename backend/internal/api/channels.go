@@ -131,6 +131,7 @@ type channelInput struct {
 	Name             string                 `json:"name" binding:"required"`
 	Type             storage.ChannelType    `json:"type" binding:"required"`
 	SiteURL          string                 `json:"site_url" binding:"required"`
+	ProxyID          *uint                  `json:"proxy_id"`
 	Username         string                 `json:"username"`
 	Password         string                 `json:"password"`
 	CredentialMode   storage.CredentialMode `json:"credential_mode"`
@@ -161,6 +162,7 @@ type channelAccountInput struct {
 type channelUpdateInput struct {
 	Name             *string                 `json:"name"`
 	SiteURL          *string                 `json:"site_url"`
+	ProxyID          json.RawMessage         `json:"proxy_id"`
 	Username         *string                 `json:"username"`
 	Password         *string                 `json:"password"`
 	CredentialMode   *storage.CredentialMode `json:"credential_mode"`
@@ -620,6 +622,7 @@ func createChannel(c *gin.Context, d *Deps) {
 		Name:               in.Name,
 		Type:               in.Type,
 		SiteURL:            in.SiteURL,
+		ProxyID:            in.ProxyID,
 		Username:           in.Username,
 		Password:           in.Password,
 		CredentialMode:     in.CredentialMode,
@@ -678,9 +681,19 @@ func updateChannel(c *gin.Context, d *Deps) {
 		fail(c, http.StatusBadRequest, err)
 		return
 	}
+	var proxyID *uint
+	if len(in.ProxyID) > 0 {
+		var value uint
+		if err := json.Unmarshal(in.ProxyID, &value); err != nil {
+			fail(c, http.StatusBadRequest, channel.ErrInvalidProxy)
+			return
+		}
+		proxyID = &value
+	}
 	updated, err := d.ChannelSvc.Update(id, channel.UpdateInput{
 		Name:               in.Name,
 		SiteURL:            in.SiteURL,
+		ProxyID:            proxyID,
 		Username:           in.Username,
 		Password:           in.Password,
 		CredentialMode:     in.CredentialMode,
@@ -718,6 +731,9 @@ func additionalAccountInputsPtr(items *[]channelAccountInput) *[]channel.Additio
 }
 
 func channelErrorStatus(err error) int {
+	if errors.Is(err, channel.ErrInvalidProxy) {
+		return http.StatusBadRequest
+	}
 	if errors.Is(err, channel.ErrNameConflict) || errors.Is(err, gorm.ErrDuplicatedKey) {
 		return http.StatusConflict
 	}

@@ -15,6 +15,7 @@ import (
 
 	"github.com/go-resty/resty/v2"
 	"github.com/guliansheng/gateway-ops/internal/connector"
+	"github.com/guliansheng/gateway-ops/internal/networkproxy"
 )
 
 func init() {
@@ -29,6 +30,7 @@ type Client struct {
 
 func New() *Client {
 	c := resty.New().
+		SetTransport(networkproxy.NewTransport()).
 		SetTimeout(30*time.Second).
 		SetHeader("User-Agent", "GatewayOps/0.1").
 		SetHeader("Accept", "application/json")
@@ -69,7 +71,7 @@ func (c *Client) Login(ctx context.Context, ch *connector.Channel) (*connector.A
 	site := strings.TrimRight(ch.SiteURL, "/")
 	vars := map[string]string{"username": ch.Username, "password": ch.Password, "turnstile_token": ch.TurnstileToken}
 	req := c.http.R().
-		SetContext(ctx).
+		SetContext(ch.RequestContext(ctx)).
 		SetHeaders(requestHeaders(ch, nil)).
 		SetBody(connector.ExpandRequestKV(ch.LoginParams, vars))
 	if ch.TurnstileToken != "" {
@@ -204,7 +206,7 @@ func (c *Client) ListUsage(ctx context.Context, ch *connector.Channel, session *
 		return nil, err
 	}
 
-	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session)).
+	req := c.http.R().SetContext(ch.RequestContext(ctx)).SetHeaders(requestHeaders(ch, session)).
 		SetQueryParam("p", strconv.Itoa(page)).
 		SetQueryParam("page_size", strconv.Itoa(pageSize)).
 		SetQueryParam("type", "0")
@@ -381,7 +383,7 @@ func (c *Client) getJSON(ctx context.Context, ch *connector.Channel, url string,
 		return nil, err
 	}
 	defer release()
-	req := c.http.R().SetContext(ctx).SetHeaders(requestHeaders(ch, session))
+	req := c.http.R().SetContext(ch.RequestContext(ctx)).SetHeaders(requestHeaders(ch, session))
 	resp, err := req.Get(url)
 	if err != nil {
 		return nil, err

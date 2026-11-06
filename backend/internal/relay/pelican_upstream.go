@@ -268,7 +268,11 @@ func (s *Service) prepareDirectPelican(channel storage.Channel, key string, conf
 	client := *s.client
 	client.Timeout = pelicanTimeout
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	return &pelicanTarget{client: client, endpoint: endpoint, model: models[0], token: key, chat: true, headers: make(http.Header), secrets: []string{key}}, nil
+	target := &pelicanTarget{client: client, endpoint: endpoint, model: models[0], token: key, chat: true, headers: make(http.Header), secrets: []string{key}}
+	if err := s.applyChannelProxy(target, channel); err != nil {
+		return nil, err
+	}
+	return target, nil
 }
 
 func (s *Service) prepareNewAPIPelican(ctx context.Context, station storage.RelayStation, credential newAPICredential, accountID int64, key string, account storage.RelayAccount, config storage.PelicanConfig) (*pelicanTarget, error) {
@@ -308,17 +312,40 @@ func (s *Service) prepareNewAPIPelican(ctx context.Context, station storage.Rela
 }
 
 func (s *Service) preparePelicanForStation(ctx context.Context, station storage.RelayStation, relayCredential, manualKey string, account storage.RelayAccount, config storage.PelicanConfig) (*pelicanTarget, error) {
+	var sourceChannel *storage.Channel
+	if config.ChannelID != 0 {
+		if s.channels == nil {
+			return nil, errors.New("渠道代理依赖未初始化")
+		}
+		var err error
+		sourceChannel, err = s.channels.FindByID(config.ChannelID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	var target *pelicanTarget
+	var err error
 	if station.Type == string(storage.ChannelTypeNewAPI) {
 		credential, ok := decodeNewAPICredential(relayCredential)
 		if !ok {
 			return nil, errors.New("NewAPI 管理凭据格式无效")
 		}
-		return s.prepareNewAPIPelican(ctx, station, credential, config.AccountExternalID, manualKey, account, config)
+		target, err = s.prepareNewAPIPelican(ctx, station, credential, config.AccountExternalID, manualKey, account, config)
+	} else if strings.TrimSpace(manualKey) != "" {
+		target, err = s.preparePelicanWithManualKey(ctx, station, account, manualKey, config, relayCredential)
+	} else {
+		target, err = s.preparePelican(ctx, station, relayCredential, config)
 	}
-	if strings.TrimSpace(manualKey) != "" {
-		return s.preparePelicanWithManualKey(ctx, station, account, manualKey, config, relayCredential)
+	if err != nil {
+		return nil, err
 	}
-	return s.preparePelican(ctx, station, relayCredential, config)
+	if sourceChannel != nil {
+		if err := s.applyChannelProxy(target, *sourceChannel); err != nil {
+			target.close()
+			return nil, err
+		}
+	}
+	return target, nil
 }
 
 func pelicanOpenAIChatURL(base string) (string, error) {

@@ -12,9 +12,12 @@ package connector
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/guliansheng/gateway-ops/internal/networkproxy"
 )
 
 // ChannelType 渠道类型枚举，与 storage.ChannelType 同步。
@@ -55,6 +58,7 @@ type Channel struct {
 	Name             string
 	Type             ChannelType
 	SiteURL          string
+	ProxyURL         *url.URL
 	Username         string
 	Password         string
 	LoginHeaders     []RequestKV
@@ -62,6 +66,10 @@ type Channel struct {
 	TurnstileEnabled bool
 	// TurnstileToken 由调用方在 Login 前预先求解打码后填入；为空则直接发起登录。
 	TurnstileToken string
+}
+
+func (ch *Channel) RequestContext(ctx context.Context) context.Context {
+	return networkproxy.WithURL(ctx, ch.ProxyURL)
 }
 
 func (ch *Channel) RequestHeaders() map[string]string {

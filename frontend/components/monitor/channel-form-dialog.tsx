@@ -33,6 +33,7 @@ import { useTriggerRefresh } from "@/lib/refresh-context"
 import { useCaptchaConfigs } from "@/lib/queries"
 import { cn } from "@/lib/utils"
 import { ChannelRelayAssociationEditor } from "@/components/monitor/channel-relay-association-editor"
+import { ProxySelect } from "@/components/monitor/proxy-select"
 
 interface ChannelFormDialogProps {
   open: boolean
@@ -54,6 +55,7 @@ interface FormState {
   name: string
   type: ChannelType
   site_url: string
+  proxy_id: string
   pelican_api_key: string
   clear_pelican_api_key: boolean
   username: string
@@ -185,6 +187,7 @@ function initialState(c?: Channel | null): FormState {
     name: c?.name ?? "",
     type,
     site_url: c?.site_url ?? "",
+    proxy_id: c?.proxy_id != null ? String(c.proxy_id) : "",
     pelican_api_key: "",
     clear_pelican_api_key: false,
     username: c?.username ?? "",
@@ -317,6 +320,7 @@ function buildAdditionalAccountPayloads(accounts: AdditionalAccountForm[], type:
 export function ChannelFormDialog({ open, onOpenChange, channel, associationSnapshot, onAssociationChanged }: ChannelFormDialogProps) {
   const [form, setForm] = useState<FormState>(() => initialState(channel))
   const [submitting, setSubmitting] = useState(false)
+  const [proxyPending, setProxyPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const refresh = useTriggerRefresh()
   const captchas = useCaptchaConfigs()
@@ -344,6 +348,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
     setError(null)
     setSubmitting(true)
     try {
+      if (proxyPending) throw new Error("请先添加代理或取消新增代理")
       const threshold = Number(form.balance_threshold)
       if (!Number.isFinite(threshold) || threshold < 0) {
         throw new Error("余额阈值必须是非负数")
@@ -359,6 +364,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
           name: form.name,
           site_url: form.site_url,
           balance_mode: "manual",
+          proxy_id: form.proxy_id ? Number(form.proxy_id) : null,
           manual_balance: manualBalance,
           remark: form.remark.trim(),
           balance_threshold: threshold,
@@ -437,6 +443,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
           login_headers: form.login_headers,
           login_params: form.login_params,
           balance_mode: "auto",
+          proxy_id: form.proxy_id ? Number(form.proxy_id) : null,
           remark: form.remark.trim(),
           balance_threshold: threshold,
           monitor_enabled: form.monitor_enabled,
@@ -465,6 +472,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
             login_headers: form.login_headers,
             login_params: form.login_params,
             balance_mode: "auto",
+            proxy_id: form.proxy_id ? Number(form.proxy_id) : null,
             manual_balance: 0,
             remark: form.remark.trim(),
             password: isTokenMode ? "" : form.password,
@@ -545,6 +553,8 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
               disabled={submitting}
             />
           </div>
+
+          <ProxySelect key={channel?.id ?? "new"} value={form.proxy_id} onChange={(proxy_id) => setForm((current) => ({ ...current, proxy_id }))} onPendingChange={setProxyPending} disabled={submitting} />
 
           <div className="space-y-1.5 border-t border-border pt-3">
             <Label htmlFor="pelican-api-key">测智 API Key（可选）</Label>
@@ -921,7 +931,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
               取消
             </Button>
-            <Button type="submit" disabled={submitting}>
+            <Button type="submit" disabled={submitting || proxyPending}>
               {submitting ? "保存中…" : "保存"}
             </Button>
           </DialogFooter>

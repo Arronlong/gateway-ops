@@ -40,13 +40,18 @@ func (s *Service) pelicanKeyGroup(ctx context.Context, target *pelicanTarget, st
 		if err != nil {
 			continue
 		}
+		lookup, err := s.keyGroupSessionTarget(target, session.ProxyID)
+		if err != nil {
+			continue
+		}
+		defer lookup.close()
 		var info pelicanKeyGroup
 		if session.Type == storage.ChannelTypeNewAPI {
 			headers := s.pelicanNewAPIHeaders(session, token)
 			if len(headers) == 0 {
 				continue
 			}
-			info = target.readNewAPIKeyGroup(ctx, session.SiteURL, headers)
+			info = lookup.readNewAPIKeyGroup(ctx, session.SiteURL, headers)
 		} else {
 			if token == "" && session.CredentialMode == storage.CredentialModeToken {
 				raw, err := s.cipher.Decrypt(session.CredentialCipher)
@@ -64,7 +69,7 @@ func (s *Service) pelicanKeyGroup(ctx context.Context, target *pelicanTarget, st
 			if token == "" {
 				continue
 			}
-			info = target.readKeyGroup(ctx, session.SiteURL, token)
+			info = lookup.readKeyGroup(ctx, session.SiteURL, token)
 		}
 		if info.Name != "" {
 			return info

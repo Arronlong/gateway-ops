@@ -13,6 +13,7 @@ type ChannelPelicanInfo struct {
 type ChannelPelicanKey struct {
 	ChannelID  uint
 	Ciphertext string
+	ProxyID    *uint
 }
 
 type ChannelPelicanTarget struct {
@@ -140,7 +141,7 @@ func (r *RelayStations) ChannelPelicanGallery(historyCounts ...int) ([]ChannelPe
 func (r *RelayStations) ChannelPelicanKeyForAccount(stationID uint, accountID int64, channelID uint) (ChannelPelicanKey, error) {
 	var key ChannelPelicanKey
 	err := r.db.Table("channels").
-		Select("channels.id AS channel_id, channels.pelican_key_cipher AS ciphertext").
+		Select("channels.id AS channel_id, channels.pelican_key_cipher AS ciphertext, channels.proxy_id").
 		Joins("JOIN channel_accounts ON channel_accounts.channel_id = channels.id AND channel_accounts.deleted_at IS NULL").
 		Joins("JOIN channel_relay_account_links ON channel_relay_account_links.channel_account_id = channel_accounts.id").
 		Where("channels.id = ? AND channels.deleted_at IS NULL AND channel_relay_account_links.relay_station_id = ? AND channel_relay_account_links.relay_account_external_id = ?", channelID, stationID, accountID).
@@ -151,7 +152,7 @@ func (r *RelayStations) ChannelPelicanKeyForAccount(stationID uint, accountID in
 func (r *RelayStations) ChannelPelicanKeysForAccount(stationID uint, accountID int64) ([]ChannelPelicanKey, error) {
 	var keys []ChannelPelicanKey
 	err := r.db.Table("channels").
-		Select("DISTINCT channels.id AS channel_id, channels.pelican_key_cipher AS ciphertext").
+		Select("DISTINCT channels.id AS channel_id, channels.pelican_key_cipher AS ciphertext, channels.proxy_id").
 		Joins("JOIN channel_accounts ON channel_accounts.channel_id = channels.id AND channel_accounts.deleted_at IS NULL").
 		Joins("JOIN channel_relay_account_links ON channel_relay_account_links.channel_account_id = channel_accounts.id").
 		Where("channels.deleted_at IS NULL AND channel_relay_account_links.relay_station_id = ? AND channel_relay_account_links.relay_account_external_id = ?", stationID, accountID).

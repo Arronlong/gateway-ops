@@ -11,13 +11,15 @@ type PelicanKeySession struct {
 	AccessTokenCipher string `json:"-"`
 	CookieCipher      string `json:"-"`
 	UserID            string
+	ProxyID           *uint
 }
 
 func (r *RelayStations) PelicanKeySessions(ctx context.Context, stationID uint, accountID int64) ([]PelicanKeySession, error) {
 	var sessions []PelicanKeySession
 	err := r.db.WithContext(ctx).Raw(`SELECT channels.site_url, sessions.access_token_cipher, channels.type, sessions.cookie_cipher, sessions.user_id,
 	 CASE WHEN accounts.is_primary THEN channels.credential_mode ELSE accounts.credential_mode END AS credential_mode,
-	 CASE WHEN accounts.is_primary THEN channels.password_cipher ELSE accounts.password_cipher END AS credential_cipher
+	 CASE WHEN accounts.is_primary THEN channels.password_cipher ELSE accounts.password_cipher END AS credential_cipher,
+	 channels.proxy_id
 	 FROM channel_relay_account_links links
 	 JOIN channel_accounts accounts ON accounts.id = links.channel_account_id AND accounts.deleted_at IS NULL
 	 JOIN channels ON channels.id = accounts.channel_id AND channels.deleted_at IS NULL
