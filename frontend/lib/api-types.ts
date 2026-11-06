@@ -1058,6 +1058,7 @@ export interface RelayGroupView {
 export type PublicGroupMonitorStatus = "available" | "degraded" | "unavailable" | "idle" | "disabled" | "unknown"
 
 export interface PublicGroupMonitorCall {
+  output_tokens?: number
 	success: boolean
 	created_at: string
 	model?: string

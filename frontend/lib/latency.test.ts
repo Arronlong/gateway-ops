@@ -65,7 +65,7 @@ test("\u65f6\u95f4\u6876\u7684\u8bf7\u6c42\u7ed3\u679c\u4e0d\u4f1a\u56e0\u5ef6\u
   assert.deepEqual(latencyBucketTones({ ...bucket, success_rate: null }), [null, null, null, null])
 })
 
-test("\u65f6\u95f4\u6876\u540c\u65f6\u8003\u8651\u8c03\u7528\u5931\u8d25\u548c\u9ad8\u5ef6\u8fdf", () => {
+test("measured latency colors remain independent of request outcomes", () => {
   const bucket = {
     start: "2026-10-15T10:12:00Z",
     end: "2026-10-15T10:36:00Z",
@@ -79,6 +79,11 @@ test("\u65f6\u95f4\u6876\u540c\u65f6\u8003\u8651\u8c03\u7528\u5931\u8d25\u548c\u
     output_token_speed_p95: null,
   }
   assert.deepEqual(latencyBucketTones(bucket), ["good", "warn", "warn", "bad"])
-  assert.deepEqual(latencyBucketTones({ ...bucket, success_rate: 0 }), ["bad", "bad", "bad", "bad"])
+  assert.deepEqual(latencyBucketTones({ ...bucket, success_rate: 0 }), ["good", "warn", "warn", "bad"])
   assert.deepEqual(latencyBucketTones({ ...bucket, success_rate: null }), ["good", "warn", "warn", "bad"])
+})
+
+test("measured quadrants match tooltip latency colors at 99.7 percent success", () => {
+  const bucket = { start: "2026-11-06T03:48:00Z", end: "2026-11-06T06:34:00Z", request_count: 1033, success_rate: 0.997, first_token_p50_ms: 4600, first_token_p95_ms: 25000, duration_p50_ms: 13000, duration_p95_ms: 58000, output_token_speed_p50: null, output_token_speed_p95: null }
+  assert.deepEqual(latencyBucketTones(bucket), ["good", "warn", "good", "good"])
 })

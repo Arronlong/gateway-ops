@@ -28,8 +28,7 @@ export function latencyBucketTones(bucket: LatencyBucket): Array<LatencyTone | n
     : rate === 0 ? "bad" : rate < 1 ? "warn" : "good"
   const tone = (value: number | null | undefined, metric: LatencyMetric): LatencyTone | null => {
     const measured = value == null || !Number.isFinite(value) || value < 0 ? null : latencyTone(value, metric)
-    if (outcome === "bad" || measured === "bad") return "bad"
-    if (outcome === "warn" || measured === "warn") return "warn"
+    // 有延迟时与浮层使用同一阈值；缺失延迟才回退到请求结果。
     return measured ?? outcome
   }
   return [

@@ -69,6 +69,7 @@ type PublicGroupMonitorGroup struct {
 }
 
 type PublicGroupMonitorCall struct {
+	OutputTokens int64     `json:"output_tokens,omitempty"`
 	Success      bool      `json:"success"`
 	CreatedAt    time.Time `json:"created_at"`
 	Model        string    `json:"model,omitempty"`
@@ -77,14 +78,16 @@ type PublicGroupMonitorCall struct {
 }
 
 type PublicGroupMonitorLatencyBucket struct {
-	Start           time.Time `json:"start"`
-	End             time.Time `json:"end"`
-	FirstTokenP50MS *int64    `json:"first_token_p50_ms"`
-	FirstTokenP95MS *int64    `json:"first_token_p95_ms"`
-	DurationP50MS   *int64    `json:"duration_p50_ms"`
-	DurationP95MS   *int64    `json:"duration_p95_ms"`
-	SuccessRate     *float64  `json:"success_rate"`
-	RequestCount    int       `json:"request_count"`
+	OutputTokenSpeedP50 *float64  `json:"output_token_speed_p50"`
+	OutputTokenSpeedP95 *float64  `json:"output_token_speed_p95"`
+	Start               time.Time `json:"start"`
+	End                 time.Time `json:"end"`
+	FirstTokenP50MS     *int64    `json:"first_token_p50_ms"`
+	FirstTokenP95MS     *int64    `json:"first_token_p95_ms"`
+	DurationP50MS       *int64    `json:"duration_p50_ms"`
+	DurationP95MS       *int64    `json:"duration_p95_ms"`
+	SuccessRate         *float64  `json:"success_rate"`
+	RequestCount        int       `json:"request_count"`
 }
 
 type publicMonitorCacheKey struct {
@@ -128,6 +131,7 @@ type publicMonitorCacheEntry struct {
 }
 
 type monitorEvent struct {
+	outputTokens    int64
 	success         bool
 	createdAt       time.Time
 	model           string
@@ -605,7 +609,7 @@ func usageMonitorEvents(items []remoteUsage) []monitorEvent {
 			model = strings.TrimSpace(item.Model)
 		}
 		first, duration := item.FirstTokenMS, item.DurationMS
-		events = append(events, monitorEvent{success: true, createdAt: created, model: model, requestID: strings.TrimSpace(item.RequestID), clientRequestID: strings.TrimSpace(item.ClientRequestID), firstTokenMS: &first, durationMS: &duration})
+		events = append(events, monitorEvent{success: true, outputTokens: item.OutputTokens, createdAt: created, model: model, requestID: strings.TrimSpace(item.RequestID), clientRequestID: strings.TrimSpace(item.ClientRequestID), firstTokenMS: &first, durationMS: &duration})
 	}
 	return events
 }
@@ -821,7 +825,7 @@ func buildPublicGroupMonitorGroupForWindow(group storage.RelayGroup, usage, fail
 	}
 	calls := make([]PublicGroupMonitorCall, 0, len(recentEvents))
 	for _, event := range recentEvents {
-		calls = append(calls, PublicGroupMonitorCall{Success: event.success, CreatedAt: event.createdAt, Model: event.model, FirstTokenMS: event.firstTokenMS, DurationMS: event.durationMS})
+		calls = append(calls, PublicGroupMonitorCall{OutputTokens: event.outputTokens, Success: event.success, CreatedAt: event.createdAt, Model: event.model, FirstTokenMS: event.firstTokenMS, DurationMS: event.durationMS})
 	}
 	latencyBuckets := buildPublicGroupMonitorLatencyBuckets(events, since, until, groupMonitorLimit)
 	return PublicGroupMonitorGroup{ExternalID: group.ExternalID, Name: group.Name, Description: group.Description, Platform: group.Platform, RateMultiplier: group.RateMultiplier, Enabled: group.MonitorEnabled, GroupStatus: group.Status, Status: status, DataComplete: complete, UpdatedAt: now, LatestCallAt: latest, SuccessCount: successCount, FailureCount: failureCount, ConsecutiveFailures: consecutiveFailures, FailureSummary: failureSummary, Calls: calls, LatencyBuckets: latencyBuckets}
@@ -835,6 +839,7 @@ func buildPublicGroupMonitorLatencyBuckets(events []monitorEvent, since, until t
 	type bucketValues struct {
 		first    []int64
 		duration []int64
+		speeds   []float64
 		success  int
 		requests int
 	}
@@ -857,6 +862,11 @@ func buildPublicGroupMonitorLatencyBuckets(events []monitorEvent, since, until t
 		if event.durationMS != nil {
 			values[index].duration = append(values[index].duration, *event.durationMS)
 		}
+		if event.durationMS != nil {
+			if speed, ok := outputTokenSpeed(event.outputTokens, *event.durationMS); ok {
+				values[index].speeds = append(values[index].speeds, speed)
+			}
+		}
 		values[index].success += boolToInt(event.success)
 	}
 	buckets := make([]PublicGroupMonitorLatencyBucket, count)
@@ -877,6 +887,8 @@ func buildPublicGroupMonitorLatencyBuckets(events []monitorEvent, since, until t
 			p50, p95 := percentileInt64(values[index].duration, 0.50), percentileInt64(values[index].duration, 0.95)
 			bucket.DurationP50MS, bucket.DurationP95MS = &p50, &p95
 		}
+		bucket.OutputTokenSpeedP50 = percentileFloat64Ptr(values[index].speeds, 0.50)
+		bucket.OutputTokenSpeedP95 = percentileFloat64Ptr(values[index].speeds, 0.95)
 		buckets[index] = bucket
 	}
 	return buckets
