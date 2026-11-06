@@ -30,11 +30,30 @@ func (s *Service) refetchContinuousHistory(ctx context.Context, ch *storage.Chan
 	for i, account := range accounts {
 		job, readErr := s.prepareUsageAccount(ctx, ch, account)
 		if readErr == nil {
+			detail := UsageWindowIntegrity{AccountID: account.ID, AccountName: account.Username, Since: result.Since, Until: result.Until, Level: "history"}
+			initial := result.Accounts[i]
+			hadDifference := initial.UpstreamCount != nil && initial.LocalCount-initial.RetainedCount != *initial.UpstreamCount
+			updateDetail := func(status string) {
+				current := result.Accounts[i]
+				detail.Status = status
+				detail.LocalCount = current.LocalCount - current.RetainedCount
+				detail.CountsPending = current.UpstreamCount == nil
+				if current.UpstreamCount != nil {
+					detail.UpstreamCount = *current.UpstreamCount
+				}
+				report.recordWindow(detail)
+			}
+			updateDetail("checking")
+			emitUsageIntegrity(ctx, result, "locating", usageHistoryWindowMessage(detail))
 			hadCoverage := job.state.HistoryAvailableSince != nil
 			job.onHistoryPage = func(page, saved int) {
 				report.SavedPages++
 				report.SavedRows += saved
+				detail.Page = page
+				detail.SavedPages++
+				detail.SavedRows += saved
 				_ = job.refreshAvailableResult(result, i)
+				updateDetail("repairing")
 				emitUsageIntegrity(ctx, result, "repairing", fmt.Sprintf("%s: \u7b2c %d \u9875\u5df2\u6838\u5bf9\u5e76\u4fdd\u5b58\uff0c\u672c\u6b21\u5df2\u4fdd\u5b58 %d \u9875\u3001%d \u6761\u8c03\u7528", account.Username, page, report.SavedPages, report.SavedRows))
 			}
 			readErr = job.resumeHistory(ctx, until, 1000)
@@ -45,6 +64,14 @@ func (s *Service) refetchContinuousHistory(ctx context.Context, ch *storage.Chan
 				readErr = job.reconcileAvailableHistory(ctx, result, i, hadCoverage)
 			}
 			result.Accounts[i].HistoryVerifiedUntil = job.state.HistoryVerifiedUntil
+			status := "verified"
+			if hadDifference {
+				status = "repaired"
+			}
+			if readErr != nil {
+				status = "interrupted"
+			}
+			updateDetail(status)
 		}
 		if readErr != nil {
 			result.Accounts[i].Error = readErr.Error()

@@ -57,3 +57,11 @@ test("\u76f8\u540c\u5468\u533a\u95f4\u53ea\u5c55\u793a\u4e00\u6b21", () => {
   ]}}
   assert.equal(usageIntegrityWindows(result).length, 1)
 })
+
+test("Sub2API \u8fde\u7eed\u5386\u53f2\u6838\u5bf9\u7684\u533a\u95f4\u660e\u7ec6\u4e0e\u8fdb\u5ea6\u53ef\u663e\u793a", () => {
+  const detail = {account_id:1,account_name:"test",level:"history",status:"repairing",since:"0001-01-01T00:00:00Z",until:"2026-11-01T00:00:00Z",local_count:105,upstream_count:205,page:3,saved_pages:2,saved_rows:105}
+  const result:UsageIntegrity = {phase:"repairing",status:"mismatch",local_count:105,upstream_count:205,since:detail.since,until:detail.until,checked_at:"",accounts:[],audit:{checked_windows:1,skipped_windows:0,anomalous_days:0,repaired_days:0,windows:[detail]}}
+  assert.deepEqual(usageIntegrityWindows(result),[detail])
+  const completed={...detail,status:"repaired",local_count:205,saved_pages:3,saved_rows:205}
+  assert.deepEqual(usageIntegrityWindows({...result,audit:{...result.audit!,windows:[detail,completed]}}),[completed])
+})

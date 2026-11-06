@@ -22,7 +22,7 @@ export interface UsageIntegrity {
 		skipped_windows: number
 		anomalous_days: number
 		repaired_days: number
-		windows?: {since:string;until:string;level:string;status:string;local_count:number;upstream_count:number;total_capped?:boolean;account_id?:number;account_name?:string}[]
+		windows?: {since:string;until:string;level:string;status:string;local_count:number;upstream_count:number;total_capped?:boolean;counts_pending?:boolean;page?:number;saved_pages?:number;saved_rows?:number;account_id?:number;account_name?:string}[]
 	}
   status: "matched" | "mismatch" | "unavailable" | "pending" | "not_applicable"
   local_count: number

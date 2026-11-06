@@ -13,7 +13,8 @@ async function main() {
     const output=path.resolve('outputs/usage-history/ui')
     fs.mkdirSync(output,{recursive:true})
     const reports=[]
-    for (const [width,mode] of [[1440,'list'],[390,'gallery']]) {
+    for (const [width,mode,type] of [[1440,'list','newapi'],[390,'gallery','sub2api']]) {
+      channel.type=type
       const context=await browser.newContext({viewport:{width,height:1100},locale:'zh-CN',timezoneId:'Asia/Shanghai'})
       const page=await context.newPage(),errors=[]
       const requestedRanges=[]
@@ -74,6 +75,7 @@ async function main() {
           }
           repaired=true
           const fixed=retentionNext?retentionResult():{phase:'complete',status:'matched',local_count:15,upstream_count:15,since:'2026-10-01T00:00:00Z',until:'2026-11-01T00:00:00Z',checked_at:'2026-11-05T00:00:00Z',accounts:[{account_id:1,account_name:'test',local_count:15,upstream_count:15}],audit:{checked_windows:20,skipped_windows:14,anomalous_days:1,repaired_days:1,windows:[{account_id:1,account_name:'test',level:'day',status:'repaired',since:'2026-10-22T00:00:00Z',until:'2026-10-23T00:00:00Z',local_count:2,upstream_count:5}]}}
+          if(type==='sub2api'&&!retentionNext)fixed.audit.windows=[{account_id:1,account_name:'test',level:'history',status:'repaired',since:'0001-01-01T00:00:00Z',until:fixed.until,local_count:15,upstream_count:15,page:2,saved_pages:3,saved_rows:15}]
           if(pauseNext && pausePosts++===0){
             const paused={...fixed,phase:'paused',status:'mismatch',local_count:14,retry_status:429,retry_at:new Date(Date.now()+3500).toISOString(),error:'upstream HTTP 429',accounts:[{account_id:1,account_name:'test',local_count:14,upstream_count:15,history_verified_until:'2026-10-20T00:00:00+08:00'}],audit:{...fixed.audit,saved_pages:3,saved_rows:14}}
             const events=[{stage:'usage',message:'paused',data:{kind:'usage_integrity',phase:'paused',result:paused}},{stage:'error',ok:false,message:'upstream HTTP 429'}]
@@ -101,6 +103,13 @@ async function main() {
       await dialogSections(page)
       assert.equal(posts,1,'one explicit click must start exactly one repair')
       assert.equal(requestedRanges[0],'all','first request must use the range explicitly selected by the user')
+      if(type==='sub2api') {
+        const details=dialog.getByRole('region',{name:'\u5f02\u5e38\u533a\u95f4'})
+        await details.getByText(/\u5386\u53f2\u8303\u56f4\u6838\u5bf9/).waitFor()
+        await details.getByText(/\u7d2f\u8ba1\u4fdd\u5b58 3 \u9875\u300115 \u6761\u8c03\u7528/).waitFor()
+        await details.getByText('\u5df2\u4fee\u590d',{exact:true}).waitFor()
+        assert.equal((await details.innerText()).includes('0001'),false)
+      }
       await dialog.getByRole('button',{name:'\u81ea\u5b9a\u4e49',exact:true}).click()
       await dialog.locator('input[type="datetime-local"]').nth(0).fill('2026-10-01T00:00')
       await dialog.locator('input[type="datetime-local"]').nth(1).fill('2026-11-01T23:59')
@@ -156,7 +165,7 @@ async function main() {
       await page.waitForTimeout(100)
       assert.equal(posts,7,'reopening a completed dialog must wait for another manual start')
       assert.deepEqual(errors,[])
-      reports.push({mode,width,posts,errors,conflictPreserved:true,rateLimitResumed:true})
+      reports.push({mode,width,type,posts,errors,conflictPreserved:true,rateLimitResumed:true})
       await context.close()
     }
     fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(reports,null,2),'utf8')

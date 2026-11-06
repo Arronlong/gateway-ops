@@ -10,6 +10,10 @@ import (
 type usageHistoryWindow struct{ Since, Until time.Time }
 type usageWindowCounts struct{ Local, Remote int64 }
 type UsageWindowIntegrity struct {
+	CountsPending bool      `json:"counts_pending,omitempty"`
+	Page          int       `json:"page,omitempty"`
+	SavedPages    int       `json:"saved_pages,omitempty"`
+	SavedRows     int       `json:"saved_rows,omitempty"`
 	TotalCapped   bool      `json:"total_capped,omitempty"`
 	AccountID     uint      `json:"account_id,omitempty"`
 	AccountName   string    `json:"account_name,omitempty"`
@@ -30,6 +34,19 @@ type UsageHistoryReport struct {
 	RepairedDays   int                    `json:"repaired_days"`
 	Windows        []UsageWindowIntegrity `json:"windows,omitempty"`
 }
+
+func (report *UsageHistoryReport) recordWindow(item UsageWindowIntegrity) {
+	for index, previous := range report.Windows {
+		if previous.AccountID == item.AccountID && previous.Level == item.Level && previous.Since.Equal(item.Since) && previous.Until.Equal(item.Until) {
+			report.Windows[index] = item
+			return
+		}
+	}
+	if len(report.Windows) < 128 {
+		report.Windows = append(report.Windows, item)
+	}
+}
+
 type usageHistoryWalker struct {
 	AccountID           uint
 	AccountName         string
@@ -91,8 +108,8 @@ func (walker *usageHistoryWalker) walk(ctx context.Context, window usageHistoryW
 	}
 	item := UsageWindowIntegrity{AccountID: walker.AccountID, AccountName: walker.AccountName, Since: window.Since, Until: window.Until, Level: level, Status: "mismatch", LocalCount: counts.Local, UpstreamCount: counts.Remote}
 	record := func() {
-		if item.Status != "matched" && len(walker.Report.Windows) < 128 {
-			walker.Report.Windows = append(walker.Report.Windows, item)
+		if item.Status != "matched" {
+			walker.Report.recordWindow(item)
 		}
 		if walker.Progress != nil {
 			walker.Progress(item)
@@ -141,7 +158,10 @@ func (walker *usageHistoryWalker) walk(ctx context.Context, window usageHistoryW
 				record()
 				return counts, fmt.Errorf("upstream returned no calls for %s; retained existing history", key)
 			}
+			item.Status = "repairing"
+			record()
 			if err := walker.Repair(ctx, window, counts.Remote); err != nil {
+				item.Status = "mismatch"
 				record()
 				return counts, err
 			}

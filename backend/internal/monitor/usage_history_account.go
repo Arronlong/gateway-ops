@@ -90,7 +90,7 @@ func (job *usageHistoryAccount) walker(ctx context.Context, report *UsageHistory
 }
 
 func usageHistoryWindowMessage(item UsageWindowIntegrity) string {
-	level := map[string]string{"total": "\u603b\u6570", "month": "\u6708", "week": "\u5468", "day": "\u5929", "hour": "\u5c0f\u65f6", "remaining": "\u5269\u4f59\u533a\u95f4"}[item.Level]
+	level := map[string]string{"total": "\u603b\u6570", "month": "\u6708", "week": "\u5468", "day": "\u5929", "hour": "\u5c0f\u65f6", "remaining": "\u5269\u4f59\u533a\u95f4", "history": "\u5386\u53f2\u8303\u56f4"}[item.Level]
 	outcome := "\u53d1\u73b0\u6761\u6570\u5dee\u5f02\uff0c\u7ee7\u7eed\u5b9a\u4f4d"
 	if item.Status == "checking" {
 		outcome = "\u6b63\u5728\u6838\u5bf9"
@@ -106,6 +106,12 @@ func usageHistoryWindowMessage(item UsageWindowIntegrity) string {
 	}
 	if item.Status == "repairing" {
 		outcome = "\u5df2\u4fdd\u5b58\u5f53\u524d\u9875\uff0c\u7ee7\u7eed\u8bfb\u53d6"
+	}
+	if item.Status == "verified" {
+		outcome = "\u5386\u53f2\u8303\u56f4\u6838\u5bf9\u5b8c\u6210"
+	}
+	if item.Status == "interrupted" {
+		outcome = "\u5904\u7406\u672a\u5b8c\u6210\uff0c\u5df2\u4fdd\u7559\u6536\u5230\u7684\u6570\u636e\u548c\u65ad\u70b9"
 	}
 	since := item.Since.Format(time.RFC3339)
 	if item.Since.IsZero() {

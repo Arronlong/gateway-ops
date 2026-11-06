@@ -83,6 +83,13 @@ func (job *usageHistoryAccount) reconcileAvailableHistory(ctx context.Context, r
 	job.service.usageAudit.invalidate(job.channel.ID)
 	window := usageHistoryWindow{Since: *job.state.HistoryAvailableSince, Until: result.Until}
 	walker := job.walker(ctx, result.Audit, true)
+	walker.Progress = func(item UsageWindowIntegrity) {
+		phase := "locating"
+		if item.Status == "repairing" || item.Status == "repaired" {
+			phase = "repairing"
+		}
+		emitUsageIntegrity(ctx, result, phase, usageHistoryWindowMessage(item))
+	}
 	known := usageWindowCounts{Local: result.Accounts[index].LocalCount - result.Accounts[index].RetainedCount, Remote: remote}
 	if _, err := walker.walk(ctx, window, "total", &known); err != nil {
 		return err
