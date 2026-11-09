@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 // @ts-expect-error Node 的原生测试运行器需要显式扩展名。
-import { initialRuleForm, rulePayload, targetChanged } from "./rule-form.ts"
+import { initialRuleForm, metricChanged, rulePayload, targetChanged } from "./rule-form.ts"
 
 test("编辑保留订阅渠道、范围、停用状态和零恢复开关", () => {
   const form = initialRuleForm({ name: "消耗保护", target_type: "relay_user", metric: "user_spend", enabled: false, severity: "critical", channel_ids: [3], scope: '{"station_ids":[7],"target_ids":["42"]}', condition: '{"threshold":10,"window_seconds":900}', action: "{}", recovery: '{"enabled":false}', cooldown_seconds: 3600 } as never)
@@ -54,6 +54,30 @@ test("metrics without request counts ignore the minimum requests field", () => {
     const payload = rulePayload({ ...initialRuleForm(), name: metric, targetType: metric === "user_balance_low" ? "relay_user" : "channel", metric, minRequests: "invalid" })
     assert.equal(payload.condition.min_requests, 0)
   }
+})
+
+test("未使用场景默认三十天并复用通用处理", () => {
+  const base = { ...targetChanged(initialRuleForm(), "relay_user"), name: "未使用", action: "disable_user", autoRecovery: false, channels: [3] }
+  const form = metricChanged(base, "user_inactive")
+  assert.equal(form.threshold, "30")
+  assert.equal(form.action, "disable_user")
+  const payload = rulePayload({ ...form, minRequests: "invalid", window: "invalid" })
+  assert.equal(payload.condition.threshold, 30)
+  assert.equal(payload.condition.min_requests, 0)
+  assert.equal(payload.condition.window_seconds, 900)
+  assert.deepEqual(payload.action.actions, [{ kind: "disable_user", enabled: true }])
+  assert.deepEqual(payload.channel_ids, [3])
+  assert.equal(payload.recovery.enabled, false)
+  for (const threshold of ["0", "0.5", "3651", ""]) assert.throws(() => rulePayload({ ...form, threshold }))
+})
+
+test("未使用场景编辑保留天数与恢复阈值", () => {
+  const form = initialRuleForm({ name: "未使用", target_type: "relay_user", metric: "user_inactive", condition: '{"threshold":60,"recovery_threshold":7}', action: "{}", recovery: "{}" } as never)
+  const payload = rulePayload(form)
+  assert.equal(payload.condition.threshold, 60)
+  assert.equal(payload.condition.recovery_threshold, 7)
+  assert.equal(initialRuleForm({ metric: "user_inactive" } as never).threshold, "30")
+  assert.equal(metricChanged(form, "user_spend").threshold, "20")
 })
 
 test("incomplete scope filters cannot silently widen a rule", () => {

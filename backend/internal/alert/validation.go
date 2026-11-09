@@ -33,7 +33,7 @@ func validateRule(rule *storage.AlertRule) error {
 	target := TargetType(rule.TargetType)
 	validPair := (target == TargetChannel && (metric == MetricChannelRateChange || metric == MetricBalanceLow)) ||
 		(target == TargetRelayAccount && (metric == MetricAccountSpend || metric == MetricAccountStability || metric == MetricRateChange || metric == MetricBalanceLow)) ||
-		(target == TargetRelayUser && (metric == MetricUserSpend || metric == MetricUserMultiIP || metric == MetricUserBalanceLow))
+		(target == TargetRelayUser && (metric == MetricUserSpend || metric == MetricUserMultiIP || metric == MetricUserBalanceLow || metric == MetricUserInactive))
 	if !validPair {
 		return errors.New("指标与目标类型不匹配")
 	}
@@ -43,6 +43,19 @@ func validateRule(rule *storage.AlertRule) error {
 	var config ConditionConfig
 	if err := decodeConfig(rule.ConditionJSON, &config); err != nil {
 		return fmt.Errorf("判定配置无效: %w", err)
+	}
+	if metric == MetricUserInactive {
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal([]byte(rule.ConditionJSON), &fields); err != nil {
+			return err
+		}
+		if _, exists := fields["threshold"]; !exists {
+			config.Threshold = 30
+		}
+		if config.Threshold < 1 || config.Threshold > 3650 || math.Trunc(config.Threshold) != config.Threshold {
+			return errors.New("未使用天数必须为 1–3650 的整数")
+		}
+		config.MinRequests = 0
 	}
 	if config.WindowSeconds == 0 {
 		config.WindowSeconds = 900

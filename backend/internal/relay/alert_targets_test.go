@@ -90,6 +90,9 @@ func TestAlertUserSnapshotsSupportsSub2APIAndNewAPI(t *testing.T) {
 			if len(users) != 1 || users[0].ID != 42 || users[0].Balance != 3.5 || users[0].ObservedAt.IsZero() {
 				t.Fatalf("user snapshots = %+v", users)
 			}
+			if users[0].LastUsedAtSupported != (stationType == relayStationSub2API) {
+				t.Fatalf("LastUsedAtSupported = %t", users[0].LastUsedAtSupported)
+			}
 		})
 	}
 }

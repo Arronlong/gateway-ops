@@ -404,7 +404,14 @@ func (s *Service) sendEventNotification(ctx context.Context, rule storage.AlertR
 			actionSummary += fmt.Sprintf("%s：%s %s；", alertLabel(entry.Action), alertLabel(entry.Status), entry.ErrorMessage)
 		}
 	}
-	body := fmt.Sprintf("规则：%s\n等级：%s\n中转站：%d\n目标：%s（%s）\n指标：%s\n状态：%s\n实际值：%.4f\n阈值：%.4f\n窗口：%d 秒\n触发时间：%s\n%s\n自动化：%s\n事件：/alerts?event=%d（事件 #%d）", rule.Name, alertLabel(rule.Severity), target.StationID, target.TargetName, target.TargetExternalID, alertLabel(event.Metric), alertLabel(string(event.State)), valueOrZero(event.ActualValue), valueOrZero(event.ThresholdValue), config.WindowSeconds, event.StartedAt.In(time.FixedZone("Asia/Shanghai", 28800)).Format(time.RFC3339), event.Summary, actionSummary, event.ID, event.ID)
+	actual, threshold := fmt.Sprintf("%.4f", valueOrZero(event.ActualValue)), fmt.Sprintf("%.4f", valueOrZero(event.ThresholdValue))
+	window := fmt.Sprintf("%d 秒", config.WindowSeconds)
+	if event.Metric == string(MetricUserInactive) {
+		actual += " 天"
+		threshold += " 天"
+		window = "按最后使用时间判定"
+	}
+	body := fmt.Sprintf("规则：%s\n等级：%s\n中转站：%d\n目标：%s（%s）\n指标：%s\n状态：%s\n实际值：%s\n阈值：%s\n窗口：%s\n触发时间：%s\n%s\n自动化：%s\n事件：/alerts?event=%d（事件 #%d）", rule.Name, alertLabel(rule.Severity), target.StationID, target.TargetName, target.TargetExternalID, alertLabel(event.Metric), alertLabel(string(event.State)), actual, threshold, window, event.StartedAt.In(time.FixedZone("Asia/Shanghai", 28800)).Format(time.RFC3339), event.Summary, actionSummary, event.ID, event.ID)
 	if recovered {
 		subject = "已恢复：" + subject
 	}
@@ -416,7 +423,7 @@ func (s *Service) sendEventNotification(ctx context.Context, rule storage.AlertR
 }
 
 func alertLabel(value string) string {
-	labels := map[string]string{"info": "提示", "warning": "警告", "critical": "严重", "rate_change": "倍率变化", "channel_rate_change": "倍率变化", "balance_low": "渠道余额低", "account_spend": "账号消耗异常", "account_stability": "账号稳定性异常", "user_spend": "用户消耗异常", "user_multi_ip": "用户多 IP", "user_balance_low": "用户余额低", "firing": "触发中", "recovering": "恢复中", "recovered": "已恢复", "disable_account_scheduling": "自动停止账号调度", "enable_account_scheduling": "自动恢复账号调度", "disable_user": "自动停用用户", "enable_user": "自动启用用户", "prepared": "准备执行", "succeeded": "执行成功", "skipped": "已跳过", "failed": "执行失败", "uncertain": "结果待核对"}
+	labels := map[string]string{"info": "提示", "warning": "警告", "critical": "严重", "rate_change": "倍率变化", "channel_rate_change": "倍率变化", "balance_low": "渠道余额低", "account_spend": "账号消耗异常", "account_stability": "账号稳定性异常", "user_spend": "用户消耗异常", "user_multi_ip": "用户多 IP", "user_balance_low": "用户余额低", "user_inactive": "用户长期未使用", "firing": "触发中", "recovering": "恢复中", "recovered": "已恢复", "disable_account_scheduling": "自动停止账号调度", "enable_account_scheduling": "自动恢复账号调度", "disable_user": "自动停用用户", "enable_user": "自动启用用户", "prepared": "准备执行", "succeeded": "执行成功", "skipped": "已跳过", "failed": "执行失败", "uncertain": "结果待核对"}
 	if label, ok := labels[value]; ok {
 		return label
 	}

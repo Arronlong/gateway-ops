@@ -27,7 +27,7 @@ func (s *Service) AlertUserSnapshots(ctx context.Context, stationID uint) ([]sto
 		if err != nil {
 			return nil, err
 		}
-		return mapAlertUserSnapshots(users, time.Now().UTC()), nil
+		return mapAlertUserSnapshots(users, time.Now().UTC(), station.Type == relayStationSub2API || station.Type == ""), nil
 	})
 	if err != nil {
 		return nil, err
@@ -35,7 +35,7 @@ func (s *Service) AlertUserSnapshots(ctx context.Context, stationID uint) ([]sto
 	return value.([]storage.RelayUserSnapshot), nil
 }
 
-func mapAlertUserSnapshots(users []remoteUser, observedAt time.Time) []storage.RelayUserSnapshot {
+func mapAlertUserSnapshots(users []remoteUser, observedAt time.Time, lastUsedAtSupported bool) []storage.RelayUserSnapshot {
 	result := make([]storage.RelayUserSnapshot, 0, len(users))
 	for _, user := range users {
 		if user.ID <= 0 || user.DeletedAt != nil {
@@ -45,6 +45,7 @@ func mapAlertUserSnapshots(users []remoteUser, observedAt time.Time) []storage.R
 			ID: user.ID, Username: user.Username, Email: user.Email, Role: user.Role,
 			Balance: user.Balance, Concurrency: user.Concurrency, RPMLimit: user.RPMLimit,
 			Status: user.Status, LastUsedAt: user.LastUsedAt, CreatedAt: user.CreatedAt, ObservedAt: observedAt,
+			LastUsedAtSupported: lastUsedAtSupported,
 		})
 	}
 	return result

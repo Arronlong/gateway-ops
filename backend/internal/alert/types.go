@@ -25,6 +25,7 @@ const (
 	MetricUserSpend         MetricKind = "user_spend"
 	MetricUserMultiIP       MetricKind = "user_multi_ip"
 	MetricUserBalanceLow    MetricKind = "user_balance_low"
+	MetricUserInactive      MetricKind = "user_inactive"
 )
 
 type ActionKind string

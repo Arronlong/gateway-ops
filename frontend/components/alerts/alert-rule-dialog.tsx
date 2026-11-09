@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { actionLabels, initialRuleForm, metricLabels, rulePayload, targetChanged, type RuleForm } from "./rule-form"
+import { actionLabels, initialRuleForm, metricChanged, metricLabels, rulePayload, targetChanged, type RuleForm } from "./rule-form"
 
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
 type ScopeField = { field: string; label: string; type: "text" | "number" | "boolean" | "time" }
@@ -62,16 +62,17 @@ export function AlertRuleDialog({ open, onOpenChange, rule, onSaved }: { open: b
   const [scopePreview, setScopePreview] = useState<ScopePreview | null>(null)
   useEffect(() => { if (open) { setForm(initialRuleForm(rule)); setStep(0); setScopePreview(null) } }, [open, rule])
   const set = <K extends keyof RuleForm>(key: K, value: RuleForm[K]) => { setForm((current) => ({ ...current, [key]: value })); setScopePreview(null) }
-  const number = (key: keyof RuleForm, label: string, hint?: string) => <Field label={label} hint={hint}><Input aria-label={label} type="number" step="any" value={String(form[key])} onChange={(event) => set(key, event.target.value)} /></Field>
+  const number = (key: keyof RuleForm, label: string, hint?: string) => <Field label={label} hint={hint}><Input aria-label={label} type="number" step={key === "threshold" && inactive ? "1" : "any"} min={key === "threshold" && inactive ? 1 : undefined} max={key === "threshold" && inactive ? 3650 : undefined} value={String(form[key])} onChange={(event) => set(key, event.target.value)} /></Field>
   const spend = form.metric === "account_spend" || form.metric === "user_spend"
   const balance = form.metric === "balance_low" || form.metric === "user_balance_low"
+  const inactive = form.metric === "user_inactive"
   const rateChange = form.metric === "channel_rate_change" || form.metric === "rate_change"
   const disabling = form.action === "disable_account_scheduling" || form.action === "disable_user"
   const stationIDs = form.stationID === "all" ? [] : form.stationID.split(",")
   const allowedMetrics: Record<AlertTargetType, AlertMetric[]> = {
     channel: ["balance_low", "channel_rate_change"],
     relay_account: ["account_spend", "account_stability"],
-    relay_user: ["user_spend", "user_multi_ip", "user_balance_low"],
+    relay_user: ["user_spend", "user_multi_ip", "user_balance_low", "user_inactive"],
   }
   const metrics = [...allowedMetrics[form.targetType]]
   if (rule?.target_type === form.targetType && !metrics.includes(form.metric)) metrics.push(form.metric)
@@ -101,8 +102,7 @@ export function AlertRuleDialog({ open, onOpenChange, rule, onSaved }: { open: b
   }
 
   function changeMetric(metric: AlertMetric) {
-    const balanceMetric = metric === "balance_low" || metric === "user_balance_low"
-    setForm((current) => ({ ...current, metric, threshold: metric === "user_multi_ip" ? "3" : balanceMetric ? "10" : "20", baseline: "", recoveryThreshold: "", trustedIPs: "", minRequests: metric === "channel_rate_change" || metric === "rate_change" || balanceMetric ? "0" : current.minRequests }))
+    setForm((current) => metricChanged(current, metric))
     setScopePreview(null)
   }
 
@@ -146,12 +146,12 @@ export function AlertRuleDialog({ open, onOpenChange, rule, onSaved }: { open: b
     {step === 1 && <div className="space-y-4">
       {rateChange && <div className="grid gap-4 sm:grid-cols-2"><Field label="变化计算"><select aria-label="变化计算" className={selectClass} value={form.rateMode} onChange={(event) => set("rateMode", event.target.value)}><option value="percent">百分比变化（%）</option><option value="absolute">倍率绝对差值</option></select></Field><Field label="变化方向"><select aria-label="变化方向" className={selectClass} value={form.direction} onChange={(event) => set("direction", event.target.value)}><option value="any">上涨或下跌</option><option value="increase">仅上涨</option><option value="decrease">仅下跌</option></select></Field></div>}
       {form.metric === "account_stability" && <Field label="稳定性指标"><select aria-label="稳定性指标" className={selectClass} value={form.stabilityMetric} onChange={(event) => set("stabilityMetric", event.target.value)}><option value="error_rate">错误率（%）</option><option value="first_token_p95">首字耗时 P95（毫秒）</option><option value="duration_p95">请求耗时 P95（毫秒）</option><option value="consecutive_failures">连续请求失败数</option></select></Field>}
-      <div className="grid gap-4 sm:grid-cols-2">{number("threshold", balance ? "余额低于或等于" : form.metric === "user_multi_ip" ? "不同 IP 数达到" : spend ? "窗口累计消耗达到（美元）" : "指标达到阈值", balance ? (form.metric === "balance_low" ? "按渠道当前聚合余额判定；停止监控或余额快照过期时不参与判定。" : "按中转站用户最近一次有效余额快照判定。") : rateChange ? "在统计窗口内按渠道与模型计算倍率变化。" : undefined)}{form.metric !== "balance_low" && form.metric !== "user_balance_low" && number("window", form.metric === "channel_rate_change" ? "倍率变化窗口（秒）" : "统计窗口（秒）", "60–86400 秒。用量预警按滑动窗口聚合。")}</div>
+      <div className="grid gap-4 sm:grid-cols-2">{number("threshold", inactive ? "连续未使用天数" : balance ? "余额低于或等于" : form.metric === "user_multi_ip" ? "不同 IP 数达到" : spend ? "窗口累计消耗达到（美元）" : "指标达到阈值", inactive ? "1–3650 天；从未使用的用户从创建时间起计算，数据不足时不触发。" : balance ? (form.metric === "balance_low" ? "按渠道当前聚合余额判定；停止监控或余额快照过期时不参与判定。" : "按中转站用户最近一次有效余额快照判定。") : rateChange ? "在统计窗口内按渠道与模型计算倍率变化。" : undefined)}{!inactive && form.metric !== "balance_low" && form.metric !== "user_balance_low" && number("window", form.metric === "channel_rate_change" ? "倍率变化窗口（秒）" : "统计窗口（秒）", "60–86400 秒。用量预警按滑动窗口聚合。")}</div>
       <div className="grid gap-4 sm:grid-cols-2">{number("trigger", "触发命中次数", "默认连续 3 个有效评估周期命中。重复采样不会增加次数。")}{number("hitWindow", "最近评估次数 M（可选）", "留空表示连续命中；填写后按最近 M 次中命中 N 次触发。")}</div>
       {(spend || form.metric === "account_stability" || form.metric === "user_multi_ip") && number("minRequests", "窗口最小请求数", "请求数不足或采集数据不完整时标记数据不足，不触发自动化。")}
       {spend && number("baseline", "历史消耗倍数（可选）", "需同时超过金额阈值及最近 7 天同窗口平均消耗的指定倍数；至少 3 个完整历史窗口。")}
       {form.metric === "user_multi_ip" && <Field label="可信 IP / CIDR（可选）" hint="每行一个；计数时排除这些地址。"><textarea aria-label="可信 IP" className={`${selectClass} h-24 py-2`} value={form.trustedIPs} onChange={(event) => set("trustedIPs", event.target.value)} /></Field>}
-      <div className="grid gap-4 sm:grid-cols-2">{number("recoveryThreshold", "恢复阈值（可选）", balance ? "余额需高于触发阈值，以避免事件反复切换。" : "其他指标需低于触发阈值，以避免事件反复切换。")}{number("recoveryCount", "连续恢复次数", "连续达到正常或恢复阈值后关闭事件；自动化是否恢复远端状态由下一步决定。")}</div>
+      <div className="grid gap-4 sm:grid-cols-2">{number("recoveryThreshold", inactive ? "恢复阈值（天，可选）" : "恢复阈值（可选）", balance ? "余额需高于触发阈值，以避免事件反复切换。" : "其他指标需低于触发阈值，以避免事件反复切换。")}{number("recoveryCount", "连续恢复次数", "连续达到正常或恢复阈值后关闭事件；自动化是否恢复远端状态由下一步决定。")}</div>
     </div>}
     {step === 2 && <div className="space-y-4">
       {form.targetType === "channel" ? <p className="rounded-md bg-muted p-3 text-sm text-muted-foreground">渠道规则仅记录事件并发送通知，不会修改渠道状态。</p> : <><Field label="自动化处理"><select aria-label="自动化处理" className={selectClass} value={form.action} onChange={(event) => { set("action", event.target.value); set("autoRecovery", false) }}>{Object.entries(actionLabels).filter(([kind]) => kind === "none" || (form.targetType === "relay_account" ? kind.includes("account") : kind.includes("user"))).map(([kind, label]) => <option key={kind} value={kind}>{label}</option>)}</select></Field>
@@ -163,7 +163,7 @@ export function AlertRuleDialog({ open, onOpenChange, rule, onSaved }: { open: b
     </div>}
     {step === 3 && <div className="space-y-4">
       <Field label="预警级别"><select aria-label="预警级别" className={selectClass} value={form.severity} onChange={(event) => set("severity", event.target.value)}><option value="info">提示</option><option value="warning">警告</option><option value="critical">严重</option></select></Field>
-      <dl className="grid grid-cols-[100px_1fr] gap-3 rounded-md bg-muted p-4 text-sm"><dt className="text-muted-foreground">规则</dt><dd>{form.name || "尚未填写"}</dd><dt className="text-muted-foreground">对象</dt><dd>{form.targetType === "channel" ? "渠道" : form.targetType === "relay_account" ? "中转站账号" : "中转站用户"} · {form.targetType !== "channel" && (form.stationID === "all" ? "全部中转站" : `中转站 #${form.stationID}`)} · {form.targetIDs || scopeSummary}</dd><dt className="text-muted-foreground">指标</dt><dd>{form.metric === "balance_low" && form.targetType === "relay_account" ? "旧规则：关联渠道账号余额" : metricLabels[form.metric]}</dd><dt className="text-muted-foreground">判定</dt><dd>{form.window} 秒窗口，阈值 {form.threshold}；{form.hitWindow ? `最近 ${form.hitWindow} 次中命中 ${form.trigger} 次` : `连续命中 ${form.trigger} 次`}</dd><dt className="text-muted-foreground">告警级别</dt><dd>{form.severity === "critical" ? "严重" : form.severity === "info" ? "提示" : "警告"}</dd><dt className="text-muted-foreground">处理</dt><dd>{form.targetType === "channel" ? "仅记录与通知" : actionLabels[form.action]}{disabling ? form.autoRecovery ? "，满足条件后自动恢复" : "，无自动恢复" : ""}</dd><dt className="text-muted-foreground">通知</dt><dd>{form.channels.length} 个渠道，冷却 {form.cooldown} 分钟</dd></dl>
+      <dl className="grid grid-cols-[100px_1fr] gap-3 rounded-md bg-muted p-4 text-sm"><dt className="text-muted-foreground">规则</dt><dd>{form.name || "尚未填写"}</dd><dt className="text-muted-foreground">对象</dt><dd>{form.targetType === "channel" ? "渠道" : form.targetType === "relay_account" ? "中转站账号" : "中转站用户"} · {form.targetType !== "channel" && (form.stationID === "all" ? "全部中转站" : `中转站 #${form.stationID}`)} · {form.targetIDs || scopeSummary}</dd><dt className="text-muted-foreground">指标</dt><dd>{form.metric === "balance_low" && form.targetType === "relay_account" ? "旧规则：关联渠道账号余额" : metricLabels[form.metric]}</dd><dt className="text-muted-foreground">判定</dt><dd>{inactive ? `连续未使用达到 ${form.threshold} 天` : `${form.window} 秒窗口，阈值 ${form.threshold}`}；{form.hitWindow ? `最近 ${form.hitWindow} 次中命中 ${form.trigger} 次` : `连续命中 ${form.trigger} 次`}</dd><dt className="text-muted-foreground">告警级别</dt><dd>{form.severity === "critical" ? "严重" : form.severity === "info" ? "提示" : "警告"}</dd><dt className="text-muted-foreground">处理</dt><dd>{form.targetType === "channel" ? "仅记录与通知" : actionLabels[form.action]}{disabling ? form.autoRecovery ? "，满足条件后自动恢复" : "，无自动恢复" : ""}</dd><dt className="text-muted-foreground">通知</dt><dd>{form.channels.length} 个渠道，冷却 {form.cooldown} 分钟</dd></dl>
       <Field label="备注"><Input aria-label="备注" maxLength={1000} value={form.remark} onChange={(event) => set("remark", event.target.value)} /></Field>
       <label className="flex items-center justify-between text-sm">保存后启用规则<Switch checked={form.enabled} onCheckedChange={(value) => set("enabled", value)} /></label>
       {rule && <p className="text-xs text-muted-foreground">存在未恢复事件时，仅允许修改名称、通知渠道、冷却、备注与启用状态。修改条件或动作前需先处理活动事件。</p>}

@@ -42,6 +42,8 @@ func EvaluateCondition(rule RuleSpec, observation Observation, baseline *Baselin
 		return thresholdResult(rule, observation.Value, "渠道余额")
 	case MetricUserBalanceLow:
 		return thresholdResult(rule, observation.Value, "用户余额")
+	case MetricUserInactive:
+		return thresholdResult(rule, observation.Value, "连续未使用天数")
 	case MetricAccountStability:
 		return thresholdResult(rule, observation.Value, "稳定性指标")
 	case MetricAccountSpend, MetricUserSpend:

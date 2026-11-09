@@ -84,6 +84,7 @@ func (c *Collector) Collect(ctx context.Context, rule storage.AlertRule, config 
 		targets[strings.TrimSpace(id)] = struct{}{}
 	}
 	metric := MetricKind(rule.Metric)
+	snapshotMetric := metric == MetricUserBalanceLow || metric == MetricUserInactive
 	spec := config.RuleSpec(metric)
 	result := make([]TargetObservation, 0)
 	activeTargetsByStation := map[uint]map[string]struct{}{}
@@ -115,13 +116,20 @@ func (c *Collector) Collect(ctx context.Context, rule storage.AlertRule, config 
 			if err != nil {
 				return nil, err
 			}
+			// 新快照在请求完成后计时，按采集完成时刻校验，避免误判为未来数据。
+			snapshotNow := now
+			if metric == MetricUserInactive {
+				if collectedAt := time.Now().UTC(); collectedAt.After(snapshotNow) {
+					snapshotNow = collectedAt
+				}
+			}
 			states, err := c.alerts.ListRuleStates(rule.ID)
 			if err != nil {
 				return nil, err
 			}
 			activeTargets := activeAlertTargetIDs(states, TargetRelayUser, stationID)
 			known := map[string]bool{}
-			if metric == MetricUserBalanceLow || len(scope.Filters) > 0 {
+			if snapshotMetric || len(scope.Filters) > 0 {
 				for _, user := range users {
 					key := strconv.FormatInt(user.ID, 10)
 					if len(targets) > 0 {
@@ -138,7 +146,7 @@ func (c *Collector) Collect(ctx context.Context, rule storage.AlertRule, config 
 			for key := range activeTargets {
 				known[key] = true
 			}
-			if metric != MetricUserBalanceLow {
+			if !snapshotMetric {
 				keys, err := c.stations.ListUsageUserKeys(stationID, now.Add(-spec.Window))
 				if err != nil {
 					return nil, err
@@ -165,15 +173,18 @@ func (c *Collector) Collect(ctx context.Context, rule storage.AlertRule, config 
 				if len(targets) > 0 && !hasScopeTarget(targets, key) {
 					continue
 				}
-				if len(scope.Filters) > 0 || metric == MetricUserBalanceLow {
+				if len(scope.Filters) > 0 || snapshotMetric {
 					user, exists := userByID[key]
 					if !exists || (!scopeMatches(targetType, scope, userScopeAttributes(user, *station)) && !hasScopeTarget(activeTargets, key)) {
 						continue
 					}
-					if metric == MetricUserBalanceLow {
+					if snapshotMetric {
 						observation := Observation{ObservedAt: user.ObservedAt.UTC(), Value: user.Balance, Valid: !user.ObservedAt.IsZero() && fresh(user.ObservedAt, now, 3*time.Minute)}
 						if !observation.Valid {
 							observation.Reason = "用户余额快照缺失或已过期"
+						}
+						if metric == MetricUserInactive {
+							observation = userInactivityObservation(user, snapshotNow)
 						}
 						result = append(result, TargetObservation{StationID: stationID, TargetExternalID: key, TargetName: userDisplayName(user), Metric: metric, Observation: observation})
 						continue
@@ -187,7 +198,7 @@ func (c *Collector) Collect(ctx context.Context, rule storage.AlertRule, config 
 			}
 			continue
 		}
-		if targetType == TargetRelayUser && (metric == MetricUserBalanceLow || len(scope.Filters) > 0) {
+		if targetType == TargetRelayUser && (snapshotMetric || len(scope.Filters) > 0) {
 			return nil, fmt.Errorf("user scope filtering requires a station adapter")
 		}
 		if targetType == TargetRelayUser {
