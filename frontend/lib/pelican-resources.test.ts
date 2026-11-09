@@ -6,12 +6,12 @@ import { PelicanResourcePool } from "./pelican-resources.ts"
 const turn = () => new Promise(resolve => setTimeout(resolve, 0))
 
 test("\u4e0b\u8f7d\u4e0e\u751f\u6210\u72ec\u7acb\u6392\u961f\uff0c\u751f\u6210\u5360\u6ee1\u65f6\u4e0b\u8f7d\u4ecd\u53ef\u7ee7\u7eed", async () => {
-  const downloads = new PelicanResourcePool<string>({maxBytes:0,maxEntries:0,maxConcurrent:8,size:value=>value.length})
-  const renders = new PelicanResourcePool<string>({maxBytes:0,maxEntries:0,maxConcurrent:3,size:value=>value.length})
+  const downloads = new PelicanResourcePool<string>({maxBytes:0,maxEntries:0,maxConcurrent:Infinity,size:value=>value.length})
+  const renders = new PelicanResourcePool<string>({maxBytes:0,maxEntries:0,maxConcurrent:10,size:value=>value.length})
   const signal = new AbortController().signal
   const downloadFinishes: Array<() => void> = [], renderFinishes: Array<() => void> = []
   let activeDownloads=0, downloaded=0, rendered=0
-  const tasks = Array.from({length:12}, async (_,index) => {
+  const tasks = Array.from({length:24}, async (_,index) => {
     const html = await downloads.load(String(index),signal,()=>new Promise<string>(resolve=>{
       activeDownloads++
       downloadFinishes.push(()=>{activeDownloads--;downloaded++;resolve(String(index))})
@@ -21,22 +21,20 @@ test("\u4e0b\u8f7d\u4e0e\u751f\u6210\u72ec\u7acb\u6392\u961f\uff0c\u751f\u6210\u
     }))
   })
   await turn()
-  assert.equal(activeDownloads,8)
+  assert.equal(activeDownloads,24)
   downloadFinishes.splice(0).forEach(finish=>finish())
   await turn()
-  assert.equal(activeDownloads,4)
-  assert.equal(renderFinishes.length,3)
-  downloadFinishes.splice(0).forEach(finish=>finish())
-  await turn()
-  assert.equal(downloaded,12)
+  assert.equal(activeDownloads,0)
+  assert.equal(renderFinishes.length,10)
+  assert.equal(downloaded,24)
   assert.equal(rendered,0)
   assert.equal(renders.cachedEntries,0)
-  for(let batch=0;batch<4;batch++) {
-    assert.equal(renderFinishes.length,3)
+  for(const count of [10,10,4]) {
+    assert.equal(renderFinishes.length,count)
     renderFinishes.splice(0).forEach(finish=>finish())
     await turn()
   }
-  assert.deepEqual(await Promise.all(tasks),Array.from({length:12},(_,index)=>String(index)))
+  assert.deepEqual(await Promise.all(tasks),Array.from({length:24},(_,index)=>String(index)))
   assert.equal(downloads.cachedEntries,0)
 })
 

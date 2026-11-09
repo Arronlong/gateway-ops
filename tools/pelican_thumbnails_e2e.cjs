@@ -16,15 +16,16 @@ async function main() {
   ]
   const results = artwork.map((html, index) => ({ id:index+1, channel_id:1, relay_station_id:0, account_external_id:0, account_name:'test', model:'model-'+index, reasoning_effort:'medium', trigger:'manual', status:'success', error:'', duration_ms:1000, started_at:'2026-11-04T00:00:00Z', finished_at:'2026-11-04T00:01:00Z' }))
   const saved = new Map(), reports = []
+  const parallelCount = 24
   const built = process.env.PELICAN_TEST_BUILT === '1'
   const output = path.resolve(built ? 'outputs/pelican-thumbnails-built' : 'outputs/pelican-thumbnails')
   fs.mkdirSync(output, { recursive:true })
   for (const run of ['parallel-downloads', 'first', 'new-browser', 'mobile', 'save-failure']) {
     const parallel = run === 'parallel-downloads'
     if (run === 'first') saved.clear()
-    const runResults = parallel ? Array.from({length:12}, (_, index) => ({...results[index%4],id:index+1,channel_id:Math.floor(index/4)+1})) : results
+    const runResults = parallel ? Array.from({length:parallelCount}, (_, index) => ({...results[index%4],id:index+1,channel_id:Math.floor(index/4)+1})) : results
     if (run === 'save-failure') saved.delete(1)
-    const context = await browser.newContext({ viewport:{width:run==='mobile'?390:1440,height:parallel?2200:1100}, locale:'zh-CN' })
+    const context = await browser.newContext({ viewport:{width:run==='mobile'?390:1440,height:parallel?3600:1100}, locale:'zh-CN' })
     const page = await context.newPage(), errors = []
     const scripts = []
     page.on('request', request => {if (request.resourceType()==='script') scripts.push(new URL(request.url()).pathname)})
@@ -77,22 +78,22 @@ async function main() {
       else if(p==='/api/sync-settings') data={channel_enabled:false}
       else if(p.endsWith('/branding')) data={name:'GatewayOps'}
       else if(p==='/api/version') data={version:'test',revision:'unknown',channel:'development'}
-      else if(p==='/api/channels/pelican') data={groups:Array.from({length:parallel?3:1},(_,index)=>({channel:{id:index+1,name:'Thumbnail performance '+(index+1),type:'newapi',site_url:'https://example.invalid',pelican_key_configured:false},targets:[],results:runResults.filter(result=>result.channel_id===index+1)}))}
+      else if(p==='/api/channels/pelican') data={groups:Array.from({length:parallel?parallelCount/4:1},(_,index)=>({channel:{id:index+1,name:'Thumbnail performance '+(index+1),type:'newapi',site_url:'https://example.invalid',pelican_key_configured:false},targets:[],results:runResults.filter(result=>result.channel_id===index+1)}))}
       else if(p==='/api/relay-stations/pelican-sources') data={groups:[]}
       await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data})})
     })
     await page.goto('http://localhost:3010/pelican')
-    const count = parallel?12:run==='mobile'?1:4
+    const count = parallel?parallelCount:run==='mobile'?1:4
     await page.waitForFunction(count => document.querySelectorAll('img[src^="blob:"]').length>=count,count,{timeout:18000})
     const stats = await page.evaluate(() => window.__thumbnailStats)
     assert.ok(stats.images.every(image=>image.width===448 && image.height===336))
-    assert.ok(stats.peakRenderers<=3,'thumbnail generation must keep a bounded concurrency')
+    assert.ok(stats.peakRenderers<=10,'thumbnail generation must keep a bounded concurrency')
     if (parallel) {
-      assert.equal(peakDownloads,8,'HTML downloads must use eight independent slots')
-      assert.equal(downloadsBeforeFirstImage,12,'queued rendering must not block later HTML downloads')
-      assert.equal(stats.peakRenderers,3)
-      assert.equal(bodyRequests,12)
-      assert.equal(uploads,12)
+      assert.equal(peakDownloads,parallelCount,'visible HTML downloads must start without an application concurrency limit')
+      assert.equal(downloadsBeforeFirstImage,parallelCount,'queued rendering must not block later HTML downloads')
+      assert.equal(stats.peakRenderers,10)
+      assert.equal(bodyRequests,parallelCount)
+      assert.equal(uploads,parallelCount)
     }
     else if (run==='first') {assert.ok(stats.peakRenderers>=2,'visible artworks must generate thumbnails concurrently');assert.equal(bodyRequests,4);assert.equal(uploads,4);assert.equal(saved.size,4)}
     else if (run === 'save-failure') {
