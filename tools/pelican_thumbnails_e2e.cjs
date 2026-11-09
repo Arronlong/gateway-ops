@@ -76,8 +76,8 @@ async function main() {
     await page.waitForFunction(count => document.querySelectorAll('img[src^="blob:"]').length>=count,count,{timeout:18000})
     const stats = await page.evaluate(() => window.__thumbnailStats)
     assert.ok(stats.images.every(image=>image.width===448 && image.height===336))
-    assert.ok(stats.peakRenderers<=1)
-    if (run==='first') {assert.equal(bodyRequests,4);assert.equal(uploads,4);assert.equal(saved.size,4)}
+    assert.ok(stats.peakRenderers<=3,'thumbnail generation must keep a bounded concurrency')
+    if (run==='first') {assert.ok(stats.peakRenderers>=2,'visible artworks must generate thumbnails concurrently');assert.equal(bodyRequests,4);assert.equal(uploads,4);assert.equal(saved.size,4)}
     else if (run === 'save-failure') {
       assert.equal(bodyRequests,1,'retry must reuse the generated JPEG without loading artwork HTML again')
       assert.equal(uploads,2,'transient save failures must retry once')

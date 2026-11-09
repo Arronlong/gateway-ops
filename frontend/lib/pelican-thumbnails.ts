@@ -5,7 +5,7 @@ export const pelicanThumbnailPool = new PelicanResourcePool<{image:Blob;saveErro
   maxBytes: 8 * 1024 * 1024, maxEntries: 96, maxConcurrent: 4, timeoutMs: 20000, size: value => value.image.size,
 })
 
-export const pelicanRenderPool = new PelicanResourcePool<Blob>({maxBytes: 0, maxEntries: 0, timeoutMs:15000, size: blob => blob.size})
+export const pelicanRenderPool = new PelicanResourcePool<Blob>({maxBytes: 0, maxEntries: 0, maxConcurrent: 3, timeoutMs:15000, size: blob => blob.size})
 
 let owners = 0, previews = 0
 const activityListeners = new Set<() => void>()
