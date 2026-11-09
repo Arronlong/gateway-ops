@@ -4,6 +4,7 @@ import { toast } from "sonner"
 import { Link } from "react-router-dom"
 import { Button } from "@/components/ui/button"
 import { ButtonGroup } from "@/components/ui/button-group"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -19,6 +20,7 @@ import { observePelicanThumbnail, pelicanThumbnailActive, pelicanThumbnailPool, 
 import { loadPelicanThumbnail } from "@/lib/pelican-thumbnail-store"
 import { usePelicanGallery, useSystemSettings, type QueryState } from "@/lib/queries"
 import { PelicanArtwork } from "./pelican-artwork"
+import { usePelicanResultSelection } from "./pelican-selection"
 
 const timeLabel=(value:string)=>new Date(value).toLocaleString("zh-CN",{month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false,timeZone:"Asia/Shanghai"})
 const running=(config?:PelicanConfig)=>Boolean(config?.lease_until&&Date.parse(config.lease_until)>Date.now())
@@ -224,6 +226,7 @@ export function PelicanResultsStrip({limit,allowDelete=false,grid=limit===3}:{li
 }
 function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanResult;grid?:boolean;allowDelete?:boolean}){
  const context=usePelican(),ref=useRef<HTMLDivElement>(null),[visible,setVisible]=useState(false)
+ const selection=usePelicanResultSelection(result,ref)
  const active=useSyncExternalStore(subscribePelicanActivity,pelicanThumbnailActive)
  const [image,setImage]=useState(""),[error,setError]=useState(""),[saveError,setSaveError]=useState("")
  const groupLabels=pelicanGroupLabels(result)
@@ -254,8 +257,10 @@ function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanR
   },120)
   return()=>{disposed=true;window.clearTimeout(timer);release();if(url)URL.revokeObjectURL(url)}
  },[visible,active,result.id,result.channel_id,result.relay_station_id,result.account_external_id,result.group_external_id,result.finished_at,result.status,context.readOnly])
- return <div ref={ref} className={`relative ${grid?"w-full min-w-0":"w-56 shrink-0 snap-start"} overflow-hidden rounded-lg border border-border bg-card`}>
-  {allowDelete&&result.status!=="running"?<PelicanDeleteButton result={result} compact/>:null}
+ if(selection?.removed)return null
+ return <div ref={ref} data-pelican-artwork={selection?pelicanResultPath(result):undefined} className={`relative ${grid?"w-full min-w-0":"w-56 shrink-0 snap-start"} overflow-hidden rounded-lg border ${selection?.checked?"border-brand ring-2 ring-brand/30":"border-border"} bg-card`}>
+  {selection&&result.status!=="running"?<Checkbox className="absolute left-2 top-2 z-20 size-5 bg-card/95 shadow-sm" aria-label={`选择测智作品 ${result.id}`} checked={selection.checked} disabled={selection.busy} onCheckedChange={selection.toggle}/>:null}
+  {allowDelete&&result.status!=="running"?<PelicanDeleteButton result={result} compact disabled={selection?.busy}/>:null}
   <div className="aspect-[4/3] overflow-hidden bg-muted/30">
    {image?<img src={image} alt={`测智作品 ${result.id} 静态预览`} width={448} height={336} decoding="async" className="h-full w-full object-contain" onError={()=>{setImage("");setError("预览不可用，点击查看原图")}}/>:null}
    {!image||error?<p className="flex h-full items-center justify-center p-3 text-center text-xs text-muted-foreground">{result.status==="running"?"生成中…":result.status==="failed"?"本次生成失败":error||"点击作品可交互播放"}</p>:null}
@@ -270,14 +275,14 @@ function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanR
     <span className="shrink-0 whitespace-nowrap tabular-nums" title="生成时 Key 对应的分组倍率">{groupLabels.rate}</span>
    </p>:null}
   </div>
-  <button type="button" className="absolute inset-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={`查看测智作品 ${result.id}`} disabled={result.status==="running"} onClick={()=>context.open(result)}/>
+  <button type="button" data-pelican-preview className="absolute inset-0 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring" aria-label={`查看测智作品 ${result.id}`} disabled={result.status==="running"} onClick={()=>context.open(result)}/>
  </div>
 }
 
-function PelicanDeleteButton({result,compact=false}:{result:PelicanResult;compact?:boolean}){
+function PelicanDeleteButton({result,compact=false,disabled=false}:{result:PelicanResult;compact?:boolean;disabled?:boolean}){
  const context=usePelican()
  const busy=context.deletingID===result.id
- return <Button type="button" size={compact?"icon":"sm"} variant="outline" className={compact?"absolute right-2 top-2 z-10 size-8 bg-card/95 text-danger shadow-sm hover:text-danger":"gap-1 text-danger hover:text-danger"} aria-label={`\u5220\u9664\u6d4b\u667a\u4f5c\u54c1 ${result.id}`} disabled={context.deletingID!==null} onClick={event=>{event.stopPropagation();void context.remove(result)}}><Trash2 className="size-3.5"/>{compact?null:busy?"\u5220\u9664\u4e2d\u2026":"\u5220\u9664\u4f5c\u54c1"}</Button>
+ return <Button type="button" size={compact?"icon":"sm"} variant="outline" className={compact?"absolute right-2 top-2 z-10 size-8 bg-card/95 text-danger shadow-sm hover:text-danger":"gap-1 text-danger hover:text-danger"} aria-label={`\u5220\u9664\u6d4b\u667a\u4f5c\u54c1 ${result.id}`} disabled={disabled||context.deletingID!==null} onClick={event=>{event.stopPropagation();void context.remove(result)}}><Trash2 className="size-3.5"/>{compact?null:busy?"\u5220\u9664\u4e2d\u2026":"\u5220\u9664\u4f5c\u54c1"}</Button>
 }
 
 

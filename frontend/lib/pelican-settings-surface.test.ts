@@ -11,7 +11,7 @@ test("作品库保留删除，所有位置移除重绘，弹窗保留动画重�
   const thumbnail = panel.slice(panel.indexOf("function PelicanThumbnail("), panel.indexOf("function PelicanDeleteButton("))
   const strip = panel.slice(panel.indexOf("export function PelicanResultsStrip("), panel.indexOf("function PelicanThumbnail("))
   const preview = panel.slice(panel.indexOf("function PelicanPreview("))
-  assert.match(thumbnail, /allowDelete&&result.status!=="running"\?\s*<PelicanDeleteButton result=\{result\} compact\/>/)
+  assert.match(thumbnail, /allowDelete&&result.status!=="running"\?\s*<PelicanDeleteButton result=\{result\} compact disabled=\{selection\?\.busy\}\/>/)
   assert.match(thumbnail, /className="absolute inset-0[^"]*" aria-label=\{/)
   assert.match(strip, /allowDelete=\{allowDelete\}/)
   assert.match(strip, /limit:number;allowDelete\?\:boolean;grid\?\:boolean/)

@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ChannelPelicanPanel } from "@/components/monitor/channel-pelican-panel"
 import { PelicanTargetPanel } from "@/components/relay/pelican-target-panel"
+import { PelicanSelection } from "@/components/relay/pelican-selection"
 import { useChannelPelicanGallery, usePelicanSources, useSystemSettings } from "@/lib/queries"
 import { ConfigurationLoading } from "@/components/ui/configuration-loading"
 
@@ -80,12 +81,14 @@ function PelicanLibraryContent({historyCount}:{historyCount:number}) {
       {sourcesQuery.loading&&!sourcesQuery.data?<p role="status" className="text-xs text-muted-foreground">正在读取号池及分组作品…</p>:null}
       {sourcesQuery.error?<p role="alert" className="text-xs text-danger">读取号池及分组作品失败：{sourcesQuery.error}</p>:null}
       <div className="min-w-0 space-y-5" aria-label="按渠道分组的测智结果">
+        <PelicanSelection onRefresh={()=>Promise.all([query.refetch(),sourcesQuery.refetch()])}>
         {groups.map(group=><section key={group.channel.id} data-pelican-channel={group.channel.id} className="min-w-0 rounded-xl border border-border bg-card p-3 sm:p-4">
           <ChannelPelicanPanel channel={group.channel} query={query} limit={historyCount} showMore={false} status={status} stationID={stationID} compact/>
         </section>)}
         {sourceGroups.map(group=><section key={group.id} data-pelican-source={group.id} className="min-w-0 rounded-xl border border-border bg-card p-3 sm:p-4">
           <PelicanTargetPanel stationID={group.station_id} externalID={group.external_id} name={`${group.station_name} · ${group.name}`} siteURL={group.site_url} scope={group.kind==="relay_group"?"group":"account"} compact status={status} query={{...sourcesQuery,data:{configs:[{...group.config,account_external_id:group.external_id}],results:group.results}}}/>
         </section>)}
+        </PelicanSelection>
       </div>
       {!query.loading&&!sourcesQuery.loading&&!query.error&&!sourcesQuery.error&&!groups.length&&!sourceGroups.length?<p className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground">没有符合条件的测智记录。</p>:null}
     </section>
