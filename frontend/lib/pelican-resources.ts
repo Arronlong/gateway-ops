@@ -18,6 +18,21 @@ export class PelicanResourcePool<T> {
   get cachedBytes() {return this.bytes}
   get cachedEntries() {return this.cache.size}
 
+  async load(key: string, signal: AbortSignal, load: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    signal.throwIfAborted()
+    const lease = this.acquire(key, load)
+    let abort!: () => void
+    const aborted = new Promise<never>((_resolve, reject) => {
+      abort = () => {lease.release(); reject(signal.reason)}
+      signal.addEventListener("abort", abort, {once:true})
+    })
+    try {
+      const value = await Promise.race([lease.promise, aborted])
+      signal.throwIfAborted()
+      return value
+    } finally {signal.removeEventListener("abort", abort); lease.release()}
+  }
+
   acquire(key: string, load: (signal: AbortSignal) => Promise<T>): Lease<T> {
     const cached = this.cache.get(key)
     if (cached) {

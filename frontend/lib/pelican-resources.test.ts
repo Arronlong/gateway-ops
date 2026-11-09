@@ -5,6 +5,77 @@ import { PelicanResourcePool } from "./pelican-resources.ts"
 
 const turn = () => new Promise(resolve => setTimeout(resolve, 0))
 
+test("\u4e0b\u8f7d\u4e0e\u751f\u6210\u72ec\u7acb\u6392\u961f\uff0c\u751f\u6210\u5360\u6ee1\u65f6\u4e0b\u8f7d\u4ecd\u53ef\u7ee7\u7eed", async () => {
+  const downloads = new PelicanResourcePool<string>({maxBytes:0,maxEntries:0,maxConcurrent:8,size:value=>value.length})
+  const renders = new PelicanResourcePool<string>({maxBytes:0,maxEntries:0,maxConcurrent:3,size:value=>value.length})
+  const signal = new AbortController().signal
+  const downloadFinishes: Array<() => void> = [], renderFinishes: Array<() => void> = []
+  let activeDownloads=0, downloaded=0, rendered=0
+  const tasks = Array.from({length:12}, async (_,index) => {
+    const html = await downloads.load(String(index),signal,()=>new Promise<string>(resolve=>{
+      activeDownloads++
+      downloadFinishes.push(()=>{activeDownloads--;downloaded++;resolve(String(index))})
+    }))
+    return renders.load(String(index),signal,()=>new Promise<string>(resolve=>{
+      renderFinishes.push(()=>{rendered++;resolve(html)})
+    }))
+  })
+  await turn()
+  assert.equal(activeDownloads,8)
+  downloadFinishes.splice(0).forEach(finish=>finish())
+  await turn()
+  assert.equal(activeDownloads,4)
+  assert.equal(renderFinishes.length,3)
+  downloadFinishes.splice(0).forEach(finish=>finish())
+  await turn()
+  assert.equal(downloaded,12)
+  assert.equal(rendered,0)
+  assert.equal(renders.cachedEntries,0)
+  for(let batch=0;batch<4;batch++) {
+    assert.equal(renderFinishes.length,3)
+    renderFinishes.splice(0).forEach(finish=>finish())
+    await turn()
+  }
+  assert.deepEqual(await Promise.all(tasks),Array.from({length:12},(_,index)=>String(index)))
+  assert.equal(downloads.cachedEntries,0)
+})
+
+test("\u53d6\u6d88\u4e00\u4e2a\u5171\u4eab\u4e0b\u8f7d\u65f6\u7acb\u5373\u7ed3\u675f\uff0c\u5176\u4ed6\u4f7f\u7528\u8005\u4ecd\u80fd\u5b8c\u6210", async () => {
+  const pool = new PelicanResourcePool<string>({maxBytes:0,maxEntries:0,size:value=>value.length})
+  const controller = new AbortController()
+  let finish!: (value:string)=>void, calls=0, aborted=false
+  const load = (signal:AbortSignal) => new Promise<string>(resolve=>{
+    calls++;finish=resolve
+    signal.addEventListener("abort",()=>{aborted=true},{once:true})
+  })
+  const first=pool.load("same",controller.signal,load)
+  const second=pool.load("same",new AbortController().signal,load)
+  await turn()
+  const rejected=assert.rejects(first,{name:"AbortError"})
+  controller.abort()
+  await rejected
+  assert.equal(aborted,false)
+  finish("html")
+  assert.equal(await second,"html")
+  assert.equal(calls,1)
+})
+
+test("\u79bb\u5c4f\u53d6\u6d88\u5df2\u4e0b\u8f7d\u4f5c\u54c1\u540e\u4e0d\u518d\u751f\u6210", async () => {
+  const pool = new PelicanResourcePool<string>({maxBytes:0,maxEntries:0,size:value=>value.length})
+  let finish!: (value:string)=>void, calls=0
+  const first=pool.load("first",new AbortController().signal,()=>new Promise<string>(resolve=>{finish=resolve}))
+  const controller=new AbortController()
+  const queued=pool.load("queued",controller.signal,async()=>{calls++;return "skip"})
+  const rejected=assert.rejects(queued,{name:"AbortError"})
+  await turn()
+  controller.abort()
+  await rejected
+  finish("image")
+  assert.equal(await first,"image")
+  await turn()
+  assert.equal(calls,0)
+})
+
 test("thumbnail downloads have bounded concurrency while generation defaults to one", async () => {
   const pool = new PelicanResourcePool<string>({maxBytes: 32, maxEntries: 8, size: value => value.length, maxConcurrent: 3})
   let active = 0, peak = 0

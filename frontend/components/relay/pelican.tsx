@@ -15,7 +15,7 @@ import { apiFetch } from "@/lib/api"
 import type { ChannelPelicanTarget, PelicanConfig, PelicanGallery, PelicanLibraryPage, PelicanResult, PelicanTestPlan, RelayAccountView } from "@/lib/api-types"
 import { hasConfiguredPelicanPlan, pelicanEfforts, pelicanEffortOptions, pelicanGroupLabels, pelicanRunOptions } from "@/lib/pelican"
 import { pelicanResultPath } from "@/lib/pelican-sources"
-import { observePelicanThumbnail, pelicanThumbnailActive, pelicanThumbnailPool, pelicanRenderPool, renderPelicanThumbnail, retainPelicanThumbnails, subscribePelicanActivity, suspendPelicanThumbnails, verifyPelicanThumbnail } from "@/lib/pelican-thumbnails"
+import { observePelicanThumbnail, pelicanThumbnailActive, pelicanThumbnailPool, pelicanHTMLPool, pelicanRenderPool, renderPelicanThumbnail, retainPelicanThumbnails, subscribePelicanActivity, suspendPelicanThumbnails, verifyPelicanThumbnail } from "@/lib/pelican-thumbnails"
 import { loadPelicanThumbnail } from "@/lib/pelican-thumbnail-store"
 import { usePelicanGallery, useSystemSettings, type QueryState } from "@/lib/queries"
 import { PelicanArtwork } from "./pelican-artwork"
@@ -239,15 +239,13 @@ function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanR
    const lease=pelicanThumbnailPool.acquire(key,async signal=>{
     let saveError=""
     const image=await loadPelicanThumbnail(path,result.finished_at,signal,async()=>{
-    const value=await context.body(result,signal)
-    signal.throwIfAborted()
-    if(!value.html)throw new Error("\u4f5c\u54c1\u6ca1\u6709\u53ef\u9884\u89c8\u7684\u5185\u5bb9")
-    signal.throwIfAborted()
-    const rendering=pelicanRenderPool.acquire(key,renderSignal=>renderPelicanThumbnail(value.html!,renderSignal))
-    const abort=()=>rendering.release()
-    signal.addEventListener("abort",abort,{once:true})
-    try {return {image:await rendering.promise,html:value.html}}
-    finally {signal.removeEventListener("abort",abort);rendering.release()}
+    const html=await pelicanHTMLPool.load(key,signal,async downloadSignal=>{
+     const value=await context.body(result,downloadSignal)
+     if(!value.html)throw new Error("\u4f5c\u54c1\u6ca1\u6709\u53ef\u9884\u89c8\u7684\u5185\u5bb9")
+     return value.html
+    })
+    const image=await pelicanRenderPool.load(key,signal,renderSignal=>renderPelicanThumbnail(html,renderSignal))
+    return {image,html}
     },!context.readOnly,verifyPelicanThumbnail,error=>{saveError=error.message})
     return {image,saveError}
    })

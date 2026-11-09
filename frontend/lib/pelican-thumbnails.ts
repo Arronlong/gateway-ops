@@ -2,8 +2,10 @@ import { createPelicanDocument, pelicanViewport } from "./pelican"
 import { PelicanResourcePool } from "./pelican-resources"
 
 export const pelicanThumbnailPool = new PelicanResourcePool<{image:Blob;saveError:string}>({
-  maxBytes: 8 * 1024 * 1024, maxEntries: 96, maxConcurrent: 4, timeoutMs: 20000, size: value => value.image.size,
+  maxBytes: 8 * 1024 * 1024, maxEntries: 96, maxConcurrent: 16, timeoutMs: 120000, size: value => value.image.size,
 })
+
+export const pelicanHTMLPool = new PelicanResourcePool<string>({maxBytes: 0, maxEntries: 0, maxConcurrent: 8, timeoutMs:10000, size: html => html.length * 2})
 
 export const pelicanRenderPool = new PelicanResourcePool<Blob>({maxBytes: 0, maxEntries: 0, maxConcurrent: 3, timeoutMs:15000, size: blob => blob.size})
 

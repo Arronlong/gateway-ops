@@ -19,9 +19,12 @@ async function main() {
   const built = process.env.PELICAN_TEST_BUILT === '1'
   const output = path.resolve(built ? 'outputs/pelican-thumbnails-built' : 'outputs/pelican-thumbnails')
   fs.mkdirSync(output, { recursive:true })
-  for (const run of ['first', 'new-browser', 'mobile', 'save-failure']) {
+  for (const run of ['parallel-downloads', 'first', 'new-browser', 'mobile', 'save-failure']) {
+    const parallel = run === 'parallel-downloads'
+    if (run === 'first') saved.clear()
+    const runResults = parallel ? Array.from({length:12}, (_, index) => ({...results[index%4],id:index+1,channel_id:Math.floor(index/4)+1})) : results
     if (run === 'save-failure') saved.delete(1)
-    const context = await browser.newContext({ viewport:{width:run==='mobile'?390:1440,height:1100}, locale:'zh-CN' })
+    const context = await browser.newContext({ viewport:{width:run==='mobile'?390:1440,height:parallel?2200:1100}, locale:'zh-CN' })
     const page = await context.newPage(), errors = []
     const scripts = []
     page.on('request', request => {if (request.resourceType()==='script') scripts.push(new URL(request.url()).pathname)})
@@ -30,6 +33,7 @@ async function main() {
       await page.route('http://localhost:3010/assets/**', route => route.fulfill({path:path.resolve('frontend/dist',new URL(route.request().url()).pathname.slice(1))}))
     }
     let bodyRequests = 0, uploads = 0, thumbnailRequests = 0
+    let activeDownloads = 0, peakDownloads = 0, downloadsBeforeFirstImage = 0
     page.on('pageerror', error => errors.push(error.message))
     await page.addInitScript(() => {
       if (window.top === window) localStorage.setItem('uh_token', 'local-thumbnail-test')
@@ -58,7 +62,13 @@ async function main() {
           return saved.has(id) ? route.fulfill({status:200,contentType:'image/jpeg',body:saved.get(id)}) : route.fulfill({status:404,body:'{}'})
         }
         bodyRequests++
-        return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{...results[id-1],html:artwork[id-1]}})})
+        if (parallel) {
+          peakDownloads = Math.max(peakDownloads, ++activeDownloads)
+          if (await page.evaluate(() => window.__thumbnailStats.images.length === 0)) downloadsBeforeFirstImage++
+          await new Promise(resolve => setTimeout(resolve, 150))
+        }
+        try {return await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data:{...runResults[id-1],html:artwork[(id-1)%4]}})})}
+        finally {if (parallel) activeDownloads--}
       }
       if (route.request().method()!=='GET') throw new Error('Unexpected mutation '+p)
       let data = []
@@ -67,17 +77,24 @@ async function main() {
       else if(p==='/api/sync-settings') data={channel_enabled:false}
       else if(p.endsWith('/branding')) data={name:'GatewayOps'}
       else if(p==='/api/version') data={version:'test',revision:'unknown',channel:'development'}
-      else if(p==='/api/channels/pelican') data={groups:[{channel:{id:1,name:'Thumbnail performance',type:'newapi',site_url:'https://example.invalid',pelican_key_configured:false},targets:[],results}]}
+      else if(p==='/api/channels/pelican') data={groups:Array.from({length:parallel?3:1},(_,index)=>({channel:{id:index+1,name:'Thumbnail performance '+(index+1),type:'newapi',site_url:'https://example.invalid',pelican_key_configured:false},targets:[],results:runResults.filter(result=>result.channel_id===index+1)}))}
       else if(p==='/api/relay-stations/pelican-sources') data={groups:[]}
       await route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({data})})
     })
     await page.goto('http://localhost:3010/pelican')
-    const count = run==='mobile'?1:4
+    const count = parallel?12:run==='mobile'?1:4
     await page.waitForFunction(count => document.querySelectorAll('img[src^="blob:"]').length>=count,count,{timeout:18000})
     const stats = await page.evaluate(() => window.__thumbnailStats)
     assert.ok(stats.images.every(image=>image.width===448 && image.height===336))
     assert.ok(stats.peakRenderers<=3,'thumbnail generation must keep a bounded concurrency')
-    if (run==='first') {assert.ok(stats.peakRenderers>=2,'visible artworks must generate thumbnails concurrently');assert.equal(bodyRequests,4);assert.equal(uploads,4);assert.equal(saved.size,4)}
+    if (parallel) {
+      assert.equal(peakDownloads,8,'HTML downloads must use eight independent slots')
+      assert.equal(downloadsBeforeFirstImage,12,'queued rendering must not block later HTML downloads')
+      assert.equal(stats.peakRenderers,3)
+      assert.equal(bodyRequests,12)
+      assert.equal(uploads,12)
+    }
+    else if (run==='first') {assert.ok(stats.peakRenderers>=2,'visible artworks must generate thumbnails concurrently');assert.equal(bodyRequests,4);assert.equal(uploads,4);assert.equal(saved.size,4)}
     else if (run === 'save-failure') {
       assert.equal(bodyRequests,1,'retry must reuse the generated JPEG without loading artwork HTML again')
       assert.equal(uploads,2,'transient save failures must retry once')
@@ -100,7 +117,7 @@ async function main() {
       assert.ok(!scripts.some(script=>script.includes('relay-stations-page-')||script.includes('system-settings-page-')||script.includes('LineChart-')),'unrelated large page was eagerly loaded')
       assert.ok(scripts.some(script=>script.includes('pelican-library-page-')))
     }
-    reports.push({run,bodyRequestsBeforePreview:beforePreview,uploads,thumbnailRequests,sizes:Array.from(saved.values(),value=>value.length),scripts,...stats})
+    reports.push({run,bodyRequestsBeforePreview:beforePreview,uploads,thumbnailRequests,peakDownloads,downloadsBeforeFirstImage,sizes:Array.from(saved.values(),value=>value.length),scripts,...stats})
     await context.close()
   }
   fs.writeFileSync(path.join(output,'results.json'),JSON.stringify(reports,null,2),'utf8')
