@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useTheme } from "next-themes"
 import { Activity, Bell, Bird, BookOpen, ChevronDown, ExternalLink, Github, Home, LayoutList, LogOut, RefreshCw, Server, Settings2, ShieldCheck, Sun, Moon, WalletCards, UsersRound } from "lucide-react"
 import { Link, NavLink, useLocation } from "react-router-dom"
@@ -34,6 +34,12 @@ export function MonitorHeader() {
   const location = useLocation()
   const [mounted, setMounted] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [compactMenu, setCompactMenu] = useState(true)
+  const rowRef = useRef<HTMLDivElement>(null)
+  const brandRef = useRef<HTMLDivElement>(null)
+  const navRef = useRef<HTMLElement>(null)
+  const actionsRef = useRef<HTMLDivElement>(null)
+  const menuRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => setMounted(true), [])
 
@@ -64,11 +70,12 @@ export function MonitorHeader() {
 
   const channelPageEnabled = systemSettings.data?.channels_page_enabled === true
   const operationsManagementEnabled = systemSettings.data?.operations_management_enabled === true
+  const pelicanPageEnabled = systemSettings.data?.pelican_page_enabled === true
   const navItems = [
     { to: "/", label: "首页", icon: Home, end: true },
     ...(channelPageEnabled ? [{ to: "/channels", label: "渠道管理", icon: LayoutList }] : []),
     { to: "/relay-stations", label: "中转站管理", icon: Server },
-    ...(systemSettings.data?.pelican_page_enabled === true ? [{ to: "/pelican", label: "鹈鹕测智", icon: Bird }] : []),
+    ...(pelicanPageEnabled ? [{ to: "/pelican", label: "鹈鹕测智", icon: Bird }] : []),
   ]
 
   const operationItems = [
@@ -84,16 +91,39 @@ export function MonitorHeader() {
   const systemActive = ["/settings", "/captcha", "/alerts", "/notifications"].some((path) => location.pathname.startsWith(path))
   const isPathActive = (to: string, end = false) => end ? location.pathname === to : location.pathname.startsWith(to)
 
+  useLayoutEffect(() => {
+    const row = rowRef.current, brand = brandRef.current, nav = navRef.current, actions = actionsRef.current, menu = menuRef.current
+    if (!row || !brand || !nav || !actions || !menu) return
+    let disposed = false
+    const gap = (element: Element) => parseFloat(getComputedStyle(element).columnGap) || 0
+    const measure = () => {
+      if (disposed) return
+      const style = getComputedStyle(row)
+      const available = row.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)
+      const brandWidth = [...brand.children].reduce((width, child) => width + child.scrollWidth, 0) + gap(brand) * (brand.children.length - 1)
+      const navWidth = [...nav.children].reduce((width, child) => width + child.getBoundingClientRect().width, 0) + gap(nav) * (nav.children.length - 1)
+      const menuWidth = menu.getBoundingClientRect().width
+      const actionsWidth = actions.getBoundingClientRect().width - (menuWidth ? menuWidth + gap(actions) : 0)
+      const required = brandWidth + navWidth + actionsWidth + gap(row) * 2
+      setCompactMenu(!window.matchMedia("(min-width: 80rem)").matches || Math.ceil(required) > Math.floor(available))
+    }
+    const observer = new ResizeObserver(measure)
+    for (const element of [row, brand, nav, actions]) observer.observe(element)
+    measure()
+    void document.fonts.ready.then(measure)
+    return () => {disposed = true; observer.disconnect()}
+  }, [branding.product_name, channelPageEnabled, operationsManagementEnabled, pelicanPageEnabled, authDisabled, location.pathname])
+
   return (
     <header className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur-sm">
-      <div className="flex min-h-14 w-full min-w-0 items-center gap-2 px-6 py-1.5 sm:gap-4">
+      <div ref={rowRef} className="relative flex min-h-14 w-full min-w-0 items-center gap-2 px-6 py-1.5 sm:gap-4">
         {/* left: logo + title */}
-        <div className="flex min-w-0 items-center gap-2.5">
+        <div ref={brandRef} className="flex min-w-0 items-center gap-2.5">
           <ProductIcon className="size-8 rounded-lg"/>
           <span className="truncate text-base font-semibold tracking-tight text-foreground">{branding.product_name}</span>
         </div>
 
-        <nav className="hidden min-w-0 flex-1 flex-wrap items-center justify-center gap-1 whitespace-nowrap xl:flex" aria-label="主菜单">
+        <nav ref={navRef} aria-hidden={compactMenu} className={cn("flex items-center justify-center gap-1 whitespace-nowrap", compactMenu ? "pointer-events-none invisible absolute left-0 top-0 w-0 overflow-hidden" : "min-w-0 flex-1")} aria-label="主菜单">
           {navItems.map((item) => (
             <NavLink
               key={item.to}
@@ -148,10 +178,10 @@ export function MonitorHeader() {
         </nav>
 
         {/* right: actions */}
-        <div className="ml-auto flex shrink-0 items-center gap-1 sm:gap-3">
+        <div ref={actionsRef} className="ml-auto flex shrink-0 items-center gap-1 sm:gap-3">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="ghost" size="icon" className="size-11 xl:hidden sm:size-8" aria-label="打开菜单"><LayoutList className="size-4" /></Button>
+              <Button ref={menuRef} variant="ghost" size="icon" className={cn("size-11 sm:size-8", !compactMenu && "hidden")} aria-label="打开菜单"><LayoutList className="size-4" /></Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" sideOffset={8} className="w-[min(20rem,calc(100vw-2rem))] p-2">
               <DropdownMenuLabel className="flex items-center gap-2 px-2 py-2 text-xs font-semibold text-foreground">
@@ -216,7 +246,7 @@ export function MonitorHeader() {
 
           {/* last collected + refresh */}
           <div className="hidden items-center gap-2 sm:flex">
-            <span className="text-xs text-muted-foreground">
+            <span className="w-32 shrink-0 whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
               {"上次采集 "}
               <span className="font-medium text-foreground">{relativeTime(lastCollectedAt)}</span>
             </span>
