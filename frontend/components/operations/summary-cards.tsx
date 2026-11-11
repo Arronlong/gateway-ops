@@ -15,7 +15,7 @@ export function usd(value: number | null | undefined) {
 
 export function multiplier(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) return "—"
-  return `${value.toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} 倍`
+  return `${value.toLocaleString("zh-CN", { minimumFractionDigits: 4, maximumFractionDigits: 4 })} 倍`
 }
 
 export function OperationSummaryCards({ data, loading }: { data: OperationSummary | null; loading: boolean }) {
