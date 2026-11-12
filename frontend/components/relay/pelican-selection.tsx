@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/ui/confirm-dialog"
 import { apiFetch } from "@/lib/api"
 import type { PelicanResult } from "@/lib/api-types"
-import { deletePelicanResults, getPelicanSelection, pelicanSelectionRect, type PelicanSelectionRect } from "@/lib/pelican-selection"
+import { deletePelicanResults, getPelicanSelection, pelicanSelectionRect, updatePelicanSelection, type PelicanSelectionRect } from "@/lib/pelican-selection"
 import { pelicanResultPath } from "@/lib/pelican-sources"
 import { pelicanThumbnailPool } from "@/lib/pelican-thumbnails"
 
@@ -13,8 +13,10 @@ type SelectionEntry = {element: HTMLDivElement; result: () => PelicanResult}
 type SelectionContext = {
   selected: Set<string>
   removed: Set<string>
+  availableKeys: ReadonlySet<string>
   busy: boolean
   toggle: (key: string) => void
+  select: (keys: readonly string[], checked: boolean) => void
   register: (key: string, entry: SelectionEntry) => () => void
 }
 const PelicanSelectionContext = createContext<SelectionContext | null>(null)
@@ -31,6 +33,18 @@ export function usePelicanResultSelection(result: PelicanResult, ref: RefObject<
     return register(key, {element: ref.current, result: () => latest.current})
   }, [key, register, ref, removed, result.status])
   return context ? {checked: context.selected.has(key), busy: context.busy, removed, toggle: () => context.toggle(key)} : null
+}
+
+export function PelicanGroupSelection({results, name}: {results: readonly PelicanResult[]; name: string}) {
+  const context = useContext(PelicanSelectionContext)
+  if (!context) return null
+  const keys = [...new Set(results.map(result => pelicanResultPath(result)))].filter(key => context.availableKeys.has(key) && !context.removed.has(key))
+  const allSelected = keys.length > 0 && keys.every(key => context.selected.has(key))
+  const anySelected = keys.some(key => context.selected.has(key))
+  return <div className="inline-flex shrink-0 items-center gap-1" role="group" aria-label={`${name}选择当前筛选结果`}>
+    <Button type="button" variant="outline" size="sm" className="h-7 px-2 text-[10px]" aria-label={`${name}全选当前筛选结果`} disabled={context.busy || !keys.length || allSelected} onClick={() => context.select(keys, true)}>全选</Button>
+    <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px]" aria-label={`${name}全不选当前筛选结果`} disabled={context.busy || !anySelected} onClick={() => context.select(keys, false)}>全不选</Button>
+  </div>
 }
 
 export function PelicanSelection({children, onRefresh}: {children: ReactNode; onRefresh: () => Promise<unknown>}) {
@@ -74,6 +88,12 @@ export function PelicanSelection({children, onRefresh}: {children: ReactNode; on
       else next.add(key)
       return next
     })
+  }
+
+  function select(keys: readonly string[], checked: boolean) {
+    if (busyRef.current) return
+    const available = keys.filter(key => entries.current.has(key))
+    setSelected(current => updatePelicanSelection(current, available, checked))
   }
 
   function beginSelection(event: ReactPointerEvent<HTMLDivElement>) {
@@ -180,7 +200,7 @@ export function PelicanSelection({children, onRefresh}: {children: ReactNode; on
     }
   }
 
-  return <PelicanSelectionContext.Provider value={{selected, removed, busy, toggle, register}}>
+  return <PelicanSelectionContext.Provider value={{selected, removed, availableKeys: new Set(entries.current.keys()), busy, toggle, select, register}}>
     <div className="min-w-0 space-y-3">
       <div className="flex flex-wrap items-center gap-2" role="toolbar" aria-label="测智作品批量操作" aria-busy={busy}>
         <span className="text-xs text-muted-foreground" aria-live="polite">{busy ? `删除中 ${progress.done}/${progress.total}` : `已选 ${selected.size} 份`}</span>

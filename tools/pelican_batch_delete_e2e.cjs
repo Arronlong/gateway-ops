@@ -20,6 +20,7 @@ async function main() {
     Object.assign(defaults, {pelican_page_enabled: true, pelican_tasks_enabled: false, pelican_history_count: 30})
     const result = (id, channelID, model, status = "success") => ({id, channel_id: channelID, relay_station_id: 4, account_external_id: 3, account_name: "测试账号", model, status, reasoning_effort: "medium", trigger: "manual", error: "", duration_ms: 1000, started_at: "2026-11-09T00:00:00Z", finished_at: "2026-11-09T00:01:00Z"})
     const channelResults = [result(7, 1, "alpha"), result(8, 1, "beta", "failed"), result(10, 1, "gamma"), result(9, 1, "alpha", "running")]
+    channelResults[2].reasoning_effort = "low"
     const secondResult = result(7, 2, "alpha")
     const accountResult = result(7, 0, "alpha")
     const groupResult = {...result(7, 0, "alpha"), group_external_id: 6}
@@ -104,6 +105,44 @@ async function main() {
     await page.getByRole("button", {name: "刷新作品列表"}).click()
     await refresh
     await selectedCount(2)
+    await clear()
+
+    const channelSection = page.locator('[data-pelican-channel="1"]')
+    const accountSection = page.locator('[data-pelican-source="pool:4:3"]')
+    const groupSection = page.locator('[data-pelican-source="group:4:6"]')
+    const selectGroup = section => section.getByRole("button", {name:/全选当前筛选结果$/})
+    const unselectGroup = section => section.getByRole("button", {name:/全不选当前筛选结果$/})
+    await checkbox(secondResult).click()
+    await channelSection.getByRole("group", {name:"渠道甲按模型筛选"}).getByRole("button", {name:"alpha", exact:true}).click()
+    await selectGroup(channelSection).click()
+    await selectedCount(3)
+    assert.equal(await checkbox(channelResults[0]).getAttribute("data-state"), "checked")
+    assert.equal(await checkbox(channelResults[3]).getAttribute("data-state"), "checked")
+    assert.equal(await selectGroup(channelSection).isDisabled(), true)
+    await unselectGroup(channelSection).click()
+    await selectedCount(1)
+    assert.equal(await checkbox(secondResult).getAttribute("data-state"), "checked")
+    assert.equal(await unselectGroup(channelSection).isDisabled(), true)
+    await selectGroup(accountSection).click()
+    await selectGroup(groupSection).click()
+    await selectedCount(3)
+    await unselectGroup(accountSection).click()
+    await selectedCount(2)
+    assert.equal(await checkbox(groupResult).getAttribute("data-state"), "checked")
+    await unselectGroup(groupSection).click()
+    await selectedCount(1)
+    await channelSection.getByRole("group", {name:"渠道甲按模型筛选"}).getByRole("button", {name:"全部", exact:true}).click()
+    await selectGroup(channelSection).click()
+    await selectedCount(5)
+    await unselectGroup(channelSection).click()
+    await selectedCount(1)
+    await channelSection.getByRole("group", {name:"渠道甲按思考强度筛选"}).getByRole("button", {name:"低 - Low", exact:true}).click()
+    await selectGroup(channelSection).click()
+    await selectedCount(2)
+    assert.equal(await checkbox(channelResults[2]).getAttribute("data-state"), "checked")
+    await unselectGroup(channelSection).click()
+    await selectedCount(1)
+    await channelSection.getByRole("group", {name:"渠道甲按思考强度筛选"}).getByRole("button", {name:"全部", exact:true}).click()
     await clear()
 
     // 从图片区域起拖，框选后不能误触预览。
@@ -202,6 +241,10 @@ async function main() {
     await page.setViewportSize({width: 390, height: 844})
     await toolbar.scrollIntoViewIfNeeded()
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false)
+    await selectGroup(channelSection).click()
+    await selectedCount(4)
+    await unselectGroup(channelSection).click()
+    await selectedCount(0)
     await checkbox(channelResults[0]).focus()
     await page.keyboard.press("Space")
     await selectedCount(1)
@@ -227,7 +270,7 @@ async function main() {
     await selectedCount(0)
     assert.equal(await artwork(channelResults[0]).count(), 0)
     assert.deepEqual(errors, [])
-    const report = {passed: true, escapeDoesNotPreview: true, blurCancelsSelection: true, lostPointerUpCancelsSelection: true, checkboxTopLeft: true, crossSource: true, dragBothDirections: true, additiveDrag: true, preview: true, filterCleanup: true, refreshKeepsSelection: true, cancelDoesNotDelete: true, partialFailureRetry: true, runningSingleDelete: true, runningBatchDelete: true, keyboard: true, mobile: true, refreshFailureHidesDeleted: true, deleteRequests: calls.length, errors}
+    const report = {passed: true, groupSelection: true, filteredGroupSelection: true, groupSelectionIsolation: true, mobileGroupSelection: true, escapeDoesNotPreview: true, blurCancelsSelection: true, lostPointerUpCancelsSelection: true, checkboxTopLeft: true, crossSource: true, dragBothDirections: true, additiveDrag: true, preview: true, filterCleanup: true, refreshKeepsSelection: true, cancelDoesNotDelete: true, partialFailureRetry: true, runningSingleDelete: true, runningBatchDelete: true, keyboard: true, mobile: true, refreshFailureHidesDeleted: true, deleteRequests: calls.length, errors}
     fs.writeFileSync("outputs/pelican-batch-delete/report.json", JSON.stringify(report, null, 2), "utf8")
     console.log(JSON.stringify(report))
   } finally {await browser.close()}

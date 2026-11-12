@@ -21,6 +21,15 @@ export function getPelicanSelection(entries: readonly {key: string; rect: Pelica
 
 type DeletablePelicanResult = Pick<PelicanResult, "id" | "channel_id" | "relay_station_id" | "account_external_id" | "group_external_id" | "status">
 
+export function updatePelicanSelection(current: ReadonlySet<string>, keys: Iterable<string>, checked: boolean): Set<string> {
+  const next = new Set(current)
+  for (const key of keys) {
+    if (checked) next.add(key)
+    else next.delete(key)
+  }
+  return next
+}
+
 export async function deletePelicanResults<T extends DeletablePelicanResult>(results: readonly T[], remove: (path: string, result: T) => Promise<unknown>) {
   const unique = [...new Map(results.map(result => [pelicanResultPath(result), result])).values()]
   const outcomes: ({result: T; error: unknown} | null)[] = []

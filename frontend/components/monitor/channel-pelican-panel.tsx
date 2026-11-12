@@ -7,6 +7,7 @@ import type { Channel, ChannelPelicanGallery, PelicanGallery } from "@/lib/api-t
 import { useSystemSettings, type QueryState } from "@/lib/queries"
 import { getPelicanFilterOptions, matchesPelicanFilters } from "@/lib/pelican-library"
 import { pelicanEffortOptions } from "@/lib/pelican"
+import { PelicanGroupSelection } from "@/components/relay/pelican-selection"
 
 export function ChannelPelicanPanel({channel,query,limit=3,showMore=true,status="all",stationID="all",compact=false}:{
   channel: Pick<Channel,"id"|"name"|"site_url">
@@ -41,6 +42,7 @@ export function ChannelPelicanPanel({channel,query,limit=3,showMore=true,status=
     {group?<PelicanProvider stationID={null} galleryQuery={galleryQuery} showKeyGroup>
       {compact?<header className="flex flex-wrap items-center gap-x-4 gap-y-2" data-pelican-group-header>
         <h2 className="min-w-0 max-w-full truncate text-sm font-semibold" title={channel.name}>{channel.site_url?<a href={channel.site_url} target="_blank" rel="noopener noreferrer" aria-label={`打开上游网站：${channel.name}`} title={channel.site_url} className="inline-flex max-w-full items-center gap-1.5 text-foreground hover:text-brand hover:underline"><span className="truncate">{channel.name}</span><ExternalLink className="size-3.5 shrink-0" aria-hidden="true"/></a>:channel.name}<span className="ml-2 text-[10px] font-normal text-muted-foreground">{retainedResults.length}/{displayLimit}</span></h2>
+        <PelicanGroupSelection results={results} name={channel.name}/>
         {filterOptions.models.length?<div role="group" aria-label={`${channel.name}按模型筛选`} className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 text-xs">
           <span className="text-muted-foreground">模型</span>
           <Button type="button" size="sm" variant={modelFilter==="all"?"default":"outline"} aria-pressed={modelFilter==="all"} className="h-7 px-2 text-xs" onClick={()=>setModelFilter("all")}>全部</Button>

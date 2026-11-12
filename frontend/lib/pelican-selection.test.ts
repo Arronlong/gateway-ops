@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 // @ts-expect-error Node 22 原生 TypeScript 测试需要显式扩展名。
-import { deletePelicanResults, getPelicanSelection, pelicanSelectionRect } from "./pelican-selection.ts"
+import { deletePelicanResults, getPelicanSelection, pelicanSelectionRect, updatePelicanSelection } from "./pelican-selection.ts"
 
 test("反向框选与正向框选使用相同矩形，触碰边界不算选中", () => {
   const rect = pelicanSelectionRect({x: 200, y: 180}, {x: 20, y: 30})
@@ -31,6 +31,24 @@ test("跨渠道、账号和分组删除使用各自路径并对同一作品去�
   ])
   assert.deepEqual(result.deleted, [channel, account, group])
   assert.deepEqual(result.failed, [])
+})
+
+test("单组全选只追加当前筛选的结果并保留其他来源", () => {
+  const other = "/channels/2/pelican/results/7"
+  const filtered = ["/channels/1/pelican/results/7", "/channels/1/pelican/results/9"]
+  const original = new Set([other])
+  assert.deepEqual([...updatePelicanSelection(original, filtered, true)], [other, ...filtered])
+  assert.deepEqual([...original], [other])
+})
+
+test("单组全不选只移除当前筛选的结果，空结果不影响原选择", () => {
+  const account = "/relay-stations/4/accounts/3/pelican/results/7"
+  const group = "/relay-stations/4/groups/6/pelican/results/7"
+  const hidden = "/relay-stations/4/accounts/3/pelican/results/8"
+  const original = new Set([account, group, hidden])
+  assert.deepEqual([...updatePelicanSelection(original, [account], false)], [group, hidden])
+  assert.deepEqual([...updatePelicanSelection(original, [], true)], [...original])
+  assert.deepEqual([...updatePelicanSelection(original, [], false)], [...original])
 })
 
 test("运行中记录可按渠道、账号和分组批量删除", async () => {

@@ -7,6 +7,7 @@ import type { PelicanGallery } from "@/lib/api-types"
 import { useGroupPelicanGallery, useSystemSettings, type QueryState } from "@/lib/queries"
 import { getPelicanFilterOptions, matchesPelicanFilters } from "@/lib/pelican-library"
 import { pelicanEffortOptions } from "@/lib/pelican"
+import { PelicanGroupSelection } from "./pelican-selection"
 
 export function PelicanTargetPanel({stationID,externalID,name,scope,query,compact=false,siteURL,status="all"}:{
  stationID:number;externalID:number;name:string;scope:"account"|"group";query:QueryState<PelicanGallery>;compact?:boolean;siteURL?:string;status?:string
@@ -25,6 +26,7 @@ export function PelicanTargetPanel({stationID,externalID,name,scope,query,compac
   {compact?<header className="flex min-w-0 flex-wrap items-center gap-2" data-pelican-source-header>
    <h2 className="min-w-0 max-w-full truncate text-sm font-semibold" title={name}>{siteURL?<a href={siteURL} target="_blank" rel="noopener noreferrer" className="inline-flex max-w-full items-center gap-1 text-foreground hover:text-brand hover:underline"><span className="truncate">{name}</span><ExternalLink className="size-3 shrink-0"/></a>:name}</h2>
    <span className="text-[10px] text-muted-foreground">{results.length}/{limit}</span>
+   <PelicanGroupSelection results={results} name={name}/>
    <span className="rounded border px-1.5 py-0.5 text-[10px] text-muted-foreground">{scope==="group"?"中转站分组":"本地号池"}</span>
    {filterOptions.models.length?<div className="flex max-w-full flex-wrap items-center gap-1 text-[10px]" role="group" aria-label={`${name}按模型筛选`}><span>模型</span>{["all",...filterOptions.models].map(value=><Button key={value} size="sm" variant={model===value?"default":"outline"} className="h-6 max-w-full px-1.5 text-[10px]" aria-pressed={model===value} onClick={()=>setModel(value)} title={value}><span className="max-w-64 truncate">{value==="all"?"全部":value}</span></Button>)}</div>:null}
    {filterOptions.efforts.length?<div className="flex flex-wrap items-center gap-1 text-[10px]" role="group" aria-label={`${name}按思考强度筛选`}><span>思考强度</span>{["all",...filterOptions.efforts].map(value=><Button key={value} size="sm" variant={effort===value?"default":"outline"} className="h-6 px-1.5 text-[10px]" aria-pressed={effort===value} onClick={()=>setEffort(value)}>{value==="all"?"全部":pelicanEffortOptions[value]}</Button>)}</div>:null}
