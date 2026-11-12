@@ -466,7 +466,7 @@ func channelMetrics(c *gin.Context, d *Deps) {
 
 func channelLatencyTrends(c *gin.Context, d *Deps) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "60"))
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 || limit > 1000 {
 		limit = 60
 	}
 	channels, err := d.Channels.List()
@@ -522,7 +522,7 @@ func latencySampleWindow(c *gin.Context) (time.Time, time.Time, int, error) {
 		return time.Time{}, time.Time{}, 0, errors.New("end 必须晚于 start")
 	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "30"))
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 || limit > 1000 {
 		limit = 30
 	}
 	return start.UTC(), end.UTC(), limit, nil

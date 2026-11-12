@@ -531,8 +531,7 @@ func remoteUsageFromEvent(event storage.RelayUsageEvent) remoteUsage {
 }
 
 func (s *Service) syncUsageEvents(ctx context.Context, station storage.RelayStation, apiKey string, accounts []remoteAccount, now time.Time) error {
-	// Keep the foreground path equivalent to the old "recent 60" behavior:
-	// fetch only page 1 for each active API-key account, in parallel.
+	// 按配置补足各活跃账号的最近样本，完整历史仍由后台增量同步。
 	items := s.fetchRecentUsageItemsForAccounts(ctx, station.BaseURL, apiKey, accounts)
 	if err := s.persistUsageItems(station.ID, items, now); err != nil {
 		return err
@@ -544,7 +543,17 @@ func (s *Service) syncUsageEvents(ctx context.Context, station storage.RelayStat
 	return nil
 }
 
+func (s *Service) recentLatencySampleLimit() int {
+	_, limit, err := s.groupMetricsSettings()
+	if err != nil {
+		return latencySampleLimit
+	}
+	return limit
+}
+
 func (s *Service) fetchRecentUsageItemsForAccounts(ctx context.Context, baseURL, apiKey string, accounts []remoteAccount) []remoteUsage {
+	sampleLimit := s.recentLatencySampleLimit()
+	pageSize := min(sampleLimit, 200)
 	type job struct{ accountID int64 }
 	jobs := make(chan job)
 	results := make(chan []remoteUsage)
@@ -562,17 +571,49 @@ func (s *Service) fetchRecentUsageItemsForAccounts(ctx context.Context, baseURL,
 		go func() {
 			defer wg.Done()
 			for item := range jobs {
-				query := url.Values{}
-				query.Set("page", "1")
-				query.Set("page_size", strconv.Itoa(latencySampleLimit))
-				query.Set("account_id", strconv.FormatInt(item.accountID, 10))
-				endpoint := strings.TrimRight(baseURL, "/") + "/api/v1/admin/usage?" + query.Encode()
-				var page remoteUsagePage
-				if err := s.get(ctx, endpoint, apiKey, &page); err != nil {
-					continue
+				samples := make([]remoteUsage, 0, sampleLimit)
+				seen := make(map[int64]struct{}, sampleLimit)
+				for pageNumber := 1; pageNumber <= sampleLimit; pageNumber++ {
+					query := url.Values{}
+					query.Set("page", strconv.Itoa(pageNumber))
+					query.Set("page_size", strconv.Itoa(pageSize))
+					query.Set("account_id", strconv.FormatInt(item.accountID, 10))
+					endpoint := strings.TrimRight(baseURL, "/") + "/api/v1/admin/usage?" + query.Encode()
+					var page remoteUsagePage
+					if err := s.get(ctx, endpoint, apiKey, &page); err != nil {
+						break
+					}
+					before := len(samples)
+					for _, usage := range page.Items {
+						if _, exists := seen[usage.ID]; exists {
+							continue
+						}
+						seen[usage.ID] = struct{}{}
+						samples = append(samples, usage)
+						if len(samples) == sampleLimit {
+							break
+						}
+					}
+					// 达到目标或上游重复返回同一页时停止，失败前取得的页仍会入库。
+					if len(samples) == sampleLimit || len(samples) == before {
+						break
+					}
+					if page.Pages > 0 && pageNumber >= page.Pages {
+						break
+					}
+					effectiveSize := page.PageSize
+					if effectiveSize <= 0 {
+						effectiveSize = pageSize
+					}
+					if page.Total > 0 && len(samples) >= page.Total {
+						break
+					}
+					if page.Total == 0 && page.Pages == 0 && len(page.Items) < effectiveSize {
+						break
+					}
 				}
 				select {
-				case results <- page.Items:
+				case results <- samples:
 				case <-ctx.Done():
 					return
 				}
@@ -599,7 +640,7 @@ func (s *Service) fetchRecentUsageItemsForAccounts(ctx context.Context, baseURL,
 		wg.Wait()
 	}()
 
-	items := make([]remoteUsage, 0, len(accounts)*latencySampleLimit)
+	items := make([]remoteUsage, 0, len(accounts)*sampleLimit)
 	for pageItems := range results {
 		items = append(items, pageItems...)
 	}
@@ -733,7 +774,7 @@ func (s *Service) localUsageItems(stationID uint, since, until time.Time) ([]rem
 }
 
 func (s *Service) localAccountLatencySnapshots(stationID uint, accounts []remoteAccount, groups []remoteGroup) map[int64]string {
-	events, err := s.stations.RecentUsageEventsByAccount(stationID, latencySampleLimit)
+	events, err := s.stations.RecentUsageEventsByAccount(stationID, s.recentLatencySampleLimit())
 	if err != nil {
 		return map[int64]string{}
 	}

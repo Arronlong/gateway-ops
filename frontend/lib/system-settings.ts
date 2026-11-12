@@ -34,9 +34,9 @@ export function channelSectionVisible(settings: SystemSettings | null, section: 
 }
 
 export function recentMetricsWindowOptions(current = 1) {
-  const values = [1, 2, 4, 6, 8, 12, 18, 24]
-  if (Number.isInteger(current) && current >= 1 && current <= 24 && !values.includes(current)) values.push(current)
-  return values.sort((left, right) => left - right).map(value => ({value, label: `每 ${value} 小时`}))
+  const values = [1, 2, 4, 6, 8, 12, 18, 24, 168]
+  if (Number.isInteger(current) && current >= 1 && current <= 168 && !values.includes(current)) values.push(current)
+  return values.sort((left, right) => left - right).map(value => ({value, label: value === 168 ? "7 天" : `每 ${value} 小时`}))
 }
 
 export const defaultSystemSettings: SystemSettings = {

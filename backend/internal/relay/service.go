@@ -1890,7 +1890,7 @@ func (s *Service) ChannelUsageTotals(ctx context.Context, channels []storage.Cha
 // attributed with the same explicit-binding/automatic-URL rules as cost and
 // user-charge metrics.
 func (s *Service) ChannelLatencyTrends(channels []storage.Channel, limit int) (map[uint][]storage.RelayLatencySample, error) {
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 || limit > 1000 {
 		limit = latencySampleLimit
 	}
 	result := make(map[uint][]storage.RelayLatencySample, len(channels))

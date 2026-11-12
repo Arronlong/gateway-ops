@@ -177,7 +177,7 @@ func (r *ChannelUsage) SaveSyncState(state *ChannelUsageSyncState) error {
 }
 
 func (r *ChannelUsage) RecentSamples(channelID uint, limit int) ([]ChannelUsageSample, error) {
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 || limit > 1000 {
 		limit = 60
 	}
 	var events []ChannelUsageEvent

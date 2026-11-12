@@ -66,12 +66,33 @@ test("配置数量同时限制最近样本和统计分母", () => {
   assert.equal(result.successRate, 1)
   assert.equal(result.cacheInputTokens, 200)
   assert.equal(recentRequestMetrics(rows, now, 1, 200).sampleCount, 200)
-  assert.equal(recentRequestMetrics(rows, now, 1, 201).sampleLimit, 200)
+  assert.equal(recentRequestMetrics(rows, now, 1, 201).sampleLimit, 201)
   for (const limit of [0, -1, 1.5, NaN]) assert.equal(recentRequestMetrics(rows, now, 1, limit).sampleLimit, 60)
 })
 
 const now = Date.parse("2026-10-14T08:00:00Z")
 const sample = (minutes: number, extra = {}) => ({created_at: new Date(now - minutes * 60000).toISOString(), ...extra})
+
+test("七天窗口最多统计一千条请求，不再截断成二百条", () => {
+  const rows = Array.from({length:1001}, (_, index) => sample(index * 6 + 2, {input_tokens:10, cache_read_tokens:10, status_code:200, output_tokens:40, duration_ms:1000}))
+  const result = recentRequestMetrics(rows.reverse(), now, 168, 1000)
+  assert.equal(result.windowHours,168)
+  assert.equal(result.sampleLimit,1000)
+  assert.equal(result.sampleCount,1000)
+  assert.equal(result.successAttemptCount,1000)
+  assert.equal(result.cacheHitRate,0.5)
+  assert.equal(result.successRate,1)
+  assert.equal(result.tps,40)
+  assert.equal(recentRequestMetrics(rows, now, 168, 1).sampleCount,1)
+  assert.equal(recentRequestMetrics(rows, now, 169, 1001).sampleLimit,1000)
+  assert.equal(recentRequestMetrics(rows, now, 169, 1001).windowHours,168)
+})
+
+test("七天窗口保留原有四十五秒截止与时间边界", () => {
+  const start = now - 45000 - 168 * 3600000
+  const rows = [start, start - 1, now - 10000].map(time => ({created_at:new Date(time).toISOString()}))
+  assert.equal(recentRequestMetrics(rows,now,168,1000).sampleCount,1)
+})
 
 test("selects the one-hour window before the 45-second cutoff", () => {
   const result = recentRequestMetrics([sample(61), sample(60), sample(2), sample(0), sample(-1), {created_at: "invalid"}], now)

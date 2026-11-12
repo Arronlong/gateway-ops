@@ -57,7 +57,7 @@ func (s *Service) groupMetricsSettings() (int, int, error) {
 	if limit < 1 {
 		limit = 60
 	}
-	return min(hours, 24), min(limit, 200), nil
+	return min(hours, 168), min(limit, 1000), nil
 }
 
 func groupMetricUsageSamples(items []remoteUsage) []groupMetricSample {
@@ -119,11 +119,11 @@ func groupMetricErrorSamples(items []remoteRequestError, groupID int64) []groupM
 }
 
 func buildGroupRecentMetrics(samples []groupMetricSample, now time.Time, hours, limit int, complete bool) PublicGroupRecentMetrics {
-	hours = max(1, min(hours, 24))
+	hours = max(1, min(hours, 168))
 	if limit < 1 {
 		limit = 60
 	}
-	limit = min(limit, 200)
+	limit = min(limit, 1000)
 	result := PublicGroupRecentMetrics{WindowHours: hours, SampleLimit: limit, TPSModels: []string{}}
 	if !complete {
 		return result

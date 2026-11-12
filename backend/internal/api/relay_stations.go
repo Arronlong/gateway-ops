@@ -1320,7 +1320,7 @@ func relayStationAccountLatencySamples(c *gin.Context, d *Deps) {
 
 func relayStationLatencyTrends(c *gin.Context, d *Deps) {
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "60"))
-	if limit <= 0 || limit > 100 {
+	if limit <= 0 || limit > 1000 {
 		limit = 60
 	}
 	stations, err := d.RelayStations.List()

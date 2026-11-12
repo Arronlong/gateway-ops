@@ -8,10 +8,11 @@ test("最近数量默认为六十", () => {
 })
 
 test("统计时长预设与历史值兼容", () => {
-  const presets = [1, 2, 4, 6, 8, 12, 18, 24]
+  const presets = [1, 2, 4, 6, 8, 12, 18, 24, 168]
   assert.deepEqual(recentMetricsWindowOptions().map((option: {value: number}) => option.value), presets)
   const options = recentMetricsWindowOptions(3)
-  assert.deepEqual(options.map((option: {value: number}) => option.value), [1, 2, 3, 4, 6, 8, 12, 18, 24])
+  assert.deepEqual(options.map((option: {value: number}) => option.value), [1, 2, 3, 4, 6, 8, 12, 18, 24, 168])
+  assert.equal(options.find((option: {value: number}) => option.value === 168)?.label, "7 天")
   assert.equal(options.find((option: {value: number}) => option.value === 3)?.label, "每 3 小时")
 })
 // @ts-expect-error Node 22 原生 TypeScript 测试需要显式扩展名。

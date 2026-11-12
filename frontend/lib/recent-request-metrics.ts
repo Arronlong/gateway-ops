@@ -27,10 +27,10 @@ export type RecentRequestMetricValues = Pick<ReturnType<typeof recentRequestMetr
 
 const DEFAULT_WINDOW_HOURS = 1
 const MIN_WINDOW_HOURS = 1
-const MAX_WINDOW_HOURS = 24
+const MAX_WINDOW_HOURS = 168
 const RECENT_CUTOFF_MS = 45 * 1000
 export const DEFAULT_RECENT_METRICS_LIMIT = 60
-export const MAX_RECENT_METRICS_LIMIT = 200
+export const MAX_RECENT_METRICS_LIMIT = 1000
 
 export function normalizeRecentMetricsLimit(value = DEFAULT_RECENT_METRICS_LIMIT) {
   return Number.isSafeInteger(value) && value >= 1 ? Math.min(MAX_RECENT_METRICS_LIMIT, value) : DEFAULT_RECENT_METRICS_LIMIT

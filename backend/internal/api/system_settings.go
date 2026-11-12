@@ -64,11 +64,11 @@ func validateSystemSettings(settings storage.UISettings) error {
 	if err := storage.ValidatePelicanSettings(settings.PelicanSettings()); err != nil {
 		return err
 	}
-	if settings.RecentMetricsLimit < 1 || settings.RecentMetricsLimit > 200 {
-		return fmt.Errorf("recent metrics limit must be between 1 and 200")
+	if settings.RecentMetricsLimit < 1 || settings.RecentMetricsLimit > 1000 {
+		return fmt.Errorf("recent metrics limit must be between 1 and 1000")
 	}
-	if settings.RecentMetricsWindowHours < 1 || settings.RecentMetricsWindowHours > 24 {
-		return fmt.Errorf("recent metrics window hours must be between 1 and 24")
+	if settings.RecentMetricsWindowHours < 1 || settings.RecentMetricsWindowHours > 168 {
+		return fmt.Errorf("recent metrics window hours must be between 1 and 168")
 	}
 	switch settings.IframeEmbeddingMode {
 	case storage.IframeEmbeddingModeAll, storage.IframeEmbeddingModeAllowlist:

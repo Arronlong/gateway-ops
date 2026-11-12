@@ -187,6 +187,21 @@ func TestGroupRecentMetricsKeepRetryAttemptsAndExcludeAuxiliary(t *testing.T) {
 	}
 }
 
+func TestGroupRecentMetricsSevenDaysAndThousandSamples(t *testing.T) {
+	now := time.Now().UTC()
+	samples := make([]groupMetricSample, 1001)
+	for i := range samples {
+		samples[i] = groupMetricSample{createdAt: now.Add(-time.Duration(i+1) * 6 * time.Minute), success: true, usage: remoteUsage{InputTokens: 10, CacheReadTokens: 10, OutputTokens: 40, DurationMS: 1000}}
+	}
+	got := buildGroupRecentMetrics(samples, now, 168, 1000, true)
+	if got.WindowHours != 168 || got.SampleLimit != 1000 || got.SampleCount != 1000 || got.SuccessAttemptCount != 1000 {
+		t.Fatalf("seven-day settings were truncated: %+v", got)
+	}
+	if got.CacheHitRate == nil || *got.CacheHitRate != 0.5 || got.SuccessRate == nil || *got.SuccessRate != 1 || got.TPS == nil || *got.TPS != 40 {
+		t.Fatalf("unexpected seven-day aggregation: %+v", got)
+	}
+}
+
 func TestGroupRecentMetricsWindowLimitAndUnknownData(t *testing.T) {
 	now := time.Now().UTC()
 	usage := make([]remoteUsage, 0, 75)

@@ -9,19 +9,29 @@ async function main() {
   const output = path.resolve('outputs/recent-metrics-display')
   fs.mkdirSync(output, { recursive: true })
   const defaults = vm.runInNewContext('(' + fs.readFileSync('frontend/lib/system-settings.ts', 'utf8').match(/export const defaultSystemSettings: SystemSettings = (\{[\s\S]*?\n\})/)[1] + ')', { defaultPelicanPrompt: 'test' })
-  Object.assign(defaults, { pelican_page_enabled: false, recent_metrics_window_hours: 24, recent_metrics_limit: 60 })
+  const windowHours = Number(process.env.RECENT_METRICS_TEST_HOURS || 24)
+  const sampleLimit = Number(process.env.RECENT_METRICS_TEST_LIMIT || 60)
+  Object.assign(defaults, { pelican_page_enabled: false, recent_metrics_window_hours: windowHours, recent_metrics_limit: sampleLimit })
   const stamp = new Date().toISOString()
-  const samples = Array.from({ length: 2 }, (_, index) => ({ created_at: new Date(Date.now() - (index + 2) * 60000).toISOString(), model: 'text-fixture', success_known: true, success: index === 0, first_token_ms: 1000, duration_ms: 10000, input_tokens: 100, cache_read_tokens: 100, output_tokens: 400 }))
+  const samples = Array.from({ length: sampleLimit === 1000 ? 1000 : 2 }, (_, index) => ({ created_at: new Date(Date.now() - (index * 6 + 2) * 60000).toISOString(), model: 'text-fixture', success_known: true, success: index === 0, first_token_ms: 1000, duration_ms: 10000, input_tokens: 100, cache_read_tokens: 100, output_tokens: 400 }))
   const channel = { id: 1, name: 'Metrics Channel', site_url: 'https://example.invalid', type: 'newapi', credential_mode: 'token', username: 'fixture', login_headers: [], login_params: [], balance_mode: 'auto', monitor_enabled: true, balance_threshold: 5, last_balance: 100, accounts: [], created_at: stamp, updated_at: stamp }
   const station = { id: 1, name: 'Metrics Station', type: 'newapi', base_url: 'https://example.invalid', api_key_configured: true, auto_adjust_enabled: false, auto_adjust_no_profit_enabled: false, auto_priority_enabled: false, created_at: stamp }
   const account = { external_id: 1, name: 'Metrics Account', platform: 'openai', type: 'apikey', status: 'active', schedulable: true, concurrency: 1, current_concurrency: 0, priority: 1, pool_mode: false, pool_mode_retry_count: 0, latency_samples: samples, current_groups: [], unsafe_groups: [], no_profit_groups: [], downgrade_groups: [], suggested_group_ids: [], risk_state: 'protected', can_apply: false, usage_total_tokens: 1200, user_charge_amount: 1, account_cost_amount: 0.5 }
-  const recentMetrics = { window_hours: 24, sample_limit: 60, sample_count: 2, latest_at: samples[0].created_at, cache_hit_rate: 0.5, success_rate: 0.5, success_count: 1, success_attempt_count: 2, cache_input_tokens: 200, cache_read_tokens: 200, cache_creation_tokens: 0, tps: 40, tps_score: 80, tps_output_tokens: 800, tps_duration_seconds: 20, tps_models: ['text-fixture'] }
+  const recentMetrics = { window_hours: windowHours, sample_limit: sampleLimit, sample_count: samples.length, latest_at: samples[0].created_at, cache_hit_rate: 0.5, success_rate: 0.5, success_count: 1, success_attempt_count: samples.length, cache_input_tokens: samples.length * 100, cache_read_tokens: samples.length * 100, cache_creation_tokens: 0, tps: 40, tps_score: 80, tps_output_tokens: samples.length * 400, tps_duration_seconds: samples.length * 10, tps_models: ['text-fixture'] }
   const group = { external_id: 1, name: 'Metrics Group', rate_multiplier: 1, enabled: true, status: 'available', data_complete: true, updated_at: stamp, latest_call_at: samples[0].created_at, success_count: 1, failure_count: 1, consecutive_failures: 0, calls: samples, latency_buckets: [], recent_metrics: recentMetrics }
   const reports = []
   try {
     for (const width of [1440, 768, 390]) {
       const context = await browser.newContext({ viewport: { width, height: 1100 }, locale: 'zh-CN' })
       const page = await context.newPage(), errors = []
+      if (process.env.PELICAN_TEST_BUILT === '1') {
+        await page.route('http://localhost:3010/**', route => {
+          const pathname = new URL(route.request().url()).pathname
+          if (pathname.startsWith('/assets/')) return route.fulfill({path:path.resolve('frontend/dist', pathname.slice(1))})
+          if (route.request().resourceType() === 'document') return route.fulfill({path:path.resolve('frontend/dist/index.html'), contentType:'text/html'})
+          return route.fallback()
+        })
+      }
       page.on('pageerror', error => errors.push(error.message))
       await page.route('**/api/**', async route => {
         const request = route.request(), p = new URL(request.url()).pathname
@@ -54,14 +64,15 @@ async function main() {
               throw error
             })
           }
-          const cache = page.getByRole('button', { name: /24h \u7f13\u5b58\u547d\u4e2d\uff1a50\.0%/ }).first()
-          const tps = page.getByRole('button', { name: /24h TPS\uff1a40 Token\/s/ }).first()
+          const cache = page.getByRole('button', { name: new RegExp(`${windowHours}h \u7f13\u5b58\u547d\u4e2d\uff1a50\\.0%`) }).first()
+          const tps = page.getByRole('button', { name: new RegExp(`${windowHours}h TPS\uff1a40 Token/s`) }).first()
           await cache.waitFor({ timeout: 5000 }).catch(async error => {
             console.error(JSON.stringify({ target: target.name, mode, width, buttons: await page.locator('button[aria-label]').evaluateAll(elements => elements.map(element => element.getAttribute('aria-label'))), body: (await page.locator('body').textContent()).slice(-2500) }))
             throw error
           })
           await tps.waitFor()
           const metrics = cache.locator('..')
+          if (sampleLimit === 1000 && target.name !== 'monitor') assert.ok((await page.locator('body').innerText()).includes(`${samples.length}/${sampleLimit} 次`), 'all configured samples must be counted')
           assert.equal(await metrics.getByRole('button').count(), 2, 'only cache and TPS rings should remain')
           assert.equal(await page.getByRole('button', { name: /h \u91cd\u8bd5\u611f\u77e5\u6210\u529f\u7387/ }).count(), 0)
           await tps.scrollIntoViewIfNeeded()
