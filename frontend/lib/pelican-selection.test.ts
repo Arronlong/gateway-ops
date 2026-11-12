@@ -18,12 +18,12 @@ test("反向框选与正向框选使用相同矩形，触碰边界不算选中",
   assert.deepEqual([...getPelicanSelection(entries, {left: 25, top: 25, right: 25, bottom: 60})], [])
 })
 
-test("跨渠道、账号和分组删除使用各自路径，同一作品去重且跳过生成中作品", async () => {
+test("跨渠道、账号和分组删除使用各自路径并对同一作品去重", async () => {
   const channel = {id: 7, channel_id: 2, relay_station_id: 1, account_external_id: 3, group_external_id: 0, status: "success" as const}
   const account = {...channel, channel_id: 0, relay_station_id: 4}
   const group = {...account, group_external_id: 6, status: "failed" as const}
   const paths: string[] = []
-  const result = await deletePelicanResults([channel, account, group, channel, {...channel, id: 8, status: "running"}], async (path: string) => {paths.push(path)})
+  const result = await deletePelicanResults([channel, account, group, channel], async (path: string) => {paths.push(path)})
   assert.deepEqual(paths.sort(), [
     "/channels/2/pelican/results/7",
     "/relay-stations/4/accounts/3/pelican/results/7",
@@ -31,6 +31,16 @@ test("跨渠道、账号和分组删除使用各自路径，同一作品去重�
   ])
   assert.deepEqual(result.deleted, [channel, account, group])
   assert.deepEqual(result.failed, [])
+})
+
+test("运行中记录可按渠道、账号和分组批量删除", async () => {
+  const channel = {id: 9, channel_id: 2, relay_station_id: 0, account_external_id: 0, group_external_id: 0, status: "running" as const}
+  const account = {...channel, channel_id: 0, relay_station_id: 4, account_external_id: 3}
+  const group = {...account, account_external_id: 0, group_external_id: 6}
+  const paths: string[] = []
+  const result = await deletePelicanResults([channel, account, group], async (path:string)=>{paths.push(path)})
+  assert.deepEqual(paths, ["/channels/2/pelican/results/9", "/relay-stations/4/accounts/3/pelican/results/9", "/relay-stations/4/groups/6/pelican/results/9"])
+  assert.deepEqual(result.deleted, [channel, account, group])
 })
 
 test("删除限制并发数量，单项失败不阻断其余作品并保留错误", async () => {

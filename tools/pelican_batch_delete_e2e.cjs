@@ -86,8 +86,15 @@ async function main() {
     }
     await page.goto("http://localhost:3010/pelican")
     await checkbox(groupResult).waitFor()
-    assert.equal(await page.getByRole("checkbox").count(), 6)
-    assert.equal(await artwork(channelResults[3]).getByRole("checkbox").count(), 0)
+    assert.equal(await page.getByRole("checkbox").count(), 7)
+    assert.equal(await artwork(channelResults[3]).getByRole("checkbox").count(), 1)
+    await artwork(channelResults[3]).getByRole("button", {name: "删除测智作品 9", exact:true}).click()
+    await page.getByRole("alertdialog").getByRole("button", {name:"确认删除", exact:true}).click()
+    await artwork(channelResults[3]).waitFor({state:"hidden"})
+    assert.deepEqual(calls, [resultPath(channelResults[3])])
+    deleted.clear(); calls.length=0
+    await page.reload()
+    await checkbox(channelResults[3]).waitFor()
     const card = await artwork(channelResults[0]).boundingBox(), check = await checkbox(channelResults[0]).boundingBox()
     assert.ok(check.x >= card.x && check.x < card.x + 40 && check.y >= card.y && check.y < card.y + 40)
     await checkbox(channelResults[0]).click()
@@ -167,18 +174,18 @@ async function main() {
 
     // 取消确认不发送删除请求；部分失败保留原来源的勾选，随后可以重试。
     await toolbar.getByRole("button", {name: "全选当前结果", exact: true}).click()
-    await selectedCount(6)
-    await toolbar.getByRole("button", {name: "批量删除 (6)", exact: true}).click()
+    await selectedCount(7)
+    await toolbar.getByRole("button", {name: "批量删除 (7)", exact: true}).click()
     await page.getByRole("alertdialog").getByRole("button", {name: "取消", exact: true}).click()
     assert.deepEqual(calls, [])
-    await selectedCount(6)
+    await selectedCount(7)
     failed.add(resultPath(groupResult))
-    await toolbar.getByRole("button", {name: "批量删除 (6)", exact: true}).click()
+    await toolbar.getByRole("button", {name: "批量删除 (7)", exact: true}).click()
     await page.getByRole("alertdialog").getByRole("button", {name: "确认批量删除", exact: true}).click()
     await selectedCount(1)
-    assert.equal(calls.length, 6)
-    assert.equal(new Set(calls).size, 6)
-    assert.ok(!calls.includes(resultPath(channelResults[3])))
+    assert.equal(calls.length, 7)
+    assert.equal(new Set(calls).size, 7)
+    assert.ok(calls.includes(resultPath(channelResults[3])))
     assert.equal(await page.getByRole("checkbox").count(), 1)
     assert.equal(await checkbox(groupResult).getAttribute("data-state"), "checked")
     failed.clear()
@@ -220,7 +227,7 @@ async function main() {
     await selectedCount(0)
     assert.equal(await artwork(channelResults[0]).count(), 0)
     assert.deepEqual(errors, [])
-    const report = {passed: true, escapeDoesNotPreview: true, blurCancelsSelection: true, lostPointerUpCancelsSelection: true, checkboxTopLeft: true, crossSource: true, dragBothDirections: true, additiveDrag: true, preview: true, filterCleanup: true, refreshKeepsSelection: true, cancelDoesNotDelete: true, partialFailureRetry: true, runningExcluded: true, keyboard: true, mobile: true, refreshFailureHidesDeleted: true, deleteRequests: calls.length, errors}
+    const report = {passed: true, escapeDoesNotPreview: true, blurCancelsSelection: true, lostPointerUpCancelsSelection: true, checkboxTopLeft: true, crossSource: true, dragBothDirections: true, additiveDrag: true, preview: true, filterCleanup: true, refreshKeepsSelection: true, cancelDoesNotDelete: true, partialFailureRetry: true, runningSingleDelete: true, runningBatchDelete: true, keyboard: true, mobile: true, refreshFailureHidesDeleted: true, deleteRequests: calls.length, errors}
     fs.writeFileSync("outputs/pelican-batch-delete/report.json", JSON.stringify(report, null, 2), "utf8")
     console.log(JSON.stringify(report))
   } finally {await browser.close()}

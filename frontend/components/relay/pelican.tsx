@@ -259,8 +259,8 @@ function PelicanThumbnail({result,grid=false,allowDelete=false}:{result:PelicanR
  },[visible,active,result.id,result.channel_id,result.relay_station_id,result.account_external_id,result.group_external_id,result.finished_at,result.status,context.readOnly])
  if(selection?.removed)return null
  return <div ref={ref} data-pelican-artwork={selection?pelicanResultPath(result):undefined} className={`relative ${grid?"w-full min-w-0":"w-56 shrink-0 snap-start"} overflow-hidden rounded-lg border ${selection?.checked?"border-brand ring-2 ring-brand/30":"border-border"} bg-card`}>
-  {selection&&result.status!=="running"?<Checkbox className="absolute left-2 top-2 z-20 size-5 bg-card/95 shadow-sm" aria-label={`选择测智作品 ${result.id}`} checked={selection.checked} disabled={selection.busy} onCheckedChange={selection.toggle}/>:null}
-  {allowDelete&&result.status!=="running"?<PelicanDeleteButton result={result} compact disabled={selection?.busy}/>:null}
+  {selection?<Checkbox className="absolute left-2 top-2 z-20 size-5 bg-card/95 shadow-sm" aria-label={`选择测智作品 ${result.id}`} checked={selection.checked} disabled={selection.busy} onCheckedChange={selection.toggle}/>:null}
+  {allowDelete?<PelicanDeleteButton result={result} compact disabled={selection?.busy}/>:null}
   <div className="aspect-[4/3] overflow-hidden bg-muted/30">
    {image?<img src={image} alt={`测智作品 ${result.id} 静态预览`} width={448} height={336} decoding="async" className="h-full w-full object-contain" onError={()=>{setImage("");setError("预览不可用，点击查看原图")}}/>:null}
    {!image||error?<p className="flex h-full items-center justify-center p-3 text-center text-xs text-muted-foreground">{result.status==="running"?"生成中…":result.status==="failed"?"本次生成失败":error||"点击作品可交互播放"}</p>:null}

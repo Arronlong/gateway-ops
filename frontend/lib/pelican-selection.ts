@@ -22,7 +22,7 @@ export function getPelicanSelection(entries: readonly {key: string; rect: Pelica
 type DeletablePelicanResult = Pick<PelicanResult, "id" | "channel_id" | "relay_station_id" | "account_external_id" | "group_external_id" | "status">
 
 export async function deletePelicanResults<T extends DeletablePelicanResult>(results: readonly T[], remove: (path: string, result: T) => Promise<unknown>) {
-  const unique = [...new Map(results.filter(result => result.status !== "running").map(result => [pelicanResultPath(result), result])).values()]
+  const unique = [...new Map(results.map(result => [pelicanResultPath(result), result])).values()]
   const outcomes: ({result: T; error: unknown} | null)[] = []
   let next = 0
   await Promise.all(Array.from({length: Math.min(4, unique.length)}, async () => {

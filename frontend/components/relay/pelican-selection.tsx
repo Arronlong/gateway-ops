@@ -27,7 +27,7 @@ export function usePelicanResultSelection(result: PelicanResult, ref: RefObject<
   const register = context?.register
   const removed = context?.removed.has(key) ?? false
   useEffect(() => {
-    if (!register || !ref.current || removed || result.status === "running") return
+    if (!register || !ref.current || removed) return
     return register(key, {element: ref.current, result: () => latest.current})
   }, [key, register, ref, removed, result.status])
   return context ? {checked: context.selected.has(key), busy: context.busy, removed, toggle: () => context.toggle(key)} : null
@@ -149,7 +149,7 @@ export function PelicanSelection({children, onRefresh}: {children: ReactNode; on
     if (busyRef.current) return
     const results = [...selected].flatMap(key => {
       const result = entries.current.get(key)?.result()
-      return result && result.status !== "running" ? [result] : []
+      return result ? [result] : []
     })
     if (!results.length) return
     busyRef.current = true
