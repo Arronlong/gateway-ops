@@ -68,12 +68,13 @@ type Channel struct {
 	// ManualUsageBasis identifies the bound relay accounts and cost formula used
 	// to produce ManualUsageBaseline. A changed basis starts a fresh period so
 	// historical usage is never repriced with a new account multiplier.
-	ManualUsageBasis string  `gorm:"size:64;not null;default:''" json:"-"`
-	Remark           string  `gorm:"size:512" json:"remark,omitempty"`
-	TurnstileEnabled bool    `gorm:"default:false" json:"turnstile_enabled"`
-	CaptchaConfigID  *uint   `json:"captcha_config_id,omitempty"`
-	BalanceThreshold float64 `gorm:"default:0" json:"balance_threshold"`
-	MonitorEnabled   bool    `gorm:"default:true" json:"monitor_enabled"`
+	ManualUsageBasis      string  `gorm:"size:64;not null;default:''" json:"-"`
+	Remark                string  `gorm:"size:512" json:"remark,omitempty"`
+	TurnstileEnabled      bool    `gorm:"default:false" json:"turnstile_enabled"`
+	CaptchaConfigID       *uint   `json:"captcha_config_id,omitempty"`
+	BalanceThreshold      float64 `gorm:"default:0" json:"balance_threshold"`
+	MonitorEnabled        bool    `gorm:"default:true" json:"monitor_enabled"`
+	ExcludeFromStatistics bool    `gorm:"not null;default:false" json:"exclude_from_statistics"`
 
 	// 最近一次采集结果（聚合视图，便于列表页直接展示）
 	LastBalance          *float64   `json:"last_balance,omitempty"`

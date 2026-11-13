@@ -67,6 +67,7 @@ export interface Channel {
   captcha_config_id?: number | null
   balance_threshold: number
   monitor_enabled: boolean
+  exclude_from_statistics?: boolean
   last_balance?: number | null
   last_balance_at?: string | null
   last_error?: string
@@ -307,6 +308,7 @@ export interface DashboardChannelStat {
   type: string
   site_url: string
   monitor_enabled: boolean
+  exclude_from_statistics?: boolean
   last_balance?: number | null
   last_error?: string
 }

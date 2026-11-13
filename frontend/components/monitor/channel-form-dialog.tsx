@@ -30,7 +30,8 @@ import {
 import type { BalanceMode, CaptchaConfig, Channel, ChannelRelayAssociationSnapshot, ChannelType, CredentialMode, RequestKV } from "@/lib/api-types"
 import { apiFetch } from "@/lib/api"
 import { useTriggerRefresh } from "@/lib/refresh-context"
-import { useCaptchaConfigs } from "@/lib/queries"
+import { useCaptchaConfigs, useChannels } from "@/lib/queries"
+import { duplicateStatisticsChannels } from "@/lib/channel-statistics"
 import { cn } from "@/lib/utils"
 import { ChannelRelayAssociationEditor } from "@/components/monitor/channel-relay-association-editor"
 import { ProxySelect } from "@/components/monitor/proxy-select"
@@ -79,6 +80,7 @@ interface FormState {
 
   balance_threshold: string
   monitor_enabled: boolean
+  exclude_from_statistics: boolean
   turnstile_enabled: boolean
   captcha_config_id: string // "" 表示不绑定
   additional_accounts: AdditionalAccountForm[]
@@ -207,6 +209,7 @@ function initialState(c?: Channel | null): FormState {
     sub2api_refresh_token: "",
     balance_threshold: c?.balance_threshold != null ? String(c.balance_threshold) : "0",
     monitor_enabled: c?.monitor_enabled ?? true,
+    exclude_from_statistics: c?.exclude_from_statistics ?? false,
     turnstile_enabled: c?.turnstile_enabled ?? false,
     captcha_config_id: c?.captcha_config_id != null ? String(c.captcha_config_id) : "",
     additional_accounts: (c?.accounts ?? [])
@@ -324,6 +327,8 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
   const [error, setError] = useState<string | null>(null)
   const refresh = useTriggerRefresh()
   const captchas = useCaptchaConfigs()
+  const statisticsChannels = useChannels(true, open)
+  const statisticsDuplicates = duplicateStatisticsChannels({ ...form, id: channel?.id, accounts: form.additional_accounts }, statisticsChannels.data ?? [])
 
   // 打开 / 切换目标渠道时重置表单。
   useEffect(() => {
@@ -369,6 +374,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
           remark: form.remark.trim(),
           balance_threshold: threshold,
           monitor_enabled: form.monitor_enabled,
+          exclude_from_statistics: form.exclude_from_statistics,
         }
         if (form.clear_pelican_api_key) body.pelican_api_key = ""
         else if (form.pelican_api_key.trim()) body.pelican_api_key = form.pelican_api_key.trim()
@@ -447,6 +453,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
           remark: form.remark.trim(),
           balance_threshold: threshold,
           monitor_enabled: form.monitor_enabled,
+          exclude_from_statistics: form.exclude_from_statistics,
           turnstile_enabled: !isTokenMode && form.turnstile_enabled,
           captcha_config_id: captchaConfigID,
 		  accounts: additionalAccounts,
@@ -479,6 +486,7 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
             token_credential: isTokenMode ? tokenCredential : "",
             balance_threshold: threshold,
             monitor_enabled: form.monitor_enabled,
+            exclude_from_statistics: form.exclude_from_statistics,
             turnstile_enabled: !isTokenMode && form.turnstile_enabled,
             captcha_config_id: captchaConfigID,
 			accounts: additionalAccounts,
@@ -860,6 +868,17 @@ export function ChannelFormDialog({ open, onOpenChange, channel, associationSnap
               onCheckedChange={(v) => setForm({ ...form, monitor_enabled: v })}
               disabled={submitting}
             />
+          </div>
+
+          <div className="space-y-2 rounded-lg border border-border px-3 py-2">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <Label htmlFor="include-in-statistics" className="text-sm font-medium">计入汇总统计</Label>
+                <p className="text-xs text-muted-foreground">关闭后继续监控并保留明细，不计入渠道余额、消耗和请求数汇总。</p>
+              </div>
+              <Switch id="include-in-statistics" checked={!form.exclude_from_statistics} onCheckedChange={(value) => setForm({ ...form, exclude_from_statistics: !value })} disabled={submitting} />
+            </div>
+            {statisticsDuplicates.length > 0 ? <p role="status" className="break-words text-xs text-amber-700 dark:text-amber-400">与 {statisticsDuplicates.map(item => item.name).join("、")} 使用相同上游账号，汇总可能重复；可关闭重复渠道的「计入汇总统计」。</p> : null}
           </div>
 
           {/* Turnstile / 打码：token 模式下整段不展示 */}

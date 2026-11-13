@@ -128,25 +128,26 @@ func updateChannelRelayAssociation(c *gin.Context, d *Deps) {
 }
 
 type channelInput struct {
-	Name             string                 `json:"name" binding:"required"`
-	Type             storage.ChannelType    `json:"type" binding:"required"`
-	SiteURL          string                 `json:"site_url" binding:"required"`
-	ProxyID          *uint                  `json:"proxy_id"`
-	Username         string                 `json:"username"`
-	Password         string                 `json:"password"`
-	CredentialMode   storage.CredentialMode `json:"credential_mode"`
-	BalanceMode      storage.BalanceMode    `json:"balance_mode"`
-	ManualBalance    float64                `json:"manual_balance"`
-	Remark           string                 `json:"remark"`
-	TokenCredential  string                 `json:"token_credential"` // JSON：token 模式时填写
-	PelicanAPIKey    string                 `json:"pelican_api_key"`
-	LoginHeaders     *[]channel.RequestKV   `json:"login_headers"`
-	LoginParams      *[]channel.RequestKV   `json:"login_params"`
-	TurnstileEnabled bool                   `json:"turnstile_enabled"`
-	CaptchaConfigID  *uint                  `json:"captcha_config_id"`
-	BalanceThreshold float64                `json:"balance_threshold"`
-	MonitorEnabled   bool                   `json:"monitor_enabled"`
-	Accounts         []channelAccountInput  `json:"accounts"`
+	Name                  string                 `json:"name" binding:"required"`
+	Type                  storage.ChannelType    `json:"type" binding:"required"`
+	SiteURL               string                 `json:"site_url" binding:"required"`
+	ProxyID               *uint                  `json:"proxy_id"`
+	Username              string                 `json:"username"`
+	Password              string                 `json:"password"`
+	CredentialMode        storage.CredentialMode `json:"credential_mode"`
+	BalanceMode           storage.BalanceMode    `json:"balance_mode"`
+	ManualBalance         float64                `json:"manual_balance"`
+	Remark                string                 `json:"remark"`
+	TokenCredential       string                 `json:"token_credential"` // JSON：token 模式时填写
+	PelicanAPIKey         string                 `json:"pelican_api_key"`
+	LoginHeaders          *[]channel.RequestKV   `json:"login_headers"`
+	LoginParams           *[]channel.RequestKV   `json:"login_params"`
+	TurnstileEnabled      bool                   `json:"turnstile_enabled"`
+	CaptchaConfigID       *uint                  `json:"captcha_config_id"`
+	BalanceThreshold      float64                `json:"balance_threshold"`
+	MonitorEnabled        bool                   `json:"monitor_enabled"`
+	ExcludeFromStatistics bool                   `json:"exclude_from_statistics"`
+	Accounts              []channelAccountInput  `json:"accounts"`
 }
 
 type channelAccountInput struct {
@@ -160,24 +161,25 @@ type channelAccountInput struct {
 }
 
 type channelUpdateInput struct {
-	Name             *string                 `json:"name"`
-	SiteURL          *string                 `json:"site_url"`
-	ProxyID          json.RawMessage         `json:"proxy_id"`
-	Username         *string                 `json:"username"`
-	Password         *string                 `json:"password"`
-	CredentialMode   *storage.CredentialMode `json:"credential_mode"`
-	BalanceMode      *storage.BalanceMode    `json:"balance_mode"`
-	ManualBalance    *float64                `json:"manual_balance"`
-	Remark           *string                 `json:"remark"`
-	TokenCredential  *string                 `json:"token_credential"`
-	PelicanAPIKey    *string                 `json:"pelican_api_key"`
-	LoginHeaders     *[]channel.RequestKV    `json:"login_headers"`
-	LoginParams      *[]channel.RequestKV    `json:"login_params"`
-	TurnstileEnabled *bool                   `json:"turnstile_enabled"`
-	CaptchaConfigID  *uint                   `json:"captcha_config_id"`
-	BalanceThreshold *float64                `json:"balance_threshold"`
-	MonitorEnabled   *bool                   `json:"monitor_enabled"`
-	Accounts         *[]channelAccountInput  `json:"accounts"`
+	Name                  *string                 `json:"name"`
+	SiteURL               *string                 `json:"site_url"`
+	ProxyID               json.RawMessage         `json:"proxy_id"`
+	Username              *string                 `json:"username"`
+	Password              *string                 `json:"password"`
+	CredentialMode        *storage.CredentialMode `json:"credential_mode"`
+	BalanceMode           *storage.BalanceMode    `json:"balance_mode"`
+	ManualBalance         *float64                `json:"manual_balance"`
+	Remark                *string                 `json:"remark"`
+	TokenCredential       *string                 `json:"token_credential"`
+	PelicanAPIKey         *string                 `json:"pelican_api_key"`
+	LoginHeaders          *[]channel.RequestKV    `json:"login_headers"`
+	LoginParams           *[]channel.RequestKV    `json:"login_params"`
+	TurnstileEnabled      *bool                   `json:"turnstile_enabled"`
+	CaptchaConfigID       *uint                   `json:"captcha_config_id"`
+	BalanceThreshold      *float64                `json:"balance_threshold"`
+	MonitorEnabled        *bool                   `json:"monitor_enabled"`
+	ExcludeFromStatistics *bool                   `json:"exclude_from_statistics"`
+	Accounts              *[]channelAccountInput  `json:"accounts"`
 }
 
 func listChannels(c *gin.Context, d *Deps) {
@@ -391,6 +393,9 @@ func channelSummary(c *gin.Context, d *Deps) {
 			failedCount++
 		} else if item.MonitorEnabled {
 			activeCount++
+		}
+		if item.ExcludeFromStatistics {
+			continue
 		}
 		if balance != nil {
 			totalBalance += *balance
@@ -619,25 +624,26 @@ func createChannel(c *gin.Context, d *Deps) {
 		return
 	}
 	created, err := d.ChannelSvc.Create(channel.CreateInput{
-		Name:               in.Name,
-		Type:               in.Type,
-		SiteURL:            in.SiteURL,
-		ProxyID:            in.ProxyID,
-		Username:           in.Username,
-		Password:           in.Password,
-		CredentialMode:     in.CredentialMode,
-		TokenCredential:    in.TokenCredential,
-		PelicanAPIKey:      in.PelicanAPIKey,
-		LoginHeaders:       in.LoginHeaders,
-		LoginParams:        in.LoginParams,
-		BalanceMode:        in.BalanceMode,
-		ManualBalance:      in.ManualBalance,
-		Remark:             in.Remark,
-		TurnstileEnabled:   in.TurnstileEnabled,
-		CaptchaConfigID:    in.CaptchaConfigID,
-		BalanceThreshold:   in.BalanceThreshold,
-		MonitorEnabled:     in.MonitorEnabled,
-		AdditionalAccounts: additionalAccountInputs(in.Accounts),
+		Name:                  in.Name,
+		Type:                  in.Type,
+		SiteURL:               in.SiteURL,
+		ProxyID:               in.ProxyID,
+		Username:              in.Username,
+		Password:              in.Password,
+		CredentialMode:        in.CredentialMode,
+		TokenCredential:       in.TokenCredential,
+		PelicanAPIKey:         in.PelicanAPIKey,
+		LoginHeaders:          in.LoginHeaders,
+		LoginParams:           in.LoginParams,
+		BalanceMode:           in.BalanceMode,
+		ManualBalance:         in.ManualBalance,
+		Remark:                in.Remark,
+		TurnstileEnabled:      in.TurnstileEnabled,
+		CaptchaConfigID:       in.CaptchaConfigID,
+		BalanceThreshold:      in.BalanceThreshold,
+		MonitorEnabled:        in.MonitorEnabled,
+		ExcludeFromStatistics: in.ExcludeFromStatistics,
+		AdditionalAccounts:    additionalAccountInputs(in.Accounts),
 	})
 	if err != nil {
 		fail(c, channelErrorStatus(err), err)
@@ -691,24 +697,25 @@ func updateChannel(c *gin.Context, d *Deps) {
 		proxyID = &value
 	}
 	updated, err := d.ChannelSvc.Update(id, channel.UpdateInput{
-		Name:               in.Name,
-		SiteURL:            in.SiteURL,
-		ProxyID:            proxyID,
-		Username:           in.Username,
-		Password:           in.Password,
-		CredentialMode:     in.CredentialMode,
-		TokenCredential:    in.TokenCredential,
-		PelicanAPIKey:      in.PelicanAPIKey,
-		LoginHeaders:       in.LoginHeaders,
-		LoginParams:        in.LoginParams,
-		BalanceMode:        in.BalanceMode,
-		ManualBalance:      in.ManualBalance,
-		Remark:             in.Remark,
-		TurnstileEnabled:   in.TurnstileEnabled,
-		CaptchaConfigID:    in.CaptchaConfigID,
-		BalanceThreshold:   in.BalanceThreshold,
-		MonitorEnabled:     in.MonitorEnabled,
-		AdditionalAccounts: additionalAccountInputsPtr(in.Accounts),
+		Name:                  in.Name,
+		SiteURL:               in.SiteURL,
+		ProxyID:               proxyID,
+		Username:              in.Username,
+		Password:              in.Password,
+		CredentialMode:        in.CredentialMode,
+		TokenCredential:       in.TokenCredential,
+		PelicanAPIKey:         in.PelicanAPIKey,
+		LoginHeaders:          in.LoginHeaders,
+		LoginParams:           in.LoginParams,
+		BalanceMode:           in.BalanceMode,
+		ManualBalance:         in.ManualBalance,
+		Remark:                in.Remark,
+		TurnstileEnabled:      in.TurnstileEnabled,
+		CaptchaConfigID:       in.CaptchaConfigID,
+		BalanceThreshold:      in.BalanceThreshold,
+		MonitorEnabled:        in.MonitorEnabled,
+		ExcludeFromStatistics: in.ExcludeFromStatistics,
+		AdditionalAccounts:    additionalAccountInputsPtr(in.Accounts),
 	})
 	if err != nil {
 		fail(c, channelErrorStatus(err), err)

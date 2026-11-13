@@ -4,6 +4,7 @@ import { memo, startTransition, useEffect, useMemo, useRef, useState } from "rea
 import type { CSSProperties } from "react"
 import { toast } from "sonner"
 import { Link } from "react-router-dom"
+import { ChannelStatisticsStatus } from "@/components/monitor/channel-statistics-status"
 import {
   ArrowDown,
   ArrowUp,
@@ -1251,6 +1252,7 @@ actions={<>
                   >
                     {c.name}
                   </a>
+                  <ChannelStatisticsStatus channel={c} channels={channels ?? []} />
                   {channelSectionVisible(uiSettings, "rate_changes") && c.latest_ratio_changed_at ? (
                     <span className="text-[10px] text-muted-foreground" title="最近一次分组倍率变动">
                       {relativeTime(c.latest_ratio_changed_at)}
@@ -1477,6 +1479,7 @@ actions={<>
               <div className="min-w-0 lg:sticky lg:left-0 lg:z-20 lg:flex lg:self-stretch lg:flex-col lg:justify-center lg:bg-card">
                 <div className="flex min-w-0 items-center gap-2">
                   <a href={c.site_url} target="_blank" rel="noreferrer" className="min-w-0 truncate text-sm font-semibold text-foreground hover:text-brand hover:underline" title={c.name}>{c.name}</a>
+                  <ChannelStatisticsStatus channel={c} channels={channels ?? []} />
                   {accounts.length > 1 ? <span className="shrink-0 rounded bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan-700 dark:text-cyan-400">多账号</span> : null}
                 </div>
                 <a href={c.site_url} target="_blank" rel="noreferrer" className="mt-1 truncate text-[11px] text-muted-foreground hover:text-brand" title={c.site_url}>{siteHost(c.site_url)}</a>

@@ -83,10 +83,7 @@ func operationsSummary(c *gin.Context, d *Deps) {
 		RelayCallCostComplete: true,
 		RelayStations:         make([]operationRelayStationView, 0, len(stations)),
 	}
-	for _, channel := range channels {
-		costMetrics.ChannelBalanceAmount += currentChannelBalance(channel)
-		costMetrics.ChannelBalanceDecreaseAmount += channelBalanceDecrease[channel.ID]
-	}
+	costMetrics.ChannelBalanceAmount, costMetrics.ChannelBalanceDecreaseAmount = operationChannelBalances(channels, channelBalanceDecrease)
 	successfulRelayCount := int64(0)
 	for _, station := range stations {
 		stationExpense := stationExpenses[station.ID]

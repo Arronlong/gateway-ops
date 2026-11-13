@@ -96,25 +96,26 @@ type Sub2APITokenCredential struct {
 //   - password: Password 必填；Username 为登录账号
 //   - token:    TokenCredential 必填（已序列化为 JSON 字符串）；Username 仅作展示备注
 type CreateInput struct {
-	Name               string
-	Type               storage.ChannelType
-	SiteURL            string
-	ProxyID            *uint
-	Username           string
-	Password           string
-	CredentialMode     storage.CredentialMode
-	BalanceMode        storage.BalanceMode
-	ManualBalance      float64
-	Remark             string
-	TokenCredential    string // JSON：password 模式时为空
-	PelicanAPIKey      string
-	LoginHeaders       *[]RequestKV
-	LoginParams        *[]RequestKV
-	TurnstileEnabled   bool
-	CaptchaConfigID    *uint
-	BalanceThreshold   float64
-	MonitorEnabled     bool
-	AdditionalAccounts []AdditionalAccountInput
+	Name                  string
+	Type                  storage.ChannelType
+	SiteURL               string
+	ProxyID               *uint
+	Username              string
+	Password              string
+	CredentialMode        storage.CredentialMode
+	BalanceMode           storage.BalanceMode
+	ManualBalance         float64
+	Remark                string
+	TokenCredential       string // JSON：password 模式时为空
+	PelicanAPIKey         string
+	LoginHeaders          *[]RequestKV
+	LoginParams           *[]RequestKV
+	TurnstileEnabled      bool
+	CaptchaConfigID       *uint
+	BalanceThreshold      float64
+	MonitorEnabled        bool
+	ExcludeFromStatistics bool
+	AdditionalAccounts    []AdditionalAccountInput
 }
 
 // AdditionalAccountInput is a credential record under an automatically read
@@ -189,23 +190,24 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 		return nil, fmt.Errorf("encode login params: %w", err)
 	}
 	c := &storage.Channel{
-		Name:             name,
-		Type:             in.Type,
-		SiteURL:          in.SiteURL,
-		ProxyID:          proxyID,
-		Username:         in.Username,
-		PasswordCipher:   enc,
-		PelicanKeyCipher: pelicanKeyCipher,
-		CredentialMode:   mode,
-		LoginHeadersJSON: loginHeadersJSON,
-		LoginParamsJSON:  loginParamsJSON,
-		BalanceMode:      balanceMode,
-		ManualBalance:    in.ManualBalance,
-		Remark:           remark,
-		TurnstileEnabled: in.TurnstileEnabled && mode == storage.CredentialModePassword, // token 模式不需要打码
-		CaptchaConfigID:  in.CaptchaConfigID,
-		BalanceThreshold: in.BalanceThreshold,
-		MonitorEnabled:   in.MonitorEnabled,
+		Name:                  name,
+		Type:                  in.Type,
+		SiteURL:               in.SiteURL,
+		ProxyID:               proxyID,
+		Username:              in.Username,
+		PasswordCipher:        enc,
+		PelicanKeyCipher:      pelicanKeyCipher,
+		CredentialMode:        mode,
+		LoginHeadersJSON:      loginHeadersJSON,
+		LoginParamsJSON:       loginParamsJSON,
+		BalanceMode:           balanceMode,
+		ManualBalance:         in.ManualBalance,
+		Remark:                remark,
+		TurnstileEnabled:      in.TurnstileEnabled && mode == storage.CredentialModePassword, // token 模式不需要打码
+		CaptchaConfigID:       in.CaptchaConfigID,
+		BalanceThreshold:      in.BalanceThreshold,
+		MonitorEnabled:        in.MonitorEnabled,
+		ExcludeFromStatistics: in.ExcludeFromStatistics,
 	}
 	if balanceMode == storage.BalanceModeManual {
 		c.Username = ""
@@ -235,24 +237,25 @@ func (s *Service) Create(in CreateInput) (*storage.Channel, error) {
 
 // UpdateInput 编辑渠道的可选字段。Password / TokenCredential 为空表示不修改凭据。
 type UpdateInput struct {
-	Name               *string
-	SiteURL            *string
-	ProxyID            *uint
-	Username           *string
-	Password           *string
-	CredentialMode     *storage.CredentialMode
-	BalanceMode        *storage.BalanceMode
-	ManualBalance      *float64
-	Remark             *string
-	TokenCredential    *string // JSON
-	PelicanAPIKey      *string
-	LoginHeaders       *[]RequestKV
-	LoginParams        *[]RequestKV
-	TurnstileEnabled   *bool
-	CaptchaConfigID    *uint
-	BalanceThreshold   *float64
-	MonitorEnabled     *bool
-	AdditionalAccounts *[]AdditionalAccountInput
+	Name                  *string
+	SiteURL               *string
+	ProxyID               *uint
+	Username              *string
+	Password              *string
+	CredentialMode        *storage.CredentialMode
+	BalanceMode           *storage.BalanceMode
+	ManualBalance         *float64
+	Remark                *string
+	TokenCredential       *string // JSON
+	PelicanAPIKey         *string
+	LoginHeaders          *[]RequestKV
+	LoginParams           *[]RequestKV
+	TurnstileEnabled      *bool
+	CaptchaConfigID       *uint
+	BalanceThreshold      *float64
+	MonitorEnabled        *bool
+	ExcludeFromStatistics *bool
+	AdditionalAccounts    *[]AdditionalAccountInput
 }
 
 func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
@@ -420,6 +423,9 @@ func (s *Service) Update(id uint, in UpdateInput) (*storage.Channel, error) {
 	}
 	if in.MonitorEnabled != nil {
 		c.MonitorEnabled = *in.MonitorEnabled
+	}
+	if in.ExcludeFromStatistics != nil {
+		c.ExcludeFromStatistics = *in.ExcludeFromStatistics
 	}
 	if err := s.Channels.Update(c); err != nil {
 		return nil, err

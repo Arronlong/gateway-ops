@@ -116,3 +116,13 @@ func currentChannelBalance(channel storage.Channel) float64 {
 	}
 	return 0
 }
+
+func operationChannelBalances(channels []storage.Channel, decreases map[uint]float64) (balance, decrease float64) {
+	for _, channel := range channels {
+		if !channel.ExcludeFromStatistics {
+			balance += currentChannelBalance(channel)
+			decrease += decreases[channel.ID]
+		}
+	}
+	return balance, decrease
+}

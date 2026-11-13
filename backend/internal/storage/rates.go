@@ -714,6 +714,7 @@ func (r *Rates) AggregateBalanceTrendWindow(since, until time.Time, bucket strin
 				MAX(sampled_at) AS last_at
 			FROM balance_snapshots
 			WHERE sampled_at >= ? AND sampled_at < ?
+			  AND channel_id IN (SELECT id FROM channels WHERE deleted_at IS NULL AND exclude_from_statistics = false)
 			GROUP BY channel_id, bucket
 		)
 		SELECT pb.bucket AS day, SUM(bs.balance) AS balance
@@ -746,7 +747,7 @@ func (r *Rates) AggregateBalanceTrendSince(since time.Time, until ...time.Time) 
 		Balance float64
 	}
 	var rows []row
-	where := "sampled_at >= ?"
+	where := "sampled_at >= ? AND channel_id IN (SELECT id FROM channels WHERE deleted_at IS NULL AND exclude_from_statistics = false)"
 	args := []any{since}
 	if len(until) > 0 && !until[0].IsZero() {
 		where += " AND sampled_at < ?"
@@ -797,7 +798,7 @@ func (r *Rates) AggregateBalanceTrendHourlySince(since time.Time, until ...time.
 		Balance float64
 	}
 	var rows []row
-	where := "sampled_at >= ?"
+	where := "sampled_at >= ? AND channel_id IN (SELECT id FROM channels WHERE deleted_at IS NULL AND exclude_from_statistics = false)"
 	args := []any{since}
 	if len(until) > 0 && !until[0].IsZero() {
 		where += " AND sampled_at < ?"

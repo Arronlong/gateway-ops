@@ -25,13 +25,14 @@ type dashboardLowest struct {
 }
 
 type dashboardChannelStat struct {
-	ID             uint     `json:"id"`
-	Name           string   `json:"name"`
-	Type           string   `json:"type"`
-	SiteURL        string   `json:"site_url"`
-	MonitorEnabled bool     `json:"monitor_enabled"`
-	LastBalance    *float64 `json:"last_balance,omitempty"`
-	LastError      string   `json:"last_error,omitempty"`
+	ID                    uint     `json:"id"`
+	Name                  string   `json:"name"`
+	Type                  string   `json:"type"`
+	SiteURL               string   `json:"site_url"`
+	MonitorEnabled        bool     `json:"monitor_enabled"`
+	ExcludeFromStatistics bool     `json:"exclude_from_statistics"`
+	LastBalance           *float64 `json:"last_balance,omitempty"`
+	LastError             string   `json:"last_error,omitempty"`
 }
 
 type relayDashboardStat struct {
@@ -97,13 +98,14 @@ func dashboardSummary(c *gin.Context, d *Deps) {
 			lastBalance = &balance
 		}
 		stat := dashboardChannelStat{
-			ID:             ch.ID,
-			Name:           ch.Name,
-			Type:           string(ch.Type),
-			SiteURL:        ch.SiteURL,
-			MonitorEnabled: ch.MonitorEnabled,
-			LastBalance:    lastBalance,
-			LastError:      ch.LastError,
+			ID:                    ch.ID,
+			Name:                  ch.Name,
+			Type:                  string(ch.Type),
+			SiteURL:               ch.SiteURL,
+			MonitorEnabled:        ch.MonitorEnabled,
+			ExcludeFromStatistics: ch.ExcludeFromStatistics,
+			LastBalance:           lastBalance,
+			LastError:             ch.LastError,
 		}
 		stats = append(stats, stat)
 		if ch.LastError != "" {
@@ -111,7 +113,7 @@ func dashboardSummary(c *gin.Context, d *Deps) {
 		} else if ch.MonitorEnabled {
 			activeCount++
 		}
-		if lastBalance != nil {
+		if lastBalance != nil && !ch.ExcludeFromStatistics {
 			totalBalance += *lastBalance
 			if ch.MonitorEnabled && (lowest == nil || (lowest.Balance == nil) || (*lastBalance < *lowest.Balance)) {
 				bal := *lastBalance
@@ -137,10 +139,12 @@ func dashboardSummary(c *gin.Context, d *Deps) {
 	}
 	for _, ch := range channels {
 		interval := usage[ch.ID]
-		if ch.BalanceMode == storage.BalanceModeManual {
-			consumptionAmount += interval.Cost
-		} else {
-			consumptionAmount += consumption[ch.ID]
+		if !ch.ExcludeFromStatistics {
+			if ch.BalanceMode == storage.BalanceModeManual {
+				consumptionAmount += interval.Cost
+			} else {
+				consumptionAmount += consumption[ch.ID]
+			}
 		}
 		userChargeAmount += interval.UserCharge
 		matchedAccountCount += interval.MatchedAccountCount

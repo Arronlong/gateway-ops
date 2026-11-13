@@ -248,8 +248,8 @@ export function useBalanceTrend(range: TimeRangeSelection<BalanceTrendRange> = "
   return useApi<BalanceTrendPoint[]>(query ? `/dashboard/balance-trend?${query}` : null)
 }
 
-export function useChannels(cancelOnNavigation = true) {
-  return useApi<Channel[]>("/channels", cancelOnNavigation)
+export function useChannels(cancelOnNavigation = true, enabled = true) {
+  return useApi<Channel[]>(enabled ? "/channels" : null, cancelOnNavigation)
 }
 
 export function useChannelRelayAssociations() {

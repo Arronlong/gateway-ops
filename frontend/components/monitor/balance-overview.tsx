@@ -99,7 +99,7 @@ export function BalanceOverview({ range = "today" }: { range?: TimeRangeSelectio
     balance: p.balance,
   }))
 
-  const channels = (summary.data?.channels ?? []).filter((channel) => channel.monitor_enabled)
+  const channels = (summary.data?.channels ?? []).filter((channel) => channel.monitor_enabled && !channel.exclude_from_statistics)
   const yMax = data.length > 0 ? niceCeil(Math.max(...data.map((d) => d.balance))) : 10
 
   return (
